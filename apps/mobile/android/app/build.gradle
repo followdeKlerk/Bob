@@ -89,8 +89,8 @@ android {
         applicationId "com.bobmobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 69
-        versionName "0.3.66"
+        versionCode 71
+        versionName "0.3.68"
     }
     signingConfigs {
         release {

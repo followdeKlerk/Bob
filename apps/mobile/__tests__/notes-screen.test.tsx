@@ -3,6 +3,7 @@ import Renderer,{act} from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NotesScreen} from '../components/notes-screen';
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
+jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),removeItem:jest.fn(async(key:string)=>{values.delete(key);}),clear:jest.fn(async()=>values.clear())};});
 jest.mock('uuid',()=>{let next=1;return{v4:()=>`00000000-0000-4000-8000-${String(next++).padStart(12,'0')}`};});

@@ -69,6 +69,10 @@ Snapshot read connections rotate after roughly 8 million received UTF-16 charact
 
 Chat history, drafts and pending submissions are scoped by backend/conversation identity. Reconnection reconciles an already submitted request using its stable identity; it does not turn an unsent draft into a new submission. Unknown outcome means unknown, not failed: do not submit a new copy to “fix” it. Rename/pin/archive/trash are organization controls; chat trash is recoverable, not permanent history erasure.
 
+### Message formatting
+
+Chat replies and Notes previews use native Markdown: six heading levels, emphasis/strikethrough, nested and numbered lists, quotes, explicit links, inline code and tables. Table headers and body stack in one grid with shared column widths; cells wrap without shifting other rows. Wide tables scroll horizontally inside the message and show a swipe hint. Fenced and indented code use a separate monospace block with preserved indentation and horizontal scrolling; fences show their language label. **Copy code** copies the original parsed code, not the fence markers or display label. Headings and ordinary prose wrap to the available message width. HTML/code is never executed, remote Markdown images are placeholders, and only explicitly tapped HTTP(S) links open externally.
+
 ### Questions
 
 Use `ask_user` when clarification is actually needed. Supply 2–8 short distinct options for concrete choices; set `multiple:true` only when several may be chosen together. Free text remains possible. **End the turn after asking** and wait; do not infer an answer or continue dependent work. Presenting a question does not prove a phone notification arrived.
