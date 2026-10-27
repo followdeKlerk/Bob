@@ -65,6 +65,8 @@ Use `hindsight_recall` for targeted retrieval and `hindsight_reflect` for synthe
 
 A successfully loaded empty conversation shows “No messages yet.” without a reload warning. Loading history and history failures have separate states; failures retain a retry action.
 
+Snapshot read connections rotate after roughly 8 million received UTF-16 characters or 30 seconds, so React Native's cumulative XHR response buffer does not retain an entire long-running session. Rotation preserves the displayed conversation, receives a fresh authoritative snapshot and does not itself replay messages or trigger outbox reconciliation. Each individual snapshot must still fit in memory.
+
 Chat history, drafts and pending submissions are scoped by backend/conversation identity. Reconnection reconciles an already submitted request using its stable identity; it does not turn an unsent draft into a new submission. Unknown outcome means unknown, not failed: do not submit a new copy to “fix” it. Rename/pin/archive/trash are organization controls; chat trash is recoverable, not permanent history erasure.
 
 ### Questions
