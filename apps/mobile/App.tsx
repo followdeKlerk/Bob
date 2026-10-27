@@ -37,7 +37,7 @@ import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {FileText,StickyNote,Sparkles,ListTodo,Blocks,Plug} from 'lucide-react-native';
 import {linkToolResults,type ToolMessage} from './tool-results';
-import {hasInlineChatContent,isRecordedToolGeneration} from './chat-presentation';
+import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -637,6 +637,7 @@ function Main() {
     string,
     { conversationId: number; status?:string },
   ][];
+  const activeAgents=agents.filter(([,agent])=>isActiveSubagent(agent.status));
   const busy = !!view?.docs['pi.live']?.run || !!view?.work?.some(t=>t.kind==='bob.mcp-ui-action'&&!t.background);
   const showStop=busy&&!hasDraft;
   const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page)=>{
@@ -717,10 +718,10 @@ function Main() {
           {!isChild&&v?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===v.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted))&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
           {/* Inverted header is the physical bottom of the chat. Keep live
               replies and the composer clearance here, below stored messages. */}
-          {!isChild&&<View pointerEvents="none" accessible={false} style={{height:composerHeight+(agents.length?80:44)}}/>}
+          {!isChild&&<View pointerEvents="none" accessible={false} style={{height:composerHeight+(activeAgents.length?80:44)}}/>}
         </View>}
         renderItem={({ item }) => {
-          const user=item.kind==='pi.user'||item.kind==='bob.user';
+          const attribution=inputAttribution(item),user=attribution.owner;
           const peerAdmission=item.kind==='bob.peer-admission';
           const artifact=(item.kind==='bob.artifact'||item.kind==='bob.file')&&Attachment.safeParse(item.data).success;
           const fallback=()=>textOf(item.data)||'Stored event has no displayable text.';
@@ -729,7 +730,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:13,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:13,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:13,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:13,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -793,14 +794,14 @@ function Main() {
               </View>
             )}
             {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,elevation:4}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
-            {agents.length > 0 && (
+            {activeAgents.length > 0 && (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Toggle subagents, ${agents.length} identified agents`}
+                accessibilityLabel={`Toggle subagents, ${activeAgents.length} active agents`}
                 style={[styles.orbit,{bottom:composerHeight+12}]}
                 onPress={() => setOrbit(!orbit)}
               >
-                <Users size={18} color={colors.accent}/><Text style={styles.buttonText}>Agents · {agents.length}</Text><ChevronRight size={16} color={colors.muted}/>
+                <Users size={18} color={colors.accent}/><Text style={styles.buttonText}>Agents · {activeAgents.length}</Text><ChevronRight size={16} color={colors.muted}/>
               </Pressable>
             )}
           </View>
@@ -1053,7 +1054,8 @@ function Main() {
               <Button label="Build & install" disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
               <Button label="Conversation settings" disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Settings'));}}/>
               {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
-              {(busy||agents.length>0)&&<Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>}
+              {agents.length>0&&<Button label="Agent history" onPress={()=>{setActions(false);setOrbit(true);}}/>}
+              {(busy||activeAgents.length>0)&&<Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>}
             </ScrollView>
           </SafeAreaView>}
         </View>

@@ -1,5 +1,16 @@
-import {hasVisibleChatContent,hasInlineChatContent,isRecordedToolGeneration} from '../chat-presentation';
+import {hasVisibleChatContent,hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent} from '../chat-presentation';
 import type {ToolEntry} from '../tool-results';
+test('owner attribution requires owner entry metadata, never role or report-looking text',()=>{
+ const content='[subagent Audit helper answered, no reply needed] report';
+ expect(inputAttribution({id:1,kind:'bob.user',data:{text:content}})).toEqual({owner:true});
+ expect(inputAttribution({id:2,kind:'pi.user',model:[{role:'user',content}]})).toEqual({owner:false,label:'Input · source not identified'});
+ expect(inputAttribution({id:3,kind:'bob.subagent-report',data:{name:'Audit helper'},model:[{role:'user',content}]})).toEqual({owner:false,label:'Agent report · Audit helper'});
+ expect(inputAttribution({id:4,kind:'bob.subagent-report'})).toEqual({owner:false,label:'Agent report'});
+});
+test('only working or stopping agents keep the floating indicator active',()=>{
+ for(const status of ['working','stopping'])expect(isActiveSubagent(status)).toBe(true);
+ for(const status of ['idle','complete','unknown',undefined])expect(isActiveSubagent(status)).toBe(false);
+});
 const call={type:'toolCall',id:'shell-1',name:'bash',arguments:{command:'echo hello'}};
 const entry:ToolEntry={id:1,kind:'pi.assistant',model:[{role:'assistant',content:[call]}]};
 test('tools, hidden reasoning and whitespace do not create transcript rows',()=>{

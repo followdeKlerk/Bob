@@ -13,7 +13,7 @@ import { isAbsolute } from "node:path";
 import { once } from "node:events";
 import { z } from "zod";
 import {getSupportedThinkingLevels} from "@earendil-works/pi-ai/models";
-import type { ConversationId, Cursor, TaskId } from "@earendil-works/pi-durable";
+import type { ConversationId, Cursor, TaskId, EntryRecord } from "@earendil-works/pi-durable";
 import {LiveDoc} from '@earendil-works/pi-durable';
 import {setProviderKey} from './provider-auth.js';
 import { State } from "./state.js";
@@ -28,6 +28,7 @@ import { ctx, openRuntime, type Runtime } from "./runtime.js";
 import {SessionUI} from './session-controls.js';
 import { ChatMeta, Library, Questions, Todos } from "./documents.js";
 import { Subagents } from "./subagents.js";
+import {presentSubagentReports} from './subagent-presentation.js';
 import {McpConnection, validateMcpEndpoint, type McpConnectionConfig} from "./interactive.js";
 import {
   Configure,
@@ -95,7 +96,7 @@ export async function serve(
   // Upstream ConversationView deliberately contains BUILT-IN docs only.
   // Add Bob's native document snapshots explicitly; never assume watch exposes them.
   async function present(value: unknown, id: ConversationId) {
-    const view = value as { docs: Record<string, unknown> };
+    const view = value as { entries:EntryRecord[]; docs: Record<string, unknown> };
     const [meta, todos, questions, subagents, inspection, questionChoices] = await Promise.all([
       h.snapshot(ChatMeta, id, ctx), h.snapshot(Todos, id, ctx),
       h.snapshot(Questions, id, ctx), h.snapshot(Subagents, id, ctx),
@@ -106,7 +107,7 @@ export async function serve(
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -404,7 +405,7 @@ export async function serve(
         if (action === "history" && req.method === "GET") {
           const resource=`history:${id}`,cursor=decodeCursor(state,resource,url.searchParams.get('cursor'));
           const page=await chat.entries({order:'descending'},100,cursor,ctx);
-          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:page.items,next:encodeCursor(state,resource,page.next)});
+          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:await presentSubagentReports(h,id,page.items),next:encodeCursor(state,resource,page.next)});
         }
         if (action === "configure" && req.method === "GET") {
           const agent = await chat.agent(ctx);

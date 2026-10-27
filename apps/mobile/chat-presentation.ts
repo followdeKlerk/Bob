@@ -1,6 +1,20 @@
 import {replyText} from './reply-text';
 import type {ToolEntry} from './tool-results';
 
+/** Only Bob's explicit owner-entry kind proves a phone-authored message.
+ * Native pi.user inputs also carry agent/system deliveries; do not label them
+ * as the owner, even in an old offline cache. Never infer provenance from text.
+ */
+export function inputAttribution(entry:ToolEntry):{owner:boolean;label?:string} {
+ if(entry.kind==='bob.user')return {owner:true};
+ if(entry.kind==='bob.subagent-report'){
+  const name=(entry.data as {name?:unknown}|undefined)?.name;
+  return {owner:false,label:typeof name==='string'&&name?`Agent report · ${name}`:'Agent report'};
+ }
+ return {owner:false,...(entry.kind==='pi.user'?{label:'Input · source not identified'}:{})};
+}
+export const isActiveSubagent=(status:string|undefined)=>status==='working'||status==='stopping';
+
 /** Transcript projection only: never delete stored tools or their recorded output. */
 export function hasVisibleChatContent(entry:ToolEntry):boolean {
  if(!entry.model?.length)return !entry.kind.startsWith('pi.')||entry.kind==='pi.user'||entry.kind==='pi.assistant';

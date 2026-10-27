@@ -224,3 +224,32 @@ test('a rejected message is marked Not sent and remains between the same chat en
   expect(stored.afterEntryId).toBe(10);expect(stored.rejected).toBe(true);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test('agent reports are collapsible non-owner rows; active indicator clears on idle while agent history remains',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const report='[subagent Audit helper answered, no reply needed] Fixture report.';
+ const entries=[{id:1,kind:'bob.user',data:{text:report}},{id:2,kind:'pi.user',model:[{role:'user',content:report}]},{id:3,kind:'bob.subagent-report',data:{name:'Audit helper',conversationId:8},model:[{role:'user',content:report}]}];
+ const EventSource=require('react-native-sse');let snapshot:((value:any)=>void)|undefined;
+ EventSource.mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn()}));
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[]} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const publish=async(status:string)=>act(async()=>{snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'app.subagents':{agents:{'Audit helper':{conversationId:8,status}}}},work:[]}})});});
+ await publish('working');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'}).length).toBeGreaterThan(0);
+ const unknown=tree.root.findByProps({testID:'history-entry-2'}),projected=tree.root.findByProps({testID:'history-entry-3'});
+ expect(unknown.findByProps({accessibilityLabel:'Input · source not identified'}).props.accessibilityState.expanded).toBe(false);
+ expect(projected.findByProps({accessibilityLabel:'Agent report · Audit helper'}).props.accessibilityState.expanded).toBe(false);
+ for(const row of [unknown,projected])expect(row.findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end')).toHaveLength(0);
+ expect(tree.root.findByProps({testID:'history-entry-1'}).findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end').length).toBeGreaterThan(0);
+ await publish('idle');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'})).toHaveLength(0);
+ act(()=>tree.root.findByProps({accessibilityLabel:'Chat actions'}).props.onPress());act(()=>tree.root.findByProps({accessibilityLabel:'More'}).props.onPress());
+ expect(tree.root.findByProps({label:'Agent history'})).toBeDefined();act(()=>tree.root.findByProps({label:'Agent history'}).props.onPress());
+ expect(tree.root.findByProps({label:'Audit helper · 8 · idle'})).toBeDefined();act(()=>tree.root.findByProps({label:'Collapse subagents'}).props.onPress());
+ await publish('stopping');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'}).length).toBeGreaterThan(0);
+ await publish('idle');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'})).toHaveLength(0);
+ await act(async()=>tree.unmount());
+});

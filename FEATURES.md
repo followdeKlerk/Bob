@@ -89,6 +89,8 @@ Create with `subagent(action="spawn",name,message)` **only when the owner explic
 
 `send` steers the named helper; `followUp:true` queues instead. `status` reports working/idle. `stop` aborts its current work and queued messages but keeps the helper reusable. Answers report back automatically. These are persistent, owned helper conversations, unlike peers; children cannot spawn further subagents through this module. Creation/admission is not task completion.
 
+The floating Agents indicator counts working/stopping helpers only and disappears when all helpers are idle. Saved helper conversations remain available through **Chat actions → More → Agent history**. Agent reports are collapsed, labelled non-owner transcript cards, identified from native reporter task/submission receipts in both snapshots and stored history. This is a read-only presentation; existing transcript/task records are not rewritten. Unidentified native inputs (including old offline cache entries) are not attributed to the phone owner; text that resembles a report is not provenance.
+
 ## Files and web
 
 File/shell tools operate in the conversation's backend working folder, using the backend OS account. Absolute paths may reach beyond that folder. `write` overwrites; `edit` requires unique exact matches. `read`/`bash` output can be truncated: follow offsets or inspect the saved output before claiming a complete read. A command exit code alone may not verify its intended external effect.
