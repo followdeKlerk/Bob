@@ -1,0 +1,74 @@
+{
+  "name": "@bob-local/cli",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/coding",
+    "packages/resources",
+    "packages/subagents",
+    "packages/web",
+    "packages/interactive",
+    "packages/peers",
+    "packages/memory"
+  ],
+  "bundleDependencies": [
+    "@bob-local/core",
+    "@bob-local/coding",
+    "@bob-local/resources",
+    "@bob-local/subagents",
+    "@bob-local/web",
+    "@bob-local/interactive",
+    "@bob-local/peers",
+    "@bob-local/memory"
+  ],
+  "description": "Local native client bridge for official Pi Durable",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "bin": {
+    "bob": "dist/cli.js"
+  },
+  "files": [
+    "dist/*.js",
+    "README.md",
+    "AGENTS.md",
+    "FEATURES.md",
+    "OPERATIONS.md"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces && tsc",
+    "build:interactive": "tsc -p apps/interactive/tsconfig.json && esbuild apps/interactive/host.ts --bundle --minify --platform=browser --format=iife --outfile=apps/mobile/android/app/src/main/assets/bob-host.js",
+    "test": "tsx --test test/*.test.ts",
+    "bob": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@bob-local/core": "0.1.0",
+    "@bob-local/coding": "0.1.0",
+    "@bob-local/resources": "0.1.0",
+    "@bob-local/subagents": "0.1.0",
+    "@bob-local/web": "0.1.0",
+    "@bob-local/interactive": "0.1.0",
+    "@bob-local/peers": "0.1.0",
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "@modelcontextprotocol/server": "2.4.0",
+    "commander": "15.0.0",
+    "playwright": "1.64.1",
+    "qrcode": "1.5.4",
+    "zod": "4.6.7",
+    "@bob-local/memory": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/qrcode": "1.5.6",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

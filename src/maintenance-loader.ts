@@ -1,0 +1,12 @@
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import {join,dirname} from 'node:path';
+const home=process.argv[2];if(!home)throw Error('Maintenance home required');
+const config=JSON.parse(readFileSync(join(home,'config.json'),'utf8'));
+const db=new DatabaseSync(join(home,'journal.sqlite'),{readOnly:true});
+const row=db.prepare("SELECT value FROM settings WHERE key='active'").get();db.close();
+if(!row)throw Error('No active Bob release');
+const active=JSON.parse(String(row.value));
+if(!process.execve)throw Error('This supervisor requires Node 24 on Linux');
+const env=Object.fromEntries(Object.entries(process.env).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));
+process.execve(config.node,[config.node,join(dirname(active.cli),'maintenance-runner.js'),home],env);

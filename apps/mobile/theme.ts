@@ -1,0 +1,1 @@
+export const colors = {background:'#000000', surface:'#27272a', composer:'#242427', foreground:'#f4f4f5', body:'#e4e4e7', muted:'#a1a1aa', border:'#3f3f46', subtle:'#2b2b30', accent:'#a7c4b5', onAccent:'#18241e'} as const;

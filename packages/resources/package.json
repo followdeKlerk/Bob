@@ -1,0 +1,26 @@
+{
+  "name": "@bob-local/resources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@bob-local/core": "0.1.0"
+  },
+  "bobExtension": {
+    "api": 1,
+    "durable": "1.4.0",
+    "name": "bob.resources",
+    "requires": []
+  }
+}

@@ -1,0 +1,2 @@
+const { colors } = { colors: { background:'#000000', foreground:'#f4f4f5', primary:'#a7c4b5', 'primary-foreground':'#18241e', secondary:'#27272a', 'secondary-foreground':'#f4f4f5', muted:'#27272a', 'muted-foreground':'#a1a1aa', accent:'#3f3f46', 'accent-foreground':'#f4f4f5', destructive:'#b45f64', border:'#3f3f46', input:'#3f3f46', ring:'#a7c4b5' } };
+module.exports = { content:['./App.tsx','./components/**/*.{ts,tsx}'], presets:[require('nativewind/preset')], theme:{extend:{colors}}, plugins:[] };

@@ -1,0 +1,22 @@
+{
+  "name": "@bob-local/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./contracts": "./dist/contracts.js",
+    "./documents": "./dist/documents.js",
+    "./errors": "./dist/errors.js"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.4.0",
+    "zod": "4.6.7"
+  }
+}
