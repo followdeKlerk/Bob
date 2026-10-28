@@ -1,5 +1,6 @@
 import {FileAttachment} from './components/file-attachment';
 import {emptyConversationMessage} from './empty-conversation';
+import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
 import {noteLoadedEntries} from './stream-diagnostics';
 import {stopSpeech,openSpeechSettings} from './speech';
@@ -715,6 +716,7 @@ function Main() {
               entry slot below, so they never migrate from this transient header. */}
           {v?.docs['pi.live']?.generation?.message && !isRecordedToolGeneration(linked.rawEntries,v.docs['pi.live'].generation.message.content) && <ModelContent speakable={false} showTools={false} value={v.docs['pi.live'].generation.message.content} results={linked.results}/>}
           {!isChild&&backend&&<BuildCard key={backend.backendId} backend={backend} state={build.state} error={build.error} focus={updatesTarget?.backendId===backend.backendId} onDismiss={()=>setUpdatesTarget(undefined)} onRefresh={build.refresh}/>}
+          {!isChild&&((v?.docs['bob.diagnostics']?.requests??[]) as DiagnosticRequest[]).filter(item=>['pending','approved'].includes(item.status)).map(item=><DiagnosticCard key={`${scope}:${item.id}`} request={item} respond={value=>request(`chats/${chat}/diagnostics`,'POST',value,backend!)}/>)}
           {!isChild&&v?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===v.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted))&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
           {/* Inverted header is the physical bottom of the chat. Keep live
               replies and the composer clearance here, below stored messages. */}
@@ -902,7 +904,7 @@ function Main() {
             <TextInput accessibilityLabel="Allowed MCP tools" style={styles.input} value={mcpTools} onChangeText={setMcpTools} placeholder="exact-tool-name,another-tool" placeholderTextColor="#F2F0E9" autoCapitalize="none" />
             <Button label={mcpEnabled?'Connection enabled — disable':'Connection disabled — enable'} onPress={()=>setMcpEnabled(!mcpEnabled)} />
             <Button label={mcpEnabled?'Grant listed MCP tools and save':'Save disabled MCP connection'} onPress={()=>run(()=>changeMcp('PUT',McpConnection.parse({id:mcpId,endpoint:mcpEndpoint,allowedTools:mcpTools.split(',').map(t=>t.trim()),enabled:mcpEnabled})))} />
-            <Text style={styles.caption}>Reopened surfaces contain a recorded tool-result snapshot. Reopening does not rerun the original tool. Inputs inside the surface are transient; authorized tool results are retained in conversation history.</Text>
+            <Text style={styles.caption}>Visuals reopen with their saved HTML and latest saved data; MCP Apps show the original result snapshot. Reopening never reruns the original tool. Local inputs are transient; saved data and authorized tool results remain in conversation history.</Text>
           </>}
           {screen === 'Skills' && (
             <>

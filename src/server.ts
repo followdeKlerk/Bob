@@ -1,3 +1,4 @@
+import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
 import {setTimeout as locationDelay} from 'node:timers/promises';
 import {bindLocationDevice,locationAvailability,pollLocations,pendingLocations,respondLocation} from './phone-location.js';
 import {readNotes,syncNote} from './notes.js';
@@ -95,7 +96,7 @@ export async function serve(
   let activeNotes=0;
   // Upstream ConversationView deliberately contains BUILT-IN docs only.
   // Add Bob's native document snapshots explicitly; never assume watch exposes them.
-  async function present(value: unknown, id: ConversationId) {
+  async function present(value: unknown, id: ConversationId, deviceId: string) {
     const view = value as { entries:EntryRecord[]; docs: Record<string, unknown> };
     const [meta, todos, questions, subagents, inspection, questionChoices] = await Promise.all([
       h.snapshot(ChatMeta, id, ctx), h.snapshot(Todos, id, ctx),
@@ -107,7 +108,7 @@ export async function serve(
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -347,6 +348,7 @@ export async function serve(
           throw new HttpError(403, "Reserved resource");
         const chat = await h.conversation(id, ctx);
         if (!chat) throw new HttpError(404, "Conversation not found");
+        if(action==='diagnostics'&&req.method==='POST')return send(res,200,await respondDiagnostics(state,chat,String(state.authenticate(token)!.id),await body(req,65536)));
         // Additive, versioned UI-only document; the existing ChatMeta and task
         // schemas stay unchanged. Trash never removes Durable history.
         if (action === "metadata" && req.method === "PUT") {
@@ -372,7 +374,7 @@ export async function serve(
         if (action === "" && req.method === "GET") {
           const view = await chat.viewState(ctx);
           try {
-            return send(res, 200, { backendId: state.id, view: await present(view.value, id) });
+            return send(res, 200, { backendId: state.id, view: await present(view.value, id, String(state.authenticate(token)!.id)) });
           } finally {
             view.dispose();
           }
@@ -384,6 +386,11 @@ export async function serve(
           const task=await h.getTask(taskId,ctx);
           if(!task||task.conversationId!==id)throw new HttpError(404,'Task not found in this conversation');
           return send(res,200,{backendId:state.id,conversationId:id,id:task.id,kind:task.kind,background:task.background,state:task.state});
+        }
+        const visualData = /^ui\/([^/]+)\/data$/.exec(action);
+        if (visualData && req.method === 'GET') {
+          const after=url.searchParams.has('after')?z.coerce.number().int().nonnegative().safe().parse(url.searchParams.get('after')):undefined;
+          return send(res,200,await runtime.interactive.data(h,chat,visualData[1],after));
         }
         const uiAction = /^ui\/([^/]+)\/(open|call|close)$/.exec(action);
         if (uiAction && req.method === "POST") {
@@ -507,7 +514,7 @@ export async function serve(
                 `event: snapshot\ndata: ${JSON.stringify({
                   backendId: state.id,
                   conversationId: id,
-                  view: await present(value, id),
+                  view: await present(value, id, String(state.authenticate(token)!.id)),
                 })}\n\n`
               )
             )

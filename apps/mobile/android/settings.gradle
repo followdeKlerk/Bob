@@ -3,4 +3,6 @@ plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'BobMobile'
 include ':app'
+// Explicit opt-in only; not part of production APKs or their install path.
+if (providers.gradleProperty('inlineWebViewTests').isPresent()) include ':inline-webview-test'
 includeBuild('../node_modules/@react-native/gradle-plugin')

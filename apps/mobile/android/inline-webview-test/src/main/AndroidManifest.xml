@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:name="com.bobmobile.InlineProbeApplication" android:label="Bob inline verification" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true">
+        <activity android:name="com.bobmobile.InlineProbeActivity" android:exported="false" />
+        <activity android:name="com.bobmobile.InlineReactProbeActivity" android:exported="false" android:theme="@style/InlineProbeTheme" />
+    </application>
+</manifest>

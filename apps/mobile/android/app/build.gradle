@@ -89,8 +89,8 @@ android {
         applicationId "com.bobmobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 71
-        versionName "0.3.68"
+        versionCode 79
+        versionName "0.3.76"
     }
     signingConfigs {
         release {
@@ -139,6 +139,7 @@ tasks.register("buildBobInteractive", Exec) {
     commandLine "npm", "run", "build:interactive"
     inputs.file(rootProject.file("../../../apps/interactive/host.ts"))
     inputs.file(rootProject.file("../../../apps/interactive/tsconfig.json"))
+    inputs.file(file("src/main/assets/inline-measure.js"))
     inputs.file(rootProject.file("../../../package-lock.json"))
     outputs.file(file("src/main/assets/bob-host.js"))
 }

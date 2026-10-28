@@ -27,24 +27,26 @@ import java.util.concurrent.Semaphore
 
 internal data class SurfaceSession(val endpoint: String, val identity: String, val token: String, val chat: Long, val id: String, val resource: JSONObject)
 private object SurfaceSessions { val pending = ConcurrentHashMap<String, SurfaceSession>() }
-private fun surfaceRequest(endpoint: String, identity: String, token: String, path: String, payload: JSONObject): JSONObject {
+private class SurfaceHttpError(val status: Int) : IllegalStateException("Interactive request rejected (HTTP $status); do not automatically retry a tool action")
+private fun surfaceRequest(endpoint: String, identity: String, token: String, path: String, payload: JSONObject, method: String = "POST", onConnection: ((HttpURLConnection?) -> Unit)? = null): JSONObject {
     val uri = URI(endpoint)
     require(uri.userInfo == null && uri.query == null && uri.fragment == null && (uri.path.isEmpty() || uri.path == "/"))
     require((uri.scheme == "https" && uri.host?.endsWith(".ts.net") == true) || (BuildConfig.DEBUG && uri.scheme == "http" && uri.host == "127.0.0.1" && uri.port in 1..65535)) { "Verified paired transport required" }
     val connection = URI(endpoint.trimEnd('/') + path).toURL().openConnection() as HttpURLConnection
     try {
-        connection.instanceFollowRedirects = false; connection.connectTimeout = 15000; connection.readTimeout = 40000
-        connection.requestMethod = "POST"; connection.doOutput = true
+        onConnection?.invoke(connection)
+        connection.instanceFollowRedirects = false; connection.connectTimeout = 15000; connection.readTimeout = if (method == "GET") 10000 else 40000
+        connection.requestMethod = method; connection.doOutput = method == "POST"
         connection.setRequestProperty("Authorization", "Bearer $token"); connection.setRequestProperty("x-bob-backend", identity)
         connection.setRequestProperty("Content-Type", "application/json")
-        connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-        require(connection.responseCode in 200..299) { "Interactive request rejected (HTTP ${connection.responseCode}); do not automatically retry a tool action" }
+        if (method == "POST") connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+        if (connection.responseCode !in 200..299) throw SurfaceHttpError(connection.responseCode)
         val output = java.io.ByteArrayOutputStream()
         connection.inputStream.use { input -> val buffer = ByteArray(8192)
             while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= 4194304) { "Interactive response too large" }; output.write(buffer, 0, n) }
         }
         return JSONObject(String(output.toByteArray(), Charsets.UTF_8))
-    } finally { connection.disconnect() }
+    } finally { connection.disconnect(); onConnection?.invoke(null) }
 }
 class BobInteractive(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     override fun getName() = "BobInteractive"
@@ -80,8 +82,8 @@ class BobInteractive(private val context: ReactApplicationContext) : ReactContex
         }.start()
     }
 }
-internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit, private val inline: Boolean = false) : LinearLayout(context) {
-    private var disposed = false
+internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit, private val inline: Boolean = false, private val mountId: String? = null, private val onInlineHeight: ((Int) -> Unit)? = null) : LinearLayout(context) {
+    @Volatile private var disposed = false
     private var approval: AlertDialog? = null
     private var session: SurfaceSession? = null
     private var web: WebView? = null
@@ -89,13 +91,104 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
     private val executor = Executors.newFixedThreadPool(2)
     private val requests = Semaphore(4)
     private lateinit var status: TextView
+    private var lastInlineHeight = 0
+    private var latestData: JSONObject? = null
+    private var dataRevision = -1L
+    private var dataEnabled = false
+    private var dataFetching = false
+    private var dataDelay = 2000L
+    @Volatile private var dataFetchAllowed = false
+    @Volatile private var dataConnection: HttpURLConnection? = null
+    private val dataRefresh = Runnable { refreshData() }
+    private fun emit(name: String, fill: (WritableMap) -> Unit = {}) {
+        val selected = session ?: return
+        val reactContext = context as? ThemedReactContext ?: return
+        val event = Arguments.createMap().apply {
+            putString("backendId", selected.identity); putDouble("conversationId", selected.chat.toDouble()); putString("id", selected.id)
+            putString("session", mountId); fill(this)
+        }
+        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)?.emit(name, event)
+    }
+    private fun canRefreshData(): Boolean {
+        if (disposed || !dataEnabled || !isAttachedToWindow || windowVisibility != View.VISIBLE || !hasWindowFocus()) return false
+        // React Native keeps the chat mounted behind other tabs with opacity=0.
+        // isShown/global bounds alone do not detect that kind of hidden parent.
+        var ancestor: View? = this
+        while (ancestor != null) { if (ancestor.visibility != View.VISIBLE || ancestor.alpha <= 0.01f) return false; ancestor = ancestor.parent as? View }
+        return getGlobalVisibleRect(android.graphics.Rect())
+    }
+    private fun scheduleData(delay: Long = 0L) { removeCallbacks(dataRefresh); if (!disposed && dataEnabled && isAttachedToWindow && windowVisibility == View.VISIBLE && hasWindowFocus()) postDelayed(dataRefresh, delay) }
+    private fun pauseData() { dataFetchAllowed = false; removeCallbacks(dataRefresh); dataConnection?.disconnect() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); scheduleData() }
+    override fun onDetachedFromWindow() { pauseData(); super.onDetachedFromWindow() }
+    override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); if (visibility == View.VISIBLE) scheduleData() else pauseData() }
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) { super.onWindowFocusChanged(hasWindowFocus); if (hasWindowFocus) scheduleData() else pauseData() }
+    private fun dataStatus(message: String) {
+        if (inline) emit("BobSurfaceDataStatus") { it.putString("message", message) }
+        else { status.text = message; status.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE }
+    }
+    private fun refreshData() {
+        if (disposed || !dataEnabled || dataFetching) return
+        if (!canRefreshData()) { scheduleData(2000); return }
+        val selected = session ?: return
+        dataFetching = true; dataFetchAllowed = true
+        val revision = dataRevision.coerceAtLeast(0)
+        executor.execute {
+            try {
+                val value = surfaceRequest(selected.endpoint, selected.identity, selected.token, "/v1/chats/${selected.chat}/ui/${selected.id}/data?after=$revision", JSONObject(), "GET") { connection ->
+                    dataConnection = connection; if (!dataFetchAllowed) connection?.disconnect()
+                }
+                val responseRevision = value.optDouble("revision", -1.0)
+                require(value.optString("id") == selected.id && value.optDouble("conversationId", -1.0) == selected.chat.toDouble()) { "Visual data scope mismatch" }
+                require(responseRevision.isFinite() && responseRevision >= 0 && responseRevision <= 9007199254740991.0 && responseRevision % 1.0 == 0.0) { "Invalid visual revision" }
+                if (value.optBoolean("unchanged")) require(responseRevision == revision.toDouble()) { "Invalid unchanged visual revision" }
+                else {
+                    val data = value.opt("data")
+                    require((data === JSONObject.NULL || data is JSONObject) && data.toString().toByteArray(Charsets.UTF_8).size <= 65536) { "Invalid visual data" }
+                }
+                post {
+                    if (!disposed && canRefreshData()) { acceptVisualData(value); dataDelay = 2000; dataStatus("") }
+                }
+            } catch (error: Exception) {
+                post {
+                    if (!disposed && canRefreshData()) {
+                        if (error is SurfaceHttpError && error.status in listOf(401, 403, 404)) dataEnabled = false
+                        dataDelay = (dataDelay * 2).coerceAtMost(30000)
+                        dataStatus(if (dataEnabled) "Live updates disconnected — showing last received data." else "Live updates unavailable. Expand or reopen to reconnect.")
+                    }
+                }
+            } finally { post { dataFetching = false; scheduleData(dataDelay) } }
+        }
+    }
+    // Called on the UI thread. Reject another surface's response and regressing
+    // revisions even after reconnect; never reload the iframe or its local state.
+    internal fun acceptVisualData(value: JSONObject): Boolean {
+        val selected = session ?: return false
+        if (selected.resource.optString("kind") != "visual" || value.optString("id") != selected.id || value.optDouble("conversationId", -1.0) != selected.chat.toDouble()) return false
+        val revision = value.optDouble("revision", -1.0)
+        if (!revision.isFinite() || revision < 0 || revision > 9007199254740991.0 || revision % 1.0 != 0.0 || revision <= dataRevision.toDouble()) return false
+        val data = value.opt("data") ?: return false
+        if (data !== JSONObject.NULL && data !is JSONObject) return false
+        if (data.toString().toByteArray(Charsets.UTF_8).size > 65536) return false
+        dataRevision = revision.toLong()
+        latestData = JSONObject().put("revision", dataRevision).put("data", data).put("updatedAt", value.opt("updatedAt") ?: JSONObject.NULL)
+        pushVisualData(); return true
+    }
+    private fun pushVisualData() {
+        val value = latestData ?: return
+        if (!disposed) web?.evaluateJavascript("window.__bobVisualData?.(JSON.parse(${JSONObject.quote(value.toString()).replace("<", "\\u003c")}))", null)
+    }
     fun show(selected: SurfaceSession) {
+        if (inline) ApprovedDiagnostics.record(context, "mount", width, height)
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(0xff000000.toInt())
+        clipChildren = true; clipToPadding = true
+        if (inline) { isFocusable = false; isFocusableInTouchMode = false }
         val layout = this
         status = TextView(context).apply { setTextColor(0xfff4f4f5.toInt()); textSize = 15f; setTextIsSelectable(true); visibility = View.GONE }
         layout.addView(status)
         session = selected
+        if (selected.resource.optString("kind") == "visual") selected.resource.optJSONObject("visualData")?.let { dataEnabled = true; acceptVisualData(it) }
         val start: () -> Unit = start@{
             if (disposed) return@start
             val view = WebView(context); web = view
@@ -111,9 +204,10 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             CookieManager.getInstance().setAcceptCookie(false)
             CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
             view.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) { if (!disposed) { pushVisualData(); scheduleData() } }
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream("Network access denied".toByteArray()))
-                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
             }
             view.webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
@@ -124,11 +218,14 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             view.addJavascriptInterface(Bridge(), "BobNative")
             layout.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
             val payload = JSONObject()
-            for (key in listOf("kind", "title", "html", "input", "result", "allowedTools")) if (selected.resource.has(key)) payload.put(key, selected.resource.get(key))
+            for (key in listOf("kind", "title", "html", "input", "result", "allowedTools", "visualData")) if (selected.resource.has(key)) payload.put(key, selected.resource.get(key))
             val bundle = context.assets.open("bob-host.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script")
+            // Only the host substitutes the per-frame layout key. Never give the child
+            // the native bridge nonce (or reports will not match the host's layout key).
+            val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
             val safePayload = payload.toString().replace("<", "\\u003c")
             val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:15px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
-window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"}).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
+window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)}).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }
         if (selected.resource.optString("kind") == "mcp") {
@@ -148,14 +245,32 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
             if (raw.length > 65536 || key.length != nonce.length || !MessageDigest.isEqual(key.toByteArray(), nonce.toByteArray())) return
             val selected = session ?: return
             val parsed = try { JSONObject(raw) } catch (_: Exception) { return }
+            if (parsed.optString("method") == "layout" && inline) {
+                val height = parsed.optDouble("height", -1.0)
+                if (!height.isFinite() || height % 1.0 != 0.0 || height < 1 || height > 420) return
+                post {
+                    if (!disposed && lastInlineHeight != height.toInt()) {
+                        lastInlineHeight = height.toInt()
+                        ApprovedDiagnostics.record(context, "resize", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
+                        onInlineHeight?.invoke(lastInlineHeight)
+                        emit("BobSurfaceLayout") { it.putInt("height", lastInlineHeight) }
+                    }
+                }
+                return
+            }
             if (parsed.optString("method") == "overflow" && inline) {
                 post {
                     if (!disposed) {
-                        web?.visibility = View.INVISIBLE
-                        val event = Arguments.createMap().apply {
-                            putString("backendId", selected.identity); putDouble("conversationId", selected.chat.toDouble()); putString("id", selected.id)
+                        if (BuildConfig.DEBUG) {
+                            val reason = if (parsed.optString("reason") == "measurement-timeout") "measurement-timeout" else "content-overflow"
+                            android.util.Log.d("BobInline", "Full view: $reason; native viewport=${web?.width}x${web?.height}")
                         }
-                        (context as? ThemedReactContext)?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)?.emit("BobSurfaceOverflow", event)
+                        ApprovedDiagnostics.record(context, if (parsed.optString("reason") == "measurement-timeout") "fallback-timeout" else "fallback-overflow", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
+                        status.text = "Open full view to see this content."
+                        status.visibility = View.VISIBLE
+                        web?.visibility = View.INVISIBLE
+                        pauseData(); dataEnabled = false
+                        emit("BobSurfaceOverflow")
                     }
                 }
                 return
@@ -178,7 +293,8 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
     }
     fun dispose() {
         if (disposed) return
-        disposed = true
+        if (inline) ApprovedDiagnostics.record(context, "dispose", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
+        disposed = true; pauseData()
         approval?.setOnCancelListener(null); approval?.dismiss(); approval = null
         web?.removeJavascriptInterface("BobNative"); web?.destroy(); web = null; executor.shutdownNow()
         val selected = session; session = null
@@ -233,7 +349,8 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
         val surface = BobSurfacePanel(host.context, {
             host.removeAllViews()
             host.addView(TextView(host.context).apply { text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
-        }, true)
+        }, true, handle)
+        surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
         host.addView(surface, LinearLayout.LayoutParams(-1, -1))
         surface.show(selected)
     }

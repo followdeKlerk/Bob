@@ -70,6 +70,11 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
         } catch (_: Throwable) {}
         promise.resolve(null)
     }
+    @ReactMethod fun approvedDiagnostics(promise: Promise) {
+        // Called only after the native chat consent control receives approval.
+        try { promise.resolve(ApprovedDiagnostics.report(context)) }
+        catch (_: Exception) { promise.reject("diagnostics", "Diagnostic capture unavailable") }
+    }
     @ReactMethod fun appDiagnostics(promise: Promise) {
         Thread {
             try { promise.resolve(AppDiagnostics.report(context)) }

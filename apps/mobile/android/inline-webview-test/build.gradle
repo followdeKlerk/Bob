@@ -1,0 +1,48 @@
+// Opt-in emulator-only regression harness. Compiles the production native surface
+// without rebuilding React Native's C++; it never installs over Bob or uses chat data.
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+
+android {
+    namespace "com.bobmobile"
+    compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion rootProject.ext.ndkVersion
+    externalNativeBuild { cmake { path "src/main/jni/CMakeLists.txt"; version "3.22.1" } }
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    defaultConfig {
+        applicationId "com.bobmobile.inlineverification"
+        minSdkVersion 24
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "test-only"
+        testInstrumentationRunner "com.bobmobile.InlineSurfaceInstrumentation"
+        ndk { abiFilters "x86_64" }
+        externalNativeBuild { cmake { arguments "-DANDROID_STL=c++_shared" } }
+    }
+    buildFeatures { buildConfig true; prefab true }
+    sourceSets {
+        main {
+            java.srcDirs = ["src/main/java", layout.buildDirectory.dir("generated/production-surface")]
+            assets.srcDirs = ["../app/src/main/assets", layout.buildDirectory.dir("generated/probe-assets")]
+        }
+        androidTest.assets.srcDirs = ["../../../../test/fixtures/inline-visuals"]
+    }
+}
+
+dependencies {
+    implementation("com.facebook.react:react-android:0.88.0")
+    implementation("com.facebook.react:hermes-android:0.88.0")
+}
+
+tasks.register("copyProductionSurface", Sync) {
+    from("../app/src/main/java") { include "com/bobmobile/BobInteractive.kt", "com/bobmobile/ApprovedDiagnostics.kt" }
+    into(layout.buildDirectory.dir("generated/production-surface"))
+}
+tasks.register("bundleReactProbe", Exec) {
+    workingDir projectDir
+    inputs.files("react-probe.js", "probe-mocks.js", "metro.config.js", "babel.config.js", "../../components/inline-surface.tsx", "../../theme.ts")
+    outputs.file(layout.buildDirectory.file("generated/probe-assets/index.android.bundle"))
+    doFirst { layout.buildDirectory.dir("generated/probe-assets").get().asFile.mkdirs() }
+    commandLine "node", "../../node_modules/react-native/cli.js", "bundle", "--config", "metro.config.js", "--entry-file", "react-probe.js", "--platform", "android", "--dev", "false", "--max-workers", "2", "--bundle-output", layout.buildDirectory.file("generated/probe-assets/index.android.bundle").get().asFile.absolutePath
+}
+tasks.named("preBuild").configure { dependsOn(":app:buildBobInteractive", "copyProductionSurface", "bundleReactProbe") }

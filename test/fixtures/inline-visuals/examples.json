@@ -1,0 +1,22 @@
+[
+  {
+    "name": "packing",
+    "html": "<style>*{box-sizing:border-box}body{margin:0;padding:12px;background:#141d24;color:#f1f6f8;font:16px/1.4 system-ui,sans-serif}.rows{display:grid;gap:8px}label{display:flex;align-items:center;gap:12px;padding:10px 12px;min-height:46px;border:1px solid #3b4c57;border-radius:10px;background:#1d2a33}input{width:22px;height:22px;margin:0;flex:none;accent-color:#8ce0b4}#extras{margin-top:8px}[hidden]{display:none!important}button{display:block;width:100%;min-height:46px;margin-top:12px;padding:10px 12px;border:1px solid #72b994;border-radius:10px;background:#254a3a;color:#e8fff0;font:600 16px/1.4 system-ui,sans-serif}button:focus-visible{outline:2px solid #9df1c3;outline-offset:2px}</style><div class=\"rows\"><label><input type=\"checkbox\"><span>Phone charger</span></label><label><input type=\"checkbox\"><span>Water bottle</span></label></div><div id=\"extras\" class=\"rows\" hidden><label><input type=\"checkbox\"><span>Headphones</span></label><label><input type=\"checkbox\"><span>Light jacket</span></label></div><button id=\"toggle\" type=\"button\" aria-controls=\"extras\" aria-expanded=\"false\">Show 2 more</button><script>const toggle=document.getElementById('toggle'),extras=document.getElementById('extras');toggle.addEventListener('click',()=>{const expanded=extras.hidden;extras.hidden=!expanded;toggle.setAttribute('aria-expanded',String(expanded));toggle.textContent=expanded?'Show less':'Show 2 more';});</script>"
+  },
+  {
+    "name": "progress",
+    "visualData": {
+      "revision": 1,
+      "data": {
+        "progress": 35,
+        "stage": "Ready to build",
+        "items": [
+          "Scope agreed",
+          "Layout approved"
+        ]
+      },
+      "updatedAt": 1
+    },
+    "html": "<style>*{box-sizing:border-box}body{margin:0;padding:12px;background:#151d2c;color:#f3f6ff;font:16px/1.4 system-ui,sans-serif}.metric{display:flex;align-items:center;justify-content:space-between;gap:12px}.metric strong{font-size:34px;line-height:44px;font-variant-numeric:tabular-nums}#revision{font-size:14px;color:#c0cde2}.track{height:12px;margin-top:8px;border-radius:6px;background:#364258}#fill{height:12px;width:25%;border-radius:6px;background:#a4b6ff}#stage{margin:12px 0;font-weight:600;overflow-wrap:anywhere}#items{display:grid;gap:6px}.item{padding:8px 10px;border:1px solid #3b4b66;border-radius:8px;background:#202e44;overflow-wrap:anywhere}button{display:block;width:100%;min-height:46px;margin-top:12px;padding:10px;border:1px solid #9baded;border-radius:10px;background:#304472;color:#f4f7ff;font:600 16px/1.4 system-ui,sans-serif}button:focus-visible{outline:2px solid #bac8ff;outline-offset:2px}</style><div class=\"metric\"><strong id=\"percent\">25%</strong><span id=\"revision\">Data v0</span></div><div class=\"track\" id=\"progress\" role=\"progressbar\" aria-label=\"Demo project progress\" aria-valuemin=\"0\" aria-valuemax=\"100\" aria-valuenow=\"25\"><div id=\"fill\"></div></div><p id=\"stage\">Planning</p><div id=\"items\"><div class=\"item\">Scope agreed</div></div><button id=\"taps\" type=\"button\">Local taps: 0</button><script>let taps=0;const tapButton=document.getElementById('taps');tapButton.addEventListener('click',()=>{tapButton.textContent='Local taps: '+(++taps);});window.bobVisual?.subscribe(({data,revision})=>{if(!data||typeof data!=='object')return;if(typeof data.progress==='number'&&Number.isFinite(data.progress)){const value=Math.round(Math.max(0,Math.min(100,data.progress)));document.getElementById('percent').textContent=value+'%';document.getElementById('fill').style.width=value+'%';document.getElementById('progress').setAttribute('aria-valuenow',String(value));}if(typeof data.stage==='string')document.getElementById('stage').textContent=data.stage;if(Array.isArray(data.items)&&data.items.every(item=>typeof item==='string')){const fragment=document.createDocumentFragment();for(const text of data.items){const item=document.createElement('div');item.className='item';item.textContent=text;fragment.appendChild(item);}document.getElementById('items').replaceChildren(fragment);}document.getElementById('revision').textContent='Data v'+revision;});</script>"
+  }
+]

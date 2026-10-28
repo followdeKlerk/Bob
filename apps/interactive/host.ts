@@ -4,18 +4,20 @@ import type {CallToolResult} from '@modelcontextprotocol/client';
 declare global {
   interface Window {
     BobNative?: { request(payload: string, nonce: string): void };
-    startBobSurface(payload: Surface, nonce: string, inline?: boolean): Promise<void>;
+    startBobSurface(payload: Surface, nonce: string, inline?: boolean, inlineMeasureSource?: string): Promise<void>;
     __bobReply(id: string, payload: {result?: CallToolResult; error?: string}): void;
+    __bobVisualData?(value: VisualValue): void;
   }
 }
-type Surface={kind:'visual'|'mcp';title:string;html:string;input?:Record<string,unknown>;result?:CallToolResult;allowedTools:string[]};
+type VisualValue={revision:number;data:Record<string,unknown>|null;updatedAt:number|null};
+type Surface={kind:'visual'|'mcp';title:string;html:string;input?:Record<string,unknown>;result?:CallToolResult;allowedTools:string[];visualData?:VisualValue};
 const pending=new Map<string,{resolve:(value:CallToolResult)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 window.__bobReply=(id,payload)=>{
   const item=pending.get(id);if(!item)return;
   clearTimeout(item.timer);pending.delete(id);
   if(payload.error)item.reject(Error(payload.error));else item.resolve(payload.result??{content:[]});
 };
-window.startBobSurface=async(payload,nonce,inline=false)=>{
+window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='')=>{
   const scrollbarCss='*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}';
   const scrollbarStyle=document.createElement('style');scrollbarStyle.textContent=scrollbarCss;document.head.append(scrollbarStyle);
   const status=document.getElementById('status')!;
@@ -28,51 +30,65 @@ window.startBobSurface=async(payload,nonce,inline=false)=>{
   // Layout telemetry is untrusted child data, never a tool grant. Only the parent
   // knows the native bridge nonce; failure can only demote this surface to full view.
   const layoutKey=crypto.randomUUID();
-  let stopped=false;
-  let fitReceived=false;
-  const fullView=()=>{
+  let stopped=false,requestedHeight:number|undefined;
+  let layoutTimeout:ReturnType<typeof setTimeout>|undefined;
+  const fullView=(reason:'content-overflow'|'measurement-timeout')=>{
     if(stopped)return;
-    stopped=true;frame.style.visibility='hidden';
+    stopped=true;clearTimeout(layoutTimeout);frame.style.visibility='hidden';
+    frame.dataset.bobLayoutReason=reason;
     status.textContent='Open full view to see this content.';
-    window.BobNative?.request(JSON.stringify({method:'overflow'}),nonce);
+    window.BobNative?.request(JSON.stringify({method:'overflow',reason}),nonce);
+  };
+  const awaitFit=()=>{
+    if(!inline||stopped)return;
+    frame.style.opacity='0';frame.style.pointerEvents='none';
+    // One deadline per unsettled layout, not an endlessly extended resize loop.
+    layoutTimeout??=setTimeout(()=>fullView('measurement-timeout'),3000);
   };
   const layoutMessage=(event:MessageEvent)=>{
     if(!inline||stopped||event.source!==frame.contentWindow||event.data?.bobLayout!==layoutKey)return;
-    if(event.data.fits!==true){fullView();return;}
-    fitReceived=true;frame.style.opacity='1';frame.style.pointerEvents='auto';status.textContent='';
+    const report=event.data,bounds=frame.getBoundingClientRect();
+    // Ignore stale pre-resize reports, including stale overflow. A new measured
+    // report must arrive before revealing; no content is scaled or clipped to fit.
+    if(!Number.isFinite(report.viewportWidth)||!Number.isFinite(report.viewportHeight)||Math.abs(report.viewportWidth-bounds.width)>1||Math.abs(report.viewportHeight-bounds.height)>1){awaitFit();return;}
+    const height=report.contentHeight;
+    if(report.fits!==true||!Number.isInteger(height)||height<1||height>420){fullView('content-overflow');return;}
+    if(requestedHeight!==height){requestedHeight=height;window.BobNative?.request(JSON.stringify({method:'layout',height}),nonce);}
+    if(report.viewportFits!==true||Math.abs(report.viewportHeight-height)>1){awaitFit();return;}
+    clearTimeout(layoutTimeout);layoutTimeout=undefined;
+    frame.style.opacity='1';frame.style.pointerEvents='auto';status.textContent='';
   };
-  let layoutTimeout:ReturnType<typeof setTimeout>|undefined;
   if(inline){
-    frame.style.opacity='0';frame.style.pointerEvents='none';frame.setAttribute('scrolling','no');
+    awaitFit();frame.setAttribute('scrolling','no');
     window.addEventListener('message',layoutMessage);
-    layoutTimeout=setTimeout(()=>{if(!fitReceived)fullView();},3000);
     window.addEventListener('pagehide',()=>{clearTimeout(layoutTimeout);window.removeEventListener('message',layoutMessage);},{once:true});
   }
-  const measureScript=inline?`<script>(()=>{
-    const key=${JSON.stringify(layoutKey)};
-    let last;
-    function check(){
-      const root=document.documentElement,body=document.body;
-      if(!body)return;
-      const w=innerWidth,h=innerHeight;
-      const elements=Array.from(body.querySelectorAll('*'));
-      let fits=w>0&&h>0&&elements.length<=10000&&root.scrollWidth<=w+1&&root.scrollHeight<=h+1&&body.scrollWidth<=w+1;
-      for(const el of [body,...elements]){
-        if(!fits)break;
-        if(!(el instanceof HTMLElement)||!el.getClientRects().length)continue;
-        const style=getComputedStyle(el);
-        if(style.display==='none'||style.visibility==='hidden')continue;
-        const r=el.getBoundingClientRect();
-        if(r.right>w+1||r.bottom>h+1||r.left< -1||r.top< -1||(el.clientWidth>0&&el.scrollWidth>el.clientWidth+1)||(el.clientHeight>0&&el.scrollHeight>el.clientHeight+1))fits=false;
-      }
-      if(fits!==last){last=fits;parent.postMessage({bobLayout:key,fits},'*');}
-    }
-    addEventListener('load',()=>{requestAnimationFrame(check);setInterval(check,300);});
-    addEventListener('resize',check);
-    addEventListener('scroll',()=>{parent.postMessage({bobLayout:key,fits:false},'*');},true);
-    addEventListener('DOMContentLoaded',()=>{
-      let queued=false;
-      new MutationObserver(()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;check();});}}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});
+  const measureScript=inline?`<script>${inlineMeasure.replace('__BOB_INLINE_LAYOUT_KEY__',JSON.stringify(layoutKey))}</script>`:'';
+  const dataKey=crypto.randomUUID();
+  let value:VisualValue={revision:0,data:null,updatedAt:null};
+  const publishData=()=>{if(payload.kind==='visual')frame.contentWindow?.postMessage({bobVisual:dataKey,value},'*');};
+  window.__bobVisualData=next=>{
+    if(payload.kind!=='visual'||!next||!Number.isSafeInteger(next.revision)||next.revision<=value.revision||next.revision<0||!(next.data===null||typeof next.data==='object'&&!Array.isArray(next.data)))return;
+    value={revision:next.revision,data:next.data,updatedAt:next.updatedAt};
+    awaitFit();publishData();
+  };
+  if(payload.visualData)window.__bobVisualData(payload.visualData);
+  frame.addEventListener('load',publishData);
+  // Read-only data API. Its key identifies host messages, not native authority.
+  // The child gets no credentials, fetching primitive or backend tool interface.
+  const dataScript=payload.kind==='visual'?`<script>(()=>{
+    const key=${JSON.stringify(dataKey)},listeners=new Set();
+    let current=Object.freeze({revision:0,data:null,updatedAt:null});
+    Object.defineProperty(window,'bobVisual',{value:Object.freeze({get current(){return current;},subscribe(callback){
+      if(typeof callback!=='function')throw Error('A visual data callback is required');
+      listeners.add(callback);callback(current);return ()=>listeners.delete(callback);
+    }}),writable:false,configurable:false});
+    addEventListener('message',event=>{
+      if(event.source!==parent||event.data?.bobVisual!==key)return;
+      const next=event.data.value;if(!next||!Number.isSafeInteger(next.revision)||next.revision<=current.revision)return;
+      current=Object.freeze({revision:next.revision,data:next.data,updatedAt:next.updatedAt});
+      for(const callback of listeners){try{callback(current);}catch(error){console.error('Visual data handler failed');}}
+      dispatchEvent(new Event('bob:visual-data'));
     });
   })();</script>`:'';
   if(payload.kind==='mcp') {
@@ -98,5 +114,5 @@ window.startBobSurface=async(payload,nonce,inline=false)=>{
     window.addEventListener('pagehide',()=>{void bridge.teardownResource({}, {timeout:1000}).catch(()=>{}).finally(()=>bridge.close());},{once:true});
   } else status.textContent='';
   // The child remains an opaque origin. CSP is additive and cannot be weakened by later app markup.
-  frame.srcdoc='<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+measureScript+payload.html+'<style>'+scrollbarCss+'</style>';
+  frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+measureScript+dataScript+payload.html+'<style>html{overflow-anchor:none}'+scrollbarCss+'</style>';
 };

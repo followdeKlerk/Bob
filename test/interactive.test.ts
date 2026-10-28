@@ -12,6 +12,7 @@ import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
 import {Interactive} from '../src/interactive.js';
 import {createMcpFixture} from './mcp-fixture.js';
+import {registerInlineVisualLifecycle} from './inline-visual-lifecycle.js';
 
 test('real MCP Apps handshake and tools: native Durable records, scoped capabilities, idempotency, sandbox', {timeout:90000},async()=>{
  const fixture=await createMcpFixture(),state=new State(mkdtempSync(join(process.env.TMPDIR!,'bob-interactive-')));
@@ -86,3 +87,4 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
    }finally{held.release();}
  } finally {await browser?.close();site?.close();await runtime.close();await fixture.close();state.close();}
 });
+registerInlineVisualLifecycle();

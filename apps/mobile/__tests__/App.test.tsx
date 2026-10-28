@@ -66,10 +66,23 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  const latest=jest.spyOn(list.instance,'scrollToOffset').mockImplementation(()=>{});
  const scroll=jest.spyOn(list.instance,'scrollToEnd').mockImplementation(()=>{}),nativeEnd=jest.fn();jest.spyOn(list.instance,'getScrollResponder').mockReturnValue({scrollToEnd:nativeEnd});
  act(()=>{list.props.onLayout({nativeEvent:{layout:{height:600}}});list.props.onContentSizeChange(300,2000);});
- expect(tree.root.findByProps({testID:'history-entry-1'}).findAllByType(InlineSurface)).toHaveLength(1);
+ const inlineSurface=tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface);
  expect(tree.root.findByProps({testID:'history-entry-3'}).findAllByType(InlineSurface)).toHaveLength(0);
  expect(tree.root.findAllByType(InlineSurface)).toHaveLength(1);
  expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
+ expect(tree.root.findByProps({testID:'inline-surface-container'})).toBeDefined();
+ expect(tree.root.findByProps({testID:'bob-inline-native-surface'}).props.style).toEqual({height:420,width:'100%'});
+ // A different surface's fallback must not collapse this row. Keep this native
+ // child mounted throughout the menu/background lifecycle below.
+ const nativeSurface=tree.root.findByProps({testID:'bob-inline-native-surface'});
+ act(()=>DeviceEventEmitter.emit('BobSurfaceOverflow',{backendId:backend.backendId,conversationId:7,id:'another-surface'}));
+ expect(tree.root.findByProps({testID:'bob-inline-native-surface'})).toBe(nativeSurface);
+ const size=(height:number,session='prepared-visual')=>DeviceEventEmitter.emit('BobSurfaceLayout',{backendId:backend.backendId,conversationId:7,id:surface.id,session,height});
+ act(()=>size(220));expect(nativeSurface.props.style.height).toBe(220);
+ act(()=>{size(320);size(800);size(0);size(160,'expired-mount');});expect(nativeSurface.props.style.height).toBe(320);
+ act(()=>size(180));expect(nativeSurface.props.style.height).toBe(180);
+ expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
+ expect(inlineSurface.props.surface.presentation).toBe('inline');
  const event={nativeEvent:{contentOffset:{y:500},contentSize:{height:2000},layoutMeasurement:{height:600}}};
  await act(async()=>{await new Promise<void>(resolve=>setTimeout(resolve,35));});scroll.mockClear();nativeEnd.mockClear();latest.mockClear();
  if(!readingEarlier)act(()=>list.props.onScroll({nativeEvent:{contentOffset:{y:0},contentSize:{height:2000},layoutMeasurement:{height:600}}}));
@@ -91,6 +104,14 @@ test.each([true,false])('menus and background/foreground preserve the native lis
   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
  }
  expect(historyCalls()).toBeGreaterThan(before);expect(latest).not.toHaveBeenCalled();expect(nativeEnd).not.toHaveBeenCalled();expect(scroll).not.toHaveBeenCalled();expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
+ expect(tree.root.findByProps({testID:'bob-inline-native-surface'})).toBe(nativeSurface);
+ expect(tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface)).toBe(inlineSurface);
+ // A genuine native promotion removes the inline child, retaining exactly one
+ // title/expand action on its original producing history entry.
+ act(()=>DeviceEventEmitter.emit('BobSurfaceOverflow',{backendId:backend.backendId,conversationId:7,id:surface.id,session:'prepared-visual'}));
+ expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
+ expect(tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface).findByProps({accessibilityLabel:'Expand visual: Solar system'})).toBeDefined();
+ expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('prepared-visual');
  if(readingEarlier)expect(tree.root.findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();await act(async()=>tree.unmount());
 });
 
@@ -251,5 +272,14 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  expect(tree.root.findByProps({label:'Audit helper · 8 · idle'})).toBeDefined();act(()=>tree.root.findByProps({label:'Collapse subagents'}).props.onPress());
  await publish('stopping');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'}).length).toBeGreaterThan(0);
  await publish('idle');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'})).toHaveLength(0);
+ await act(async()=>tree.unmount());
+});
+
+// MCP Apps must retain a tappable entry even though they never mount inline.
+test('MCP app rows retain an accessible open control',async()=>{
+ const open=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<InlineSurface backend={{backendId:'fixture',endpoint:'https://test.ts.net'}} surface={{id:'fixture',conversationId:7,title:'Connected app',kind:'mcp'}} onExpand={open}/>);});
+ act(()=>tree.root.findByProps({accessibilityLabel:'Open app: Connected app'}).props.onPress());
+ expect(open).toHaveBeenCalledTimes(1);expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
  await act(async()=>tree.unmount());
 });
