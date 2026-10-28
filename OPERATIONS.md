@@ -88,6 +88,8 @@ Bob uses explicitly configured credentials, not another application's auth files
 
 Conversation-driven visual data uses the additive version-1 `bob.visual-data` document in `src/visual-data.ts`, composed into the interactive extension by `src/interactive.ts`. Existing `Interactive` records, MCP task definitions and history are unchanged; absent data means revision 0. Legacy code ignores the separate document. `test/visual-data.test.ts` covers native tool/HTTP scope, atomic revision conflicts, replay receipts, restart and legacy-code reopen; no compatibility fence or database rewrite is needed for this additive change.
 
+Ordinary MCP calls are composed at the same host boundary in `src/mcp-tools.ts`, using the separate additive version-1 `bob.mcp-tools` document. Existing Apps documents and UI tasks are unchanged. Started calls have no automatic resend; completed results survive reopening/restart. `test/mcp-tools.test.ts` covers the ordinary-tool path separately from existing Apps/HTTP tests.
+
 `rollback` switches to the previous compatible backend code; it is not a database restore or automatic Android downgrade. Compatibility fences conservatively reject storage/task-bearing changes. Do not weaken a fence to make a build pass; an incompatible change needs an explicitly reviewed migration and recovery plan. Source edits during a build invalidate its candidate.
 
 ### Backup and disaster recovery
@@ -128,7 +130,7 @@ Explicit schema migration uses `bob module migrate` with `--replace`, `--backup`
 
 ### MCP, peers and memory
 
-- **MCP:** app MCP Apps or `bob mcp configure <id> --endpoint <url> --tools <exact,names>` explicitly grants tools. `bob mcp key <id>` reads a bearer credential from stdin. `list`, `enable`, `disable`, `remove` manage configuration. An endpoint must use verified HTTPS or explicit backend-loopback HTTP. Configuration does not prove a server/action works.
+- **MCP:** `bob mcp configure <id> --endpoint <url> --tools <exact,names>` explicitly grants tools; owner-requested setup can be performed by the assistant without updating the app. MCP configuration is no longer in the burger menu. `mcp_tool` discovers/calls ordinary tools; `mcp_app` separately opens genuine MCP Apps resources. `bob mcp key <id>` reads a bearer credential from stdin. `list`, `enable`, `disable`, `remove` manage configuration. An endpoint must use verified HTTPS or explicit backend-loopback HTTP. Configuration does not prove a server/action works.
 - **Peers:** app pairing normally establishes links between compatible reachable backends. CLI `peer grant/connect/revoke` remains for explicit scoped one-way trust; use its help and protect handoff files. Peers never merge histories or become owned subagents.
 - **Memory:** owner configuration in `<state>/hindsight.json` enables the separate module; unconfigured backends make no memory calls. Its complete configuration reference is `packages/memory/README.md` in the checkout (the installed module also includes its README). Removing an override file is not disabling an already persisted configuration. Use memory status for current health, not old incident reports.
 

@@ -25,6 +25,7 @@ test('stored history and conversations paginate completely with scoped tamper-re
    firstCursor??=page.next;cursor=page.next;pages++;
   }while(cursor);
   assert.ok(pages>=3);assert.equal([...entries.values()].filter(e=>e.kind==='bob.history-fixture').length,250);
+  const filtered=await fetch(base+`/chats/${chat.id}/history?limit=12&query=deterministic`,{headers});assert.equal(filtered.status,200);const filteredPage=await filtered.json();assert.ok(filteredPage.items.length<=12);assert.equal(filteredPage.filtered,true);
   for(const path of [`/chats/${other.id}/history?cursor=${firstCursor}`,`/chats?cursor=${firstCursor}`,`/chats/${chat.id}/history?cursor=${firstCursor}x`,`/chats/${chat.id}/history?cursor=not-json`])assert.equal((await fetch(base+path,{headers})).status,400);
   for(let i=0;i<105;i++)await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
   const ids=new Set<number>();cursor=undefined;

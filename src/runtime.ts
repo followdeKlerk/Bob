@@ -4,6 +4,7 @@ import {sendFile} from './send-file.js';
 import {backendMemory} from './memory.js';
 import {phoneLocation} from './phone-location.js';
 import {notesOperation} from './notes-agent.js';
+import {searchHistory} from './history-search.js';
 import { join } from "node:path";
 import {maintenancePort} from './maintenance-port.js';
 import {hostname} from "node:os";
@@ -56,7 +57,11 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const interactive = createInteractive(state, testMcpTransport);
     let libraryId: ConversationId;
     const resources = createResources(()=>libraryId,async(source,input,context)=>{
-      const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},input.conversationId===undefined?'conversations':'history',{...input,destinationBackendId:state.id,originConversationId:source});
+      if(input.mode==='search')return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
+      if(input.conversationId===undefined&&!input.cursor&&!input.query){const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'conversations',{...input,destinationBackendId:state.id,originConversationId:source});return {...result,readOnly:true};}
+      if(input.conversationId===undefined&&!input.cursor&&input.query)return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
+      if(input.conversationId===undefined)throw Error('Specify conversationId for page mode. Use search mode to discover matching conversations first.');
+      const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'history',{...input,destinationBackendId:state.id,originConversationId:source});
       return {...result,readOnly:true};
     },maintenancePort(state),async(input,taskId,source,context)=>{
       const library=await harness.conversation(libraryId,context);if(!library)throw Error('Notes library is unavailable');

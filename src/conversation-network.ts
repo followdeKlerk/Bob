@@ -10,7 +10,7 @@ export const ConversationRequest=z.object({destinationBackendId:z.string().uuid(
 export type ConversationAuthority={originBackendId:string;name:string;allConversations?:boolean;read:number[];message:number[]};
 export type ConversationRuntime={harness:Harness;library:{id:ConversationId};models:Models};
 export async function conversationOperation(state:State,runtime:ConversationRuntime,authority:ConversationAuthority,action:string,raw:unknown){
- const p=ConversationRequest.parse(raw);
+ const p=ConversationRequest.parse({...raw as object,limit:(raw as any)?.limit??100});
  if(p.destinationBackendId!==state.id)throw Error('Wrong destination identity');
  const h=runtime.harness;
  if(action==='conversations'){

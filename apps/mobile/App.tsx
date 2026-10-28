@@ -23,6 +23,8 @@ import {responseData} from './network-policy';
 import {QuestionCard,type Question} from './components/question-card';
 import {NotesScreen} from './components/notes-screen';
 import {DraftInput,composerTransition} from './components/draft-input';
+import {SkillPicker} from './components/skill-picker';
+import {skillQuery,skillRequest} from './skill-picker';
 import {ComposerStatus} from './components/composer-status';
 import {useBackNavigation} from './use-back-navigation';
 import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
@@ -36,7 +38,7 @@ import {AttachmentThumbnail,type DraftAttachment} from './components/attachment-
 import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
-import {FileText,StickyNote,Sparkles,ListTodo,Blocks,Plug} from 'lucide-react-native';
+import {FileText,StickyNote,Blocks} from 'lucide-react-native';
 import {linkToolResults,type ToolMessage} from './tool-results';
 import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
@@ -167,6 +169,10 @@ function Main() {
   const [outbox]=useState(()=>new MessageOutbox());
   const [outgoing,setOutgoing]=useState(outbox.items),[outboxError,setOutboxError]=useState<string>();
   useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
+  const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
+  useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
+  const slashQuery=skillQuery(draft);
+  const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-headerHeight-composerHeight-16));
   const [draftAttachments,setDraftAttachments]=useState<Record<string,DraftAttachment[]>>({});
   useUpdateNotifications(backends);
   const build=useBuildStatus(backend);
@@ -817,7 +823,7 @@ function Main() {
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
               </ScrollView>}
-              <DraftInput scope={scope} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
+              <DraftInput scope={scope} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
                 maxHeight={Math.max(48,Math.min(260,windowSize.height-keyboardInset-insets.top-insets.bottom-headerHeight-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" onPress={()=>{setActionsMore(false);setActions(true);}}/>}
                 trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!chat||(!showStop&&(!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
@@ -825,6 +831,13 @@ function Main() {
             </Animated.View>
           </Animated.View>
       </>
+      {backend&&chat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!orbit&&<SkillPicker key={scope} scope={scope} query={slashQuery}
+        loadLibrary={()=>request('library','GET',undefined,backend)}
+        bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
+        maxHeight={skillPopupHeight}
+        onDismiss={()=>setSlashDismissed(true)}
+        onSelect={skill=>{setDraft(skillRequest(skill.name));setSlashDismissed(true);}}
+      />}
       {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={headerHeight} onBack={()=>setScreen('Chat')}/>}
       {screen!=='Chat'&&screen!=='Notes'&&(
         <ScrollView testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:headerHeight+24}]}>
@@ -1072,8 +1085,8 @@ function Main() {
         onNew={()=>run(async()=>{await newChat();setDrawer(false);setScreen('Chat');})}
         onSettings={()=>run(()=>openSection('Settings'))}
         navigation={[
-          {id:'Notes',icon:StickyNote},{id:'Prompts',icon:FileText},{id:'Skills',icon:Sparkles},{id:'Todos',icon:ListTodo},
-          {id:'Modules',icon:Blocks},{id:'MCP Apps',icon:Plug},
+          {id:'Notes',icon:StickyNote},{id:'Prompts',icon:FileText},
+          {id:'Modules',icon:Blocks},
         ].map(item=>({...item,label:item.id,disabled:!backend||(item.id==='Modules'&&!chat),onPress:()=>run(()=>openSection(item.id))}))}
         workspaces={backends.map(b=>({id:b.backendId,label:backends.filter(item=>item.name===b.name).length>1?`${b.name} · ${b.backendId.slice(0,8)}`:b.name,selected:b.backendId===backend?.backendId,onPress:()=>{
           if(b.backendId!==backend?.backendId){setChats([]);setChatCursor(undefined);setBackend(b);setChat(undefined);}

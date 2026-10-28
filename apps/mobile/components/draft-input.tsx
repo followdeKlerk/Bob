@@ -6,10 +6,11 @@ import {useKeyboardInset} from '../keyboard-inset';
 import {colors} from '../theme';
 import Animated,{LinearTransition,ReduceMotion} from 'react-native-reanimated';
 export const composerTransition=LinearTransition.duration(180).reduceMotion(ReduceMotion.System);
-export function DraftInput({value,onChangeText,scope,maxHeight=260,leading,trailing,compact=false}:{value:string;onChangeText:(value:string)=>void;scope:string;maxHeight?:number;compact?:boolean;leading?:React.ReactNode;trailing?:React.ReactNode}){
+export function DraftInput({value,onChangeText,scope,maxHeight=260,leading,trailing,compact=false,onFocusChange}:{value:string;onChangeText:(value:string)=>void;scope:string;maxHeight?:number;compact?:boolean;onFocusChange?:(focused:boolean)=>void;leading?:React.ReactNode;trailing?:React.ReactNode}){
  const [contentHeight,setContentHeight]=useState(48),[expanded,setExpanded]=useState(false);
  const input=useRef<React.ComponentRef<typeof TextInput>>(null),fullInput=useRef<React.ComponentRef<typeof TextInput>>(null);
  const [focused,setFocused]=useState<'inline'|'expanded'>();
+ useEffect(()=>{onFocusChange?.(focused==='inline'&&!expanded);},[focused,expanded,onFocusChange]);
  const blur=()=>{input.current?.blur();fullInput.current?.blur();setFocused(undefined);};
  const keyboard=useKeyboardInset(),insets=useSafeAreaInsets();
  const previousKeyboard=useRef(keyboard);

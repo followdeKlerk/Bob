@@ -46,7 +46,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};NativeModules.BobInteractive={prepare:jest.fn(async()=> 'prepared-visual'),releasePrepared:jest.fn()};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
-  const url=String(input);const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual-call',name:'render_visual',arguments:{title:'Solar system',html:'<p>Solar system</p>'}}]}]},{id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual-call',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Solar system. Open from the conversation’s interactive surfaces.`}]}]},{id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'This is a newer reply, after the illustration.'}]}]}]}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/models')?[]:url.endsWith('/configure')?{}:[];
+  const url=String(input);const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual-call',name:'render_visual',arguments:{title:'Solar system',html:'<p>Solar system</p>'}}]}]},{id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual-call',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Solar system. Open from the conversation’s interactive surfaces.`}]}]},{id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'This is a newer reply, after the illustration.'}]}]}]}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/library')?{instructions:'',templates:{},skills:{'minimal-skill-authoring':{description:'Author minimal skills',enabled:true}}}:url.endsWith('/models')?[]:url.endsWith('/configure')?{}:[];
   return {ok:true,status:200,json:async()=>data} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
@@ -54,6 +54,13 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  act(()=>{draft.props.onChangeText('A retained draft while toggling the keyboard.');for(const callback of ime)callback({imeBottom:280});});expect(tree.root.findByType(DraftInput).props.compact).toBe(false);expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
  act(()=>draft.props.onContentSizeChange({nativeEvent:{contentSize:{height:126}}}));expect(StyleSheet.flatten(draft.props.style).height).toBe(126);
  act(()=>{for(const callback of ime)callback({imeBottom:0});});expect(tree.root.findByType(DraftInput).props.compact).toBe(true);expect(StyleSheet.flatten(draft.props.style).height).toBe(48);expect(draft.props.value).toContain('retained draft');
+ // Slash suggestions are fetched through the active backend; selection only edits the draft.
+ await act(async()=>{draft.props.onFocus();draft.props.onChangeText('/mini');});
+ expect(tree.root.findByProps({testID:'skill-picker'})).toBeDefined();
+ act(()=>tree.root.findByProps({accessibilityLabel:'Use skill minimal-skill-authoring'}).props.onPress());
+ expect(draft.props.value).toBe('Use the skill "minimal-skill-authoring". ');
+ expect(tree.root.findAllByProps({testID:'skill-picker'})).toHaveLength(0);
+ expect((globalThis.fetch as jest.Mock).mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
  const composer=tree.root.findByProps({testID:'chat-composer'});expect(StyleSheet.flatten(composer.props.style).backgroundColor).toBe('transparent');expect(composer.findAllByType(EdgeFade)).toHaveLength(0);
  const controls=composer.findByProps({testID:'composer-controls'});expect(controls.findAllByType(TextInput)).toHaveLength(0);expect(controls.findByProps({accessibilityLabel:'Chat actions'})).toBeDefined();expect(controls.findByProps({accessibilityLabel:'Send message'})).toBeDefined();
  expect(StyleSheet.flatten(controls.findByProps({accessibilityLabel:'Send message'}).props.style).backgroundColor).toBe('transparent');
@@ -87,7 +94,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  await act(async()=>{await new Promise<void>(resolve=>setTimeout(resolve,35));});scroll.mockClear();nativeEnd.mockClear();latest.mockClear();
  if(!readingEarlier)act(()=>list.props.onScroll({nativeEvent:{contentOffset:{y:0},contentSize:{height:2000},layoutMeasurement:{height:600}}}));
  if(readingEarlier){act(()=>{list.props.onScrollBeginDrag();list.props.onScroll(event);list.props.onMomentumScrollEnd(event);});expect(tree.root.findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();}
- for(const section of ['Todos','Notes','Settings']){
+ for(const section of ['Prompts','Notes','Settings']){
   act(()=>tree.root.findByProps({accessibilityLabel:'Open workspaces'}).props.onPress());
   await act(async()=>{const drawer=tree.root.findByType(SideDrawer);if(section==='Settings')drawer.props.onSettings();else drawer.props.navigation.find((row:any)=>row.id===section).onPress();});
   expect(tree.root.findByProps({testID:section==='Notes'?'notes-screen':'section-overlay'})).toBeDefined();expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');

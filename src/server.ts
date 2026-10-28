@@ -411,8 +411,11 @@ export async function serve(
         }
         if (action === "history" && req.method === "GET") {
           const resource=`history:${id}`,cursor=decodeCursor(state,resource,url.searchParams.get('cursor'));
-          const page=await chat.entries({order:'descending'},100,cursor,ctx);
-          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:await presentSubagentReports(h,id,page.items),next:encodeCursor(state,resource,page.next)});
+          const query=(url.searchParams.get('query')??'').trim().slice(0,160),limit=Math.min(Math.max(Number(url.searchParams.get('limit')??100)||100,1),100);
+          const page=await chat.entries({order:'descending'},limit,cursor,ctx);
+          let items=await presentSubagentReports(h,id,page.items);
+          if(query){const terms=query.toLocaleLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
+          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items,next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
         }
         if (action === "configure" && req.method === "GET") {
           const agent = await chat.agent(ctx);

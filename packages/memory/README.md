@@ -35,6 +35,16 @@ Unconfigured backends default to disabled and make no Hindsight calls, including
 
 Optional configuration: `types`, `minRerankerScore`, `maxTurnChars` (24000), `maxAttempts` (5), `retryDelayMs` (2000), `pollDelayMs` (2000), `apiKey`. Prefer `BOB_HINDSIGHT_API_KEY` to putting a credential in JSON. HTTPS is required for non-loopback endpoints; no redirects are followed. Do not expose an unauthenticated Hindsight service to the network.
 
+## Local CPU recall performance
+
+Database health does not establish recall latency. Inspect Hindsight's per-phase timings before changing Bob's deadline: local cross-encoder reranking can dominate while embeddings/retrieval remain fast. Reducing `maxTokens` alone does not cap reranker candidates; even `budget:"low"` can retain the service's default 300-candidate cap.
+
+[`examples/hindsight-recall-performance.conf`](examples/hindsight-recall-performance.conf) is an optional **Hindsight user-service** systemd drop-in, not Bob configuration. It keeps the existing model/reranking, uses two native threads and two reranker workers, enables length-bucketed batches, and caps `mid` at 100 candidates. `high` retains the default 300. These are host-specific settings, not universal defaults: one-native-thread testing was slower on this installation. The smaller pool can miss relevant memories or change rankings; compare both banks and known answers, not just result counts. No bank contents or per-bank configuration need changing.
+
+Only apply/restart with owner authorization. Verify service ownership and that all banks have no pending/processing operations immediately before a graceful Hindsight-only restart. Wait for actual API readiness, then benchmark concurrent two-bank recalls through `HindsightClient`. Roll back by removing the drop-in and repeating the same safe restart procedure; do not modify databases or restart Bob to tune Hindsight.
+
+Choose Bob's `recallTimeoutMs` from measured latency plus headroom, not as a substitute for speeding retrieval. A 15000 ms owner override provides headroom for this installation's measured 6–9 s two-bank checks. Bob reads its override on backend activation, so a file edit alone does not change the running deadline. Keep benchmarks bounded and report cold starts, system contention and limited relevance coverage; this is not an SLA or proof of unchanged retrieval quality. Bob deliberately keeps fresh current-query recall on the answer path rather than reusing previous-turn background results.
+
 ## Tools and controls
 
 - `hindsight_recall({query})`: relevant facts, with source-bank/document attribution.
