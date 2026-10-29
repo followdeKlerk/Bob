@@ -45,17 +45,17 @@ function Content({name,content,result,quiet=false}:{name:string;content:string;r
 const styles=StyleSheet.create({
  card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},
  header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},
- label:{color:colors.muted,fontSize:12,lineHeight:18,flexShrink:1},
- summary:{color:colors.body,fontSize:14,lineHeight:21,flexShrink:1},
+ label:{color:colors.muted,fontSize:11,lineHeight:18,flexShrink:1},
+ summary:{color:colors.body,fontSize:13,lineHeight:21,flexShrink:1},
  preview:{paddingHorizontal:12,paddingBottom:12,gap:10},
- path:{color:colors.muted,fontSize:12,lineHeight:18},
- command:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:13,lineHeight:20},
- output:{color:colors.muted,fontSize:13,lineHeight:20},
+ path:{color:colors.muted,fontSize:11,lineHeight:18},
+ command:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:12,lineHeight:20},
+ output:{color:colors.muted,fontSize:12,lineHeight:20},
  details:{padding:12,paddingTop:0,gap:8},
  row:{flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
- code:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:13,lineHeight:20},
+ code:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:12,lineHeight:20},
  resultButton:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
- error:{color:colors.foreground,fontSize:13,lineHeight:20},
+ error:{color:colors.foreground,fontSize:12,lineHeight:20},
 });
 
 export const ToolContent=React.memo(Content,(a,b)=>a.quiet===b.quiet&&a.name===b.name&&a.content===b.content&&a.result?.status===b.result?.status&&a.result?.isError===b.result?.isError&&a.result?.content===b.result?.content);

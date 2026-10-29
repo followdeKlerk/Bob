@@ -98,7 +98,7 @@ function IconButton({icon:Icon,label,onPress,disabled=false,primary=false}:{icon
 }
 function Disclosure({label,children}:{label:string;children:React.ReactNode}) {
  const [open,setOpen]=useState(false);
- return <View><KitButton variant="ghost" accessibilityLabel={label} accessibilityState={{expanded:open}} onPress={()=>setOpen(!open)} style={{minHeight:48,height:'auto',justifyContent:'flex-start',paddingHorizontal:0}}><KitText style={{color:colors.muted,fontSize:14,flexShrink:1}}>{label}</KitText>{open?<ChevronDown size={16} color={colors.muted}/>:<ChevronRight size={16} color={colors.muted}/>}</KitButton>{open&&children}</View>;
+ return <View><KitButton variant="ghost" accessibilityLabel={label} accessibilityState={{expanded:open}} onPress={()=>setOpen(!open)} style={{minHeight:48,height:'auto',justifyContent:'flex-start',paddingHorizontal:0}}><KitText style={{color:colors.muted,fontSize:13,flexShrink:1}}>{label}</KitText>{open?<ChevronDown size={16} color={colors.muted}/>:<ChevronRight size={16} color={colors.muted}/>}</KitButton>{open&&children}</View>;
 }
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -772,7 +772,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:13,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:13,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -1182,31 +1182,31 @@ const styles = StyleSheet.create({
   welcomeArt:{minHeight:240,flex:1,alignItems:'center',justifyContent:'center'},
   welcomeLogo:{width:'100%',maxWidth:400,aspectRatio:1},
   welcomeCopy:{gap:12,paddingBottom:12},
-  welcomeTitle:{color:colors.foreground,fontSize:38,lineHeight:44,fontWeight:'600',letterSpacing:-1},
-  welcomeSubtitle:{color:colors.muted,fontSize:16,lineHeight:24},
+  welcomeTitle:{color:colors.foreground,fontSize:37,lineHeight:44,fontWeight:'600',letterSpacing:-1},
+  welcomeSubtitle:{color:colors.muted,fontSize:15,lineHeight:24},
   welcomePrimary:{minHeight:58,borderRadius:29,backgroundColor:colors.accent,alignItems:'center',justifyContent:'center',marginTop:16},
-  welcomePrimaryText:{color:colors.onAccent,fontSize:17,fontWeight:'600'},
+  welcomePrimaryText:{color:colors.onAccent,fontSize:16,fontWeight:'600'},
   root:{flex:1,backgroundColor:colors.background},
   content:{flex:1,width:'100%',maxWidth:760,alignSelf:'center'},
   readingColumn:{width:'100%',maxWidth:760,alignSelf:'center',gap:10},
-  title:{color:colors.foreground,fontSize:23,fontWeight:'600'},
-  chatTitle:{color:colors.muted,fontSize:14,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
-  caption:{color:colors.muted,fontSize:13,lineHeight:20},
-  status:{color:colors.muted,paddingHorizontal:24,paddingVertical:8,fontSize:14,lineHeight:21},
+  title:{color:colors.foreground,fontSize:22,fontWeight:'600'},
+  chatTitle:{color:colors.muted,fontSize:13,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
+  caption:{color:colors.muted,fontSize:12,lineHeight:20},
+  status:{color:colors.muted,paddingHorizontal:24,paddingVertical:8,fontSize:13,lineHeight:21},
   button:{minHeight:48,height:'auto',paddingHorizontal:16,paddingVertical:12,borderRadius:14,marginVertical:4},
-  buttonText:{color:colors.foreground,fontSize:15,textAlign:'center',flexShrink:1},
+  buttonText:{color:colors.foreground,fontSize:14,textAlign:'center',flexShrink:1},
   messages:{paddingHorizontal:24,paddingTop:16,paddingBottom:80,gap:CHAT_CONTENT_GAP},
   bubble:{paddingVertical:0,marginBottom:0},
   userBubble:{backgroundColor:colors.surface,paddingHorizontal:16,paddingVertical:12,borderRadius:20,marginLeft:48,alignSelf:'flex-end',maxWidth:'88%'},
-  kind:{color:colors.muted,fontSize:12,marginBottom:8},
-  message:{color:colors.body,fontSize:18,lineHeight:28},
+  kind:{color:colors.muted,fontSize:11,marginBottom:8},
+  message:{color:colors.body,fontSize:17,lineHeight:28},
   empty:{padding:30,flex:1,justifyContent:'center',gap:20},
-  hero:{fontSize:30,color:colors.foreground,fontWeight:'500'},
+  hero:{fontSize:29,color:colors.foreground,fontWeight:'500'},
   composer:{paddingHorizontal:12,paddingTop:8,paddingBottom:12,backgroundColor:'transparent'},
   composerCompact:{paddingHorizontal:32,paddingBottom:28},
   composerCapsule:{padding:8,borderRadius:26,borderWidth:1,borderColor:colors.border,backgroundColor:colors.composer,gap:4},
   composerCapsuleCompact:{padding:0,gap:0},
-  input:{color:colors.foreground,fontSize:16,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
+  input:{color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
   row:{flexDirection:'row',gap:8,flexWrap:'wrap'},
   orbit:{position:'absolute',right:24,bottom:18,minHeight:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,flexDirection:'row',gap:8,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
   overlay:{flex:1,backgroundColor:'#00000088',padding:18,justifyContent:'center'},

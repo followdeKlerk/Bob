@@ -12,4 +12,4 @@ export function FileAttachment({backend,artifact,fromBob,onOpen,onSave}:{backend
   <Pressable accessibilityRole="button" accessibilityLabel={`Save ${artifact.name}`} onPress={onSave} style={styles.button}><Text style={styles.action}>Save file</Text></Pressable>
  </View>;
 }
-const styles=StyleSheet.create({caption:{fontSize:13,color:colors.muted},name:{fontSize:16,lineHeight:22,color:colors.foreground},button:{minHeight:48,paddingHorizontal:16,paddingVertical:12,borderRadius:14,backgroundColor:colors.surface,justifyContent:'center',alignItems:'center'},action:{fontSize:16,color:colors.foreground}});
+const styles=StyleSheet.create({caption:{fontSize:12,color:colors.muted},name:{fontSize:15,lineHeight:22,color:colors.foreground},button:{minHeight:48,paddingHorizontal:16,paddingVertical:12,borderRadius:14,backgroundColor:colors.surface,justifyContent:'center',alignItems:'center'},action:{fontSize:15,color:colors.foreground}});

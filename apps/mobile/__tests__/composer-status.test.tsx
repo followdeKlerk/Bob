@@ -27,7 +27,7 @@ test('larger native status types without changing the full-label layout or acces
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'connection-status'}).props.style)).toMatchObject({minHeight:34,paddingBottom:11});
  expect(visible(tree)).toBe('');const reserve=tree.root.findByProps({testID:'status-layout-reservation'}).props;
- expect(StyleSheet.flatten(reserve.style)).toMatchObject({fontSize:14,lineHeight:22,fontWeight:'600',letterSpacing:0.3,opacity:0});
+ expect(StyleSheet.flatten(reserve.style)).toMatchObject({fontSize:13,lineHeight:22,fontWeight:'600',letterSpacing:0.3,opacity:0});
  act(()=>jest.advanceTimersByTime(1000));expect(visible(tree).length).toBeGreaterThan(0);expect(visible(tree)).not.toBe('Connected . . .');
  act(()=>jest.advanceTimersByTime(700));expect(visible(tree)).toBe('Connected . . .');
  expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Connected');expect(tree.root.findByProps({testID:'status-layout-reservation'}).props.children).toEqual(reserve.children);

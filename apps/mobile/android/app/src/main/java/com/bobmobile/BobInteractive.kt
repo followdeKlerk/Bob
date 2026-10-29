@@ -203,7 +203,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         clipChildren = true; clipToPadding = true
         if (inline) { isFocusable = false; isFocusableInTouchMode = false }
         val layout = this
-        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xfff4f4f5.toInt()); textSize = 15f; setTextIsSelectable(true); visibility = View.GONE }
+        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xfff4f4f5.toInt()); textSize = 14f; setTextIsSelectable(true); visibility = View.GONE }
         layout.addView(status)
         session = selected
         if (selected.resource.optString("kind") == "visual") selected.resource.optJSONObject("visualData")?.let { dataEnabled = true; acceptVisualData(it) }
@@ -243,7 +243,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
             val fontFaceCss = surfaceFontFaces(context)
             val safePayload = payload.toString().replace("<", "\\u003c")
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:15px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
 window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }
@@ -331,7 +331,7 @@ class BobInteractiveActivity : Activity() {
         super.onCreate(savedInstanceState)
         val selected = SurfaceSessions.pending.remove(intent.getStringExtra("session"))
         if (selected == null) {
-            setContentView(TextView(this).apply { useSurfaceTypeface(); text = "Content expired. Return to chat and reopen it." }); return
+            setContentView(TextView(this).apply { useSurfaceTypeface(); textSize = 13f; text = "Content expired. Return to chat and reopen it." }); return
         }
         val surface = BobSurfacePanel(this, { finish() })
         panel = surface
@@ -367,7 +367,7 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
         val selected = SurfaceSessions.pending.remove(handle) ?: return
         val surface = BobSurfacePanel(host.context, {
             host.removeAllViews()
-            host.addView(TextView(host.context).apply { useSurfaceTypeface(); text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
+            host.addView(TextView(host.context).apply { useSurfaceTypeface(); textSize = 13f; text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
         }, true, handle)
         surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
         host.addView(surface, LinearLayout.LayoutParams(-1, -1))

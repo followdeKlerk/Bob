@@ -49,6 +49,6 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
 });
 const s=StyleSheet.create({
  container:{minHeight:34,paddingHorizontal:8,paddingBottom:11},
- text:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600',letterSpacing:0.3,fontFamily:APP_FONT_FAMILY,includeFontPadding:false},
+ text:{color:colors.foreground,fontSize:13,lineHeight:22,fontWeight:'600',letterSpacing:0.3,fontFamily:APP_FONT_FAMILY,includeFontPadding:false},
  reserve:{opacity:0},overlay:{position:'absolute',top:0,left:0,right:0},
 });

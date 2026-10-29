@@ -27,7 +27,7 @@ function Content({value,results,showTools=true,quietTools=false,speakable=true}:
   if(group.kind==='text')return <View key={group.key} style={{gap:4}}><ChatMarkdown text={group.text}/><ActionRow><CopyAction text={group.text}/>{speakable&&<SpeechAction text={group.text}/>}</ActionRow></View>;
   const block=group.block;
   if(block?.type==='toolCall')return <ToolContent quiet={quietTools} key={block.id??group.key} name={block.name??'Tool'} content={JSON.stringify(block.arguments)??''} result={results?.get(block.id)}/>;
-  return <Text key={group.key} selectable style={{fontSize:16,lineHeight:26,color:colors.body}}>{JSON.stringify(block)}</Text>;
+  return <Text key={group.key} selectable style={{fontSize:15,lineHeight:26,color:colors.body}}>{JSON.stringify(block)}</Text>;
  })}</View>;
 }
 

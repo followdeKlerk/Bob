@@ -28,14 +28,14 @@ export function DiagnosticCard({request,respond}:{request:DiagnosticRequest;resp
   finally{lock.current=false;if(mounted.current)setBusy(false);}
  };
  return <View testID="diagnostic-card" style={{padding:16,gap:12,borderWidth:1,borderColor:colors.border,borderRadius:16,backgroundColor:colors.composer}}>
-  <Text style={{color:colors.foreground,fontSize:18,fontWeight:'600'}}>Share app diagnostics?</Text>
-  <Text style={{color:colors.foreground,fontSize:16}}>{request.purpose}</Text>
-  <Text style={{color:colors.muted,fontSize:14,lineHeight:21}}>Shares app/build and WebView versions, recent sanitized lifecycle/exit metadata, and inline-widget sizing/fallback events from this phone. No messages, widget HTML/data, credentials, location, screenshots or raw Android logs. The report goes to this chat and its configured model and remains in chat history.</Text>
+  <Text style={{color:colors.foreground,fontSize:17,fontWeight:'600'}}>Share app diagnostics?</Text>
+  <Text style={{color:colors.foreground,fontSize:15}}>{request.purpose}</Text>
+  <Text style={{color:colors.muted,fontSize:13,lineHeight:21}}>Shares app/build and WebView versions, recent sanitized lifecycle/exit metadata, and inline-widget sizing/fallback events from this phone. No messages, widget HTML/data, credentials, location, screenshots or raw Android logs. The report goes to this chat and its configured model and remains in chat history.</Text>
   {active&&request.canRespond?<>
-   <Pressable accessibilityRole="button" accessibilityLabel={request.status==='approved'?'Capture and send diagnostics':'Approve and send diagnostics'} disabled={busy} onPress={()=>void send(true)} style={{padding:14,minHeight:48,borderRadius:12,backgroundColor:colors.accent,opacity:busy?0.5:1}}><Text style={{color:colors.onAccent,fontSize:16,fontWeight:'600'}}>{busy?'Sending…':request.status==='approved'?'Capture and send':'Approve and send'}</Text></Pressable>
-   {request.status==='pending'&&<Pressable accessibilityRole="button" accessibilityLabel="Decline diagnostics" disabled={busy} onPress={()=>void send(false)} style={{padding:12,minHeight:48}}><Text style={{color:colors.foreground,fontSize:16}}>Decline</Text></Pressable>}
-  </>:<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:14}}>{request.status==='received'?'Report received.':active?'Approval is available only on the phone that sent the request.':`Request ${['pending','approved'].includes(request.status)?'expired':request.status}.`}</Text>}
-  {!!message&&<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:14}}>{message}</Text>}
-  {active&&<Text style={{color:colors.muted,fontSize:13}}>Expires in {Math.max(0,Math.ceil((request.expiresAt-now)/1000))} seconds. Capture starts only after approval.</Text>}
+   <Pressable accessibilityRole="button" accessibilityLabel={request.status==='approved'?'Capture and send diagnostics':'Approve and send diagnostics'} disabled={busy} onPress={()=>void send(true)} style={{padding:14,minHeight:48,borderRadius:12,backgroundColor:colors.accent,opacity:busy?0.5:1}}><Text style={{color:colors.onAccent,fontSize:15,fontWeight:'600'}}>{busy?'Sending…':request.status==='approved'?'Capture and send':'Approve and send'}</Text></Pressable>
+   {request.status==='pending'&&<Pressable accessibilityRole="button" accessibilityLabel="Decline diagnostics" disabled={busy} onPress={()=>void send(false)} style={{padding:12,minHeight:48}}><Text style={{color:colors.foreground,fontSize:15}}>Decline</Text></Pressable>}
+  </>:<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:13}}>{request.status==='received'?'Report received.':active?'Approval is available only on the phone that sent the request.':`Request ${['pending','approved'].includes(request.status)?'expired':request.status}.`}</Text>}
+  {!!message&&<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:13}}>{message}</Text>}
+  {active&&<Text style={{color:colors.muted,fontSize:12}}>Expires in {Math.max(0,Math.ceil((request.expiresAt-now)/1000))} seconds. Capture starts only after approval.</Text>}
  </View>;
 }

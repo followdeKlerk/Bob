@@ -7,8 +7,8 @@ import {colors} from '../theme';
 /** Shared chrome for non-chat destinations. Keep content readable as text grows. */
 export const sectionStyles=StyleSheet.create({
  heading:{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:20,paddingTop:20,paddingBottom:16},
- title:{color:colors.foreground,fontSize:28,lineHeight:35,fontWeight:'600',letterSpacing:-.5,flexShrink:1},
- subtitle:{color:colors.muted,fontSize:13,lineHeight:20,marginTop:3},
+ title:{color:colors.foreground,fontSize:27,lineHeight:35,fontWeight:'600',letterSpacing:-.5,flexShrink:1},
+ subtitle:{color:colors.muted,fontSize:12,lineHeight:20,marginTop:3},
 });
 export function SectionHeading({title,children}:{title:string;children?:React.ReactNode}){
  return <View style={sectionStyles.heading}><Text accessibilityRole="header" style={[sectionStyles.title,{flex:1}]}>{title}</Text>{children}</View>;
@@ -28,9 +28,9 @@ const s=StyleSheet.create({
  roundTarget:{width:48,height:48,alignItems:'center',justifyContent:'center'},
  compactRound:{width:34,height:34,borderRadius:12},
  round:{width:48,height:48,borderRadius:16,backgroundColor:colors.surface,alignItems:'center',justifyContent:'center'},
- group:{gap:9,marginBottom:10},groupTitle:{color:colors.muted,fontSize:13,fontWeight:'600',paddingHorizontal:4,letterSpacing:.3},
+ group:{gap:9,marginBottom:10},groupTitle:{color:colors.muted,fontSize:12,fontWeight:'600',paddingHorizontal:4,letterSpacing:.3},
  groupBody:{backgroundColor:colors.panel,borderRadius:20,borderWidth:1,borderColor:colors.subtle,paddingHorizontal:12,paddingVertical:4,gap:2},
  row:{flexDirection:'row',alignItems:'center',gap:12,minHeight:62,paddingVertical:10,paddingHorizontal:2},
  rowIcon:{width:34,height:34,borderRadius:11,alignItems:'center',justifyContent:'center',backgroundColor:colors.iconSurface},
- rowTitle:{flex:1,flexShrink:1,color:colors.foreground,fontSize:16,lineHeight:23},value:{color:colors.muted,fontSize:13,flexShrink:1,maxWidth:'28%'},
+ rowTitle:{flex:1,flexShrink:1,color:colors.foreground,fontSize:15,lineHeight:23},value:{color:colors.muted,fontSize:12,flexShrink:1,maxWidth:'28%'},
 });

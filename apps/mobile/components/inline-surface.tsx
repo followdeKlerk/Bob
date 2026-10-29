@@ -29,7 +29,7 @@ function Content({backend,surface,onOverflow}:{backend:Backend;surface:Props['su
   })().catch(e=>{if(active)setError(String(e.message??'Content unavailable'));});
   return ()=>{active=false;listener.remove();layout.remove();data.remove();if(prepared)NativeModules.BobInteractive.releasePrepared(prepared);};
  },[backend.backendId,backend.endpoint,surface.id,surface.conversationId,onOverflow]);
- return error?<Text style={{color:colors.muted,paddingVertical:16}}>{error}</Text>:handle?<><NativeSurface testID="bob-inline-native-surface" collapsable={false} session={handle} style={{height,width:'100%'}}/>{!!dataStatus&&<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:13}}>{dataStatus}</Text>}</>:<Text style={{paddingVertical:16,color:colors.muted}}>Loading visual…</Text>;
+ return error?<Text style={{fontSize:13,color:colors.muted,paddingVertical:16}}>{error}</Text>:handle?<><NativeSurface testID="bob-inline-native-surface" collapsable={false} session={handle} style={{height,width:'100%'}}/>{!!dataStatus&&<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:12}}>{dataStatus}</Text>}</>:<Text style={{fontSize:13,paddingVertical:16,color:colors.muted}}>Loading visual…</Text>;
 }
 export function InlineSurface({backend,surface,onExpand}:Props) {
  const [overflow,setOverflow]=useState(false);
@@ -40,7 +40,7 @@ export function InlineSurface({backend,surface,onExpand}:Props) {
   {inline&&<Content backend={backend} surface={surface} onOverflow={onOverflow}/>}
   {(!inline||surface.kind==='visual')&&<ActionRow>
    <ActionIcon icon={Maximize2} label={`${surface.kind==='visual'?'Expand visual':'Open app'}: ${surface.title}`} onPress={onExpand}/>
-   {!inline&&<Text numberOfLines={2} style={{color:colors.muted,fontSize:14,flexShrink:1}}>{surface.title}</Text>}
+   {!inline&&<Text numberOfLines={2} style={{color:colors.muted,fontSize:13,flexShrink:1}}>{surface.title}</Text>}
   </ActionRow>}
  </View>;
 }

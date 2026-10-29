@@ -32,7 +32,7 @@ const styles=StyleSheet.create({
  preview:{width:96,height:112,borderRadius:16,overflow:'hidden',backgroundColor:colors.surface},
  image:{width:'100%',height:'100%'},
  fallback:{flex:1,alignItems:'center',justifyContent:'center',padding:8,gap:6},
- label:{fontSize:12,color:colors.foreground,textAlign:'center'},
+ label:{fontSize:11,color:colors.foreground,textAlign:'center'},
  remove:{position:'absolute',top:-4,right:-4,width:44,height:44,alignItems:'center',justifyContent:'center'},
  removeCircle:{width:28,height:28,borderRadius:14,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border},
 });
