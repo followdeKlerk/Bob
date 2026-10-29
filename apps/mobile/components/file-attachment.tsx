@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React from 'react';
-import {Pressable,Text,View,StyleSheet} from 'react-native';
+import {Pressable,View,StyleSheet} from 'react-native';
 import {SentAttachmentThumbnail} from './attachment-thumbnail';
 import {colors} from '../theme';
 export function FileAttachment({backend,artifact,fromBob,onOpen,onSave}:{backend:{backendId:string;endpoint:string};artifact:{id:string;conversationId:number;name:string;mime:string;size:number};fromBob:boolean;onOpen:()=>void;onSave:()=>void}){

@@ -1,6 +1,9 @@
 package com.bobmobile
 
 import android.content.Context
+import android.graphics.Typeface
+import android.util.Base64
+import androidx.core.content.res.ResourcesCompat
 import android.view.View
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
@@ -24,6 +27,21 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
+
+// Font failures must not prevent opening a surface (including resource-light tests).
+private fun TextView.useSurfaceTypeface() {
+    typeface = try { ResourcesCompat.getFont(context, R.font.nordwand_mono) ?: Typeface.MONOSPACE }
+        catch (_: Exception) { Typeface.MONOSPACE }
+}
+private fun surfaceFontFaces(context: Context): String = listOf(
+    Triple("Regular", "400", "normal"), Triple("Bold", "500 900", "normal"),
+    Triple("Italic", "400", "italic"), Triple("BoldItalic", "500 900", "italic")
+).joinToString("") { (file, weight, style) ->
+    try {
+        val data = context.assets.open("fonts/NordwandMono-$file.woff2").use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
+        "@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,$data) format('woff2');font-weight:$weight;font-style:$style;font-display:swap}"
+    } catch (_: Exception) { "" }
+}
 
 internal data class SurfaceSession(val endpoint: String, val identity: String, val token: String, val chat: Long, val id: String, val resource: JSONObject)
 private object SurfaceSessions { val pending = ConcurrentHashMap<String, SurfaceSession>() }
@@ -185,7 +203,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         clipChildren = true; clipToPadding = true
         if (inline) { isFocusable = false; isFocusableInTouchMode = false }
         val layout = this
-        status = TextView(context).apply { setTextColor(0xfff4f4f5.toInt()); textSize = 15f; setTextIsSelectable(true); visibility = View.GONE }
+        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xfff4f4f5.toInt()); textSize = 15f; setTextIsSelectable(true); visibility = View.GONE }
         layout.addView(status)
         session = selected
         if (selected.resource.optString("kind") == "visual") selected.resource.optJSONObject("visualData")?.let { dataEnabled = true; acceptVisualData(it) }
@@ -223,9 +241,10 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             // Only the host substitutes the per-frame layout key. Never give the child
             // the native bridge nonce (or reports will not match the host's layout key).
             val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
+            val fontFaceCss = surfaceFontFaces(context)
             val safePayload = payload.toString().replace("<", "\\u003c")
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:15px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
-window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)}).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
+            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:15px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }
         if (selected.resource.optString("kind") == "mcp") {
@@ -312,7 +331,7 @@ class BobInteractiveActivity : Activity() {
         super.onCreate(savedInstanceState)
         val selected = SurfaceSessions.pending.remove(intent.getStringExtra("session"))
         if (selected == null) {
-            setContentView(TextView(this).apply { text = "Content expired. Return to chat and reopen it." }); return
+            setContentView(TextView(this).apply { useSurfaceTypeface(); text = "Content expired. Return to chat and reopen it." }); return
         }
         val surface = BobSurfacePanel(this, { finish() })
         panel = surface
@@ -348,7 +367,7 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
         val selected = SurfaceSessions.pending.remove(handle) ?: return
         val surface = BobSurfacePanel(host.context, {
             host.removeAllViews()
-            host.addView(TextView(host.context).apply { text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
+            host.addView(TextView(host.context).apply { useSurfaceTypeface(); text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
         }, true, handle)
         surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
         host.addView(surface, LinearLayout.LayoutParams(-1, -1))

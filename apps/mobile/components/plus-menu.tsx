@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React from 'react';
-import {Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {Pressable,ScrollView,StyleSheet,View} from 'react-native';
 import {Camera,Image,Paperclip,SlidersHorizontal,Ellipsis,type LucideIcon} from 'lucide-react-native';
 import {colors} from '../theme';
 export function PlusMenu({bottom,maxHeight,disabled,onCamera,onGallery,onFiles,onModel,onMore}:{bottom:number;maxHeight:number;disabled:boolean;onCamera:()=>void;onGallery:()=>void;onFiles:()=>void;onModel:()=>void;onMore:()=>void}){

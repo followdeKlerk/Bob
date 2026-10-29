@@ -1,5 +1,7 @@
+import {APP_FONT_FAMILY} from '../typography';
+import {Text} from './app-text';
 import React,{memo,useMemo,useState} from 'react';
-import {Linking,ScrollView,StyleSheet,Text,View,useWindowDimensions} from 'react-native';
+import {Linking,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import Markdown,{MarkdownIt,type ASTNode,type RenderRules} from 'react-native-markdown-display';
 import {colors} from '../theme';
 import {markdownTableWidths,markdownCodeLanguage} from '../markdown-layout';
@@ -78,10 +80,10 @@ const layout=StyleSheet.create({
  codeHeader:{minHeight:44,paddingLeft:12,paddingRight:4,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:colors.border},
  codeLabel:{color:colors.muted,fontSize:12,lineHeight:18,flexShrink:1},
  codeContent:{padding:12},
- codeText:{fontFamily:'monospace',fontSize:14,lineHeight:22,color:colors.foreground,flexShrink:0},
+ codeText:{fontFamily:APP_FONT_FAMILY,fontSize:14,lineHeight:22,color:colors.foreground,flexShrink:0},
 });
 const styles=StyleSheet.create({
- body:{color:colors.body,fontSize:16,lineHeight:25,minWidth:0,width:'100%'},
+ body:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:16,lineHeight:25,minWidth:0,width:'100%'},
  text:{color:colors.body},textgroup:{flexShrink:1},
  paragraph:{marginTop:0,marginBottom:10,flexShrink:1},
  heading1:{flexDirection:'column',color:colors.foreground,fontSize:25,lineHeight:33,fontWeight:'700',marginTop:14,marginBottom:10},
@@ -92,7 +94,7 @@ const styles=StyleSheet.create({
  heading6:{flexDirection:'column',color:colors.foreground,fontSize:16,lineHeight:24,fontWeight:'600',marginTop:8,marginBottom:6},
  strong:{fontWeight:'700'},em:{fontStyle:'italic'},s:{textDecorationLine:'line-through'},
  link:{color:colors.accent,textDecorationLine:'underline'},
- code_inline:{fontFamily:'monospace',backgroundColor:colors.surface,color:colors.foreground,borderWidth:0,padding:0,borderRadius:3},
+ code_inline:{fontFamily:APP_FONT_FAMILY,backgroundColor:colors.surface,color:colors.foreground,borderWidth:0,padding:0,borderRadius:3},
  blockquote:{backgroundColor:colors.surface,borderColor:colors.accent,borderLeftWidth:3,paddingHorizontal:12,paddingVertical:8,marginLeft:0,marginVertical:8},
  hr:{backgroundColor:colors.border,height:1,marginVertical:12},
  th:{fontWeight:'600'},

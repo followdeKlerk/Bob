@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useEffect,useState} from 'react';
-import {Image,Pressable,StyleSheet,Text,View,type ImageSourcePropType} from 'react-native';
+import {Image,Pressable,StyleSheet,View,type ImageSourcePropType} from 'react-native';
 import {FileText,X} from 'lucide-react-native';
 import * as Keychain from 'react-native-keychain';
 import {colors} from '../theme';

@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useCallback,useEffect,useState} from 'react';
-import {DeviceEventEmitter,NativeModules,requireNativeComponent,View,Text,type ViewProps} from 'react-native';
+import {DeviceEventEmitter,NativeModules,requireNativeComponent,View,type ViewProps} from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import {Maximize2} from 'lucide-react-native';
 import {ActionIcon,ActionRow} from './message-actions';

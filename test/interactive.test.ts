@@ -6,6 +6,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {chromium} from 'playwright';
+import {build} from 'esbuild';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {State} from '../src/state.js';
@@ -46,7 +47,7 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
    await assert.rejects(runtime.interactive.call(runtime.harness,chat,app.id,device,{...call,arguments:{amount:2}}),/another action/);
    const unknownId=randomUUID();await chat.commit(async tx=>{(await tx.doc(Interactive,chat.id)).operations[`${device}:${unknownId}`]={appId:app.id,tool:'increment',requestHash:createHash('sha256').update(JSON.stringify({amount:1})).digest('hex'),status:'started'};},ctx);
    await assert.rejects(runtime.interactive.call(runtime.harness,chat,app.id,device,{...call,requestId:unknownId}),/unknown; no automatic resend/);assert.equal(fixture.counter,1);
-   const host=readFileSync('apps/mobile/android/app/src/main/assets/bob-host.js','utf8').replaceAll('</script','<\\/script');
+   const host=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text.replaceAll('</script','<\\/script');
    const payload={kind:opened.kind,title:opened.title,html:opened.html,input:opened.input,result:opened.result,allowedTools:opened.allowedTools};
    const html=`<!doctype html><div id="status"></div><div id="surface" style="height:600px"></div><script>${host}</script><script>window.BobNative={request:(raw,nonce)=>window.testNative(raw,nonce).then(value=>window.__bobReply(JSON.parse(raw).id,value))};window.startBobSurface(${JSON.stringify(payload).replaceAll('<','\\u003c')},'fixture-nonce')</script>`;
    site=createServer((_req,res)=>{res.setHeader('content-type','text/html');res.end(html);});site.listen(0,'127.0.0.1');await once(site,'listening');
@@ -88,3 +89,70 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
  } finally {await browser?.close();site?.close();await runtime.close();await fixture.close();state.close();}
 });
 registerInlineVisualLifecycle();
+
+test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in host styling without new authority',{timeout:60000},async t=>{
+ const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
+ const fontCss=[['Regular','400','normal'],['Bold','500 900','normal'],['Italic','400','italic'],['BoldItalic','500 900','italic']].map(([file,weight,style])=>
+  `@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,${readFileSync(`apps/mobile/android/app/src/main/assets/fonts/NordwandMono-${file}.woff2`).toString('base64')}) format('woff2');font-weight:${weight};font-style:${style};font-display:swap}`
+ ).join('');
+ const native=readFileSync('apps/mobile/android/app/src/main/java/com/bobmobile/BobInteractive.kt','utf8');
+ const template=/val html = """([\s\S]*?)"""/.exec(native)![1];
+ const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});t.after(()=>browser.close());
+ const errors:string[]=[],requests:string[]=[];
+ async function open(kind:'visual'|'mcp',html:string,fonts=fontCss){
+  const page=await browser.newPage();page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>requests.push(request.url()));
+  const document=template.replace('$bundle',()=>bundle.replaceAll('</script','<\\/script'))
+   .replace('$fontFaceCss',()=>fonts).replace('$safePayload',()=>JSON.stringify({kind,title:'Typography',html,allowedTools:[]}).replaceAll('<','\\u003c'))
+   .replace('${JSONObject.quote(nonce)}',()=>JSON.stringify('private-native-nonce'))
+   .replace('${if (inline) "true" else "false"}','false').replace('${JSONObject.quote(inlineMeasure)}','""');
+  await page.route('https://bob.invalid/',route=>route.fulfill({contentType:'text/html',body:document}));
+  await page.goto('https://bob.invalid/');await page.waitForSelector('iframe');
+  return {page,child:page.frames().find(frame=>frame!==page.mainFrame())!};
+ }
+ const visual='<style>body{font:16px serif}input,button,select,textarea,code,pre{font-family:serif}#medium{font-weight:500}#semibold{font-weight:600}</style><p>Plain</p><input placeholder="Input"><textarea>Text</textarea><button>Button</button><select><option>Choice</option></select><pre>Pre</pre><code style="font-family:serif">Code</code><span id="medium">Medium</span><span id="semibold">Semibold</span><b>Bold</b><i>Italic</i><b><i>Bold italic</i></b><svg><text x="0" y="20">SVG text</text></svg>';
+ await t.test('visual defaults override ordinary author fonts, load normal/bold/italic locally, and preserve sandbox',async()=>{
+  const {page,child}=await open('visual',visual);
+  try {
+   const fonts=await child.evaluate(async()=>{
+    await document.fonts.ready;
+    return {families:Array.from(document.querySelectorAll('p,input,textarea,button,select,option,pre,code,span,b,i,text')).map(element=>getComputedStyle(element).fontFamily),
+     faces:Array.from(document.fonts).map(font=>({status:font.status,weight:font.weight,style:font.style})),
+     parentBlocked:(()=>{try{void parent.document;return false;}catch{return true;}})()};
+   });
+   assert.ok(fonts.families.length>=15);assert.ok(fonts.families.every(family=>family==='"Nordwand Mono", monospace'),JSON.stringify(fonts));
+   assert.deepEqual(fonts.faces.map(font=>font.status),['loaded','loaded','loaded','loaded']);
+   assert.deepEqual(fonts.faces.map(font=>[font.weight,font.style]),[['400','normal'],['500 900','normal'],['400','italic'],['500 900','italic']]);
+   assert.equal(fonts.parentBlocked,true);
+   assert.equal(await page.locator('#status').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');
+   assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
+   const srcdoc=await page.locator('iframe').getAttribute('srcdoc');
+   assert.ok(srcdoc?.includes(visual),'stored HTML is inserted unchanged');assert.ok(!srcdoc?.includes('private-native-nonce'));
+   assert.match(srcdoc!,/font-src data:; connect-src 'none'/);
+   assert.equal(await child.evaluate(async()=>{try{await fetch('https://example.invalid/blocked');return false;}catch{return true;}}),true);
+   await page.locator('#status').evaluate(element=>element.textContent='Interactive app error: fixture');
+   await page.evaluate(()=>document.fonts.ready); // The host status has its own data-URL font face.
+   assert.equal(await page.evaluate(()=>Array.from(document.fonts).find(font=>font.weight==='400'&&font.style==='normal')?.status),'loaded');
+  } finally {await page.close();}
+ });
+ await t.test('missing font assets retain readable monospace fallback',async()=>{
+  const {page,child}=await open('visual',visual,'');
+  try {assert.equal(await child.locator('input').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');assert.equal(await child.evaluate(()=>document.fonts.size),0);}
+  finally {await page.close();}
+ });
+ await t.test('MCP SDK exposes font variables and local CSS; third-party author fonts remain their choice',async()=>{
+  const app=(await build({stdin:{contents:`import {App,applyHostStyleVariables,applyHostFonts} from '@modelcontextprotocol/ext-apps';
+   const app=new App({name:'Font fixture',version:'1'},{});app.connect().then(()=>{const styles=app.getHostContext().styles;window.fontContext=styles;applyHostStyleVariables(styles.variables);applyHostFonts(styles.css.fonts);});`,resolveDir:process.cwd()},bundle:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
+  const {page,child}=await open('mcp',`<p style="font-family:var(--font-sans)">Opt in</p><code style="font-family:var(--font-mono)">Code</code><p id="owned" style="font-family:serif">App owned</p><script>${app.replaceAll('</script','<\\/script')}</script>`);
+  try {
+   await child.waitForFunction(()=>Boolean((window as any).fontContext));
+   assert.deepEqual(await child.evaluate(()=>JSON.parse(JSON.stringify((window as any).fontContext.variables))),{'--font-sans':'"Nordwand Mono", monospace','--font-mono':'"Nordwand Mono", monospace'});
+   assert.equal(await child.evaluate(()=>(window as any).fontContext.css.fonts),fontCss);
+   await child.evaluate(()=>document.fonts.ready);
+   assert.equal(await child.locator('code').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');
+   assert.equal(await child.locator('#owned').evaluate(element=>getComputedStyle(element).fontFamily),'serif');
+   assert.equal(await child.evaluate(()=>Array.from(document.fonts).find(font=>font.weight==='400'&&font.style==='normal')?.status),'loaded');
+  } finally {await page.close();}
+ });
+ assert.deepEqual(errors,[]);
+ assert.ok(requests.every(url=>url==='https://bob.invalid/'),'font loading must not request a network origin: '+requests.join(', '));
+});

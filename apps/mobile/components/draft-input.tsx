@@ -1,5 +1,6 @@
+import {Text,TextInput} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
-import {Keyboard,Modal,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
+import {Keyboard,Modal,Pressable,StyleSheet,View} from 'react-native';
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Maximize2,Minimize2} from 'lucide-react-native';
 import {useKeyboardInset} from '../keyboard-inset';

@@ -32,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
   }
   override fun onCreate() {
     super.onCreate()
+    com.facebook.react.common.assets.ReactFontManager.getInstance().addCustomFont(this, "Nordwand Mono", R.font.nordwand_mono)
     CrashDiagnostics.install(this)
     BobFullscreen.install(this)
     // Pairing, authenticated fetch and SSE must never forward credentials through a redirect or replay a mutation.

@@ -1,5 +1,7 @@
+import {APP_FONT_FAMILY} from '../typography';
+import {Text} from './app-text';
 import React,{useState} from 'react';
-import {Pressable,StyleSheet,Text,View} from 'react-native';
+import {Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight,SquareTerminal} from 'lucide-react-native';
 import {colors} from '../theme';
 import {CopyAction} from './message-actions';
@@ -47,11 +49,11 @@ const styles=StyleSheet.create({
  summary:{color:colors.body,fontSize:14,lineHeight:21,flexShrink:1},
  preview:{paddingHorizontal:12,paddingBottom:12,gap:10},
  path:{color:colors.muted,fontSize:12,lineHeight:18},
- command:{fontFamily:'monospace',color:colors.body,fontSize:13,lineHeight:20},
+ command:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:13,lineHeight:20},
  output:{color:colors.muted,fontSize:13,lineHeight:20},
  details:{padding:12,paddingTop:0,gap:8},
  row:{flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
- code:{fontFamily:'monospace',color:colors.body,fontSize:13,lineHeight:20},
+ code:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:13,lineHeight:20},
  resultButton:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
  error:{color:colors.foreground,fontSize:13,lineHeight:20},
 });

@@ -51,3 +51,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Nordwand Mono
+
+Bob bundles unmodified [Nordwand Mono 1.4.0](https://github.com/tywr/Nordwand-Mono/releases/tag/1.4.0), Copyright (c) 2026, Tanguy VIVIER, under the SIL Open Font License 1.1. The [full font licence](apps/mobile/android/app/src/main/assets/fonts/OFL.txt) is shipped in the Android app alongside the web fonts. [Provenance and SHA-256 checksums](apps/mobile/android/app/src/main/assets/fonts/README.md) identify the bundled upstream TTF and WOFF2 files. No font is downloaded at runtime.

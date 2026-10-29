@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React from 'react';
-import {Text,View} from 'react-native';
+import {View} from 'react-native';
 import {ChatMarkdown} from './chat-markdown';
 import {ActionRow,CopyAction} from './message-actions';
 import {SpeechAction} from './speech-action';

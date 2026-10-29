@@ -1,5 +1,7 @@
+import {APP_FONT_FAMILY} from '../typography';
+import {Text,TextInput} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
-import {ActivityIndicator,Platform,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight,FileText} from 'lucide-react-native';
 import {colors} from '../theme';
 export type ConversationChange={instructions:string|null}|{cwd:string};
@@ -65,6 +67,6 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
 const s=StyleSheet.create({
  heading:{flexDirection:'row',alignItems:'center',gap:12,minHeight:62,paddingHorizontal:2,paddingVertical:10},icon:{width:34,height:34,borderRadius:11,backgroundColor:colors.iconSurface,alignItems:'center',justifyContent:'center'},headingText:{flex:1,color:colors.foreground,fontSize:16,lineHeight:23},
  body:{paddingHorizontal:2,paddingTop:10,paddingBottom:16,gap:12},labelRow:{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:15,fontWeight:'600'},mode:{color:colors.accent,fontSize:12,lineHeight:18},hint:{color:colors.muted,fontSize:13,lineHeight:20},
- input:{backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:14,paddingHorizontal:12,paddingVertical:12,color:colors.foreground,fontSize:16,lineHeight:24},instructions:{minHeight:132,maxHeight:260},path:{fontSize:14,fontFamily:Platform.OS==='ios'?'Menlo':'monospace'},
+ input:{backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:14,paddingHorizontal:12,paddingVertical:12,color:colors.foreground,fontSize:16,lineHeight:24},instructions:{minHeight:132,maxHeight:260},path:{fontSize:14,fontFamily:APP_FONT_FAMILY},
  actions:{flexDirection:'row',flexWrap:'wrap',gap:8},action:{minHeight:48,minWidth:88,paddingVertical:12,paddingHorizontal:16,borderRadius:14,backgroundColor:colors.surface,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent},actionText:{color:colors.foreground,fontSize:15,lineHeight:22,fontWeight:'600'},folder:{borderTopWidth:1,borderColor:colors.subtle,marginTop:8,paddingTop:20,gap:12},feedback:{color:colors.accent,fontSize:13,lineHeight:20},
 });

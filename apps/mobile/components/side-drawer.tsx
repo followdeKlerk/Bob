@@ -1,5 +1,6 @@
+import {Text,TextInput} from './app-text';
 import React,{memo,useEffect,useMemo,useState} from 'react';
-import {Alert,BackHandler,FlatList,Image,Keyboard,Modal,Pressable,StyleSheet,Text,TextInput,View,useWindowDimensions} from 'react-native';
+import {Alert,BackHandler,FlatList,Image,Keyboard,Modal,Pressable,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Archive,ArchiveRestore,ChevronDown,ChevronRight,Check,MessageCircle,Edit3,Pin,PinOff,QrCode,Search,Server,Settings,SquarePen,Trash2,Undo2,X,type LucideIcon} from 'lucide-react-native';
 import {EdgeFade} from './edge-fade';

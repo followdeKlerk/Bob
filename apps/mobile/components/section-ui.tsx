@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React from 'react';
-import {ActivityIndicator,Pressable,StyleSheet,Text,View} from 'react-native';
+import {ActivityIndicator,Pressable,StyleSheet,View} from 'react-native';
 import {ChevronRight,type LucideIcon} from 'lucide-react-native';
 import {colors} from '../theme';
 

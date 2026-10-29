@@ -1,5 +1,7 @@
+import {APP_FONT_FAMILY} from '../typography';
+import {Text} from './app-text';
 import React,{useState} from 'react';
-import {Pressable,StyleSheet,Text,View} from 'react-native';
+import {Pressable,StyleSheet,View} from 'react-native';
 import {Check,ChevronDown,ChevronRight,Users} from 'lucide-react-native';
 import {colors} from '../theme';
 export function PeerAdmission({data,peerName}:{data:unknown;peerName?:string}){
@@ -21,4 +23,4 @@ export function PeerAdmission({data,peerName}:{data:unknown;peerName?:string}){
   </View>
  </View>;
 }
-const s=StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:12,lineHeight:18,color:colors.muted},title:{fontSize:14,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:14,lineHeight:21,color:colors.body},caption:{fontSize:13,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:'monospace',fontSize:13,lineHeight:20,color:colors.body}});
+const s=StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:12,lineHeight:18,color:colors.muted},title:{fontSize:14,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:14,lineHeight:21,color:colors.body},caption:{fontSize:13,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:APP_FONT_FAMILY,fontSize:13,lineHeight:20,color:colors.body}});

@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
-import {NativeModules,Pressable,Text,View} from 'react-native';
+import {NativeModules,Pressable,View} from 'react-native';
 import {colors} from '../theme';
 export type DiagnosticRequest={id:string;purpose:string;expiresAt:number;status:string;canRespond:boolean};
 export function DiagnosticCard({request,respond}:{request:DiagnosticRequest;respond:(value:object)=>Promise<unknown>}){

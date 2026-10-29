@@ -1,23 +1,34 @@
 import {AppBridge, PostMessageTransport} from '@modelcontextprotocol/ext-apps/app-bridge';
 import type {CallToolResult} from '@modelcontextprotocol/client';
+import type {McpUiStyles} from '@modelcontextprotocol/ext-apps';
 
 declare global {
   interface Window {
     BobNative?: { request(payload: string, nonce: string): void };
-    startBobSurface(payload: Surface, nonce: string, inline?: boolean, inlineMeasureSource?: string): Promise<void>;
+    startBobSurface(payload: Surface, nonce: string, inline?: boolean, inlineMeasureSource?: string, fontFaceCss?: string): Promise<void>;
     __bobReply(id: string, payload: {result?: CallToolResult; error?: string}): void;
     __bobVisualData?(value: VisualValue): void;
   }
 }
 type VisualValue={revision:number;data:Record<string,unknown>|null;updatedAt:number|null};
 type Surface={kind:'visual'|'mcp';title:string;html:string;input?:Record<string,unknown>;result?:CallToolResult;allowedTools:string[];visualData?:VisualValue};
+// Shared by the Bob-owned host and visual document. MCP apps receive these
+// preferences through the SDK host context instead of forced third-party CSS.
+const surfaceFontFamily='"Nordwand Mono", monospace';
+const surfaceTypographyCss=`html,body,body *,body *::before,body *::after,body *::placeholder{font-family:${surfaceFontFamily}!important}`;
+// The SDK models optional variable values as a required-key Record. Unset
+// variables remain undefined; Bob only supplies its two font preferences.
+const surfaceFontVariables={'--font-sans':surfaceFontFamily,'--font-mono':surfaceFontFamily} as McpUiStyles;
 const pending=new Map<string,{resolve:(value:CallToolResult)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 window.__bobReply=(id,payload)=>{
   const item=pending.get(id);if(!item)return;
   clearTimeout(item.timer);pending.delete(id);
   if(payload.error)item.reject(Error(payload.error));else item.resolve(payload.result??{content:[]});
 };
-window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='')=>{
+window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='',fontFaceCss='')=>{
+  // Native supplies only bundled data-URL fonts, never a network origin or grant.
+  const typographyStyle=document.createElement('style');
+  typographyStyle.textContent=fontFaceCss+surfaceTypographyCss;document.head.append(typographyStyle);
   const scrollbarCss='*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}';
   const scrollbarStyle=document.createElement('style');scrollbarStyle.textContent=scrollbarCss;document.head.append(scrollbarStyle);
   const status=document.getElementById('status')!;
@@ -92,7 +103,7 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='')=>{
     });
   })();</script>`:'';
   if(payload.kind==='mcp') {
-    const bridge=new AppBridge(null,{name:'Bob Android',version:'0.1.0'},{serverTools:{}},{hostContext:{theme:'dark',displayMode:inline?'inline':'fullscreen',availableDisplayModes:[inline?'inline':'fullscreen']}});
+    const bridge=new AppBridge(null,{name:'Bob Android',version:'0.1.0'},{serverTools:{}},{hostContext:{theme:'dark',styles:{variables:surfaceFontVariables,css:{fonts:fontFaceCss}},displayMode:inline?'inline':'fullscreen',availableDisplayModes:[inline?'inline':'fullscreen']}});
     bridge.oncalltool=async(params)=>{
       if(!payload.allowedTools.includes(params.name))throw Error('Tool is not granted to this surface');
       if(!window.BobNative)throw Error('Authenticated native bridge unavailable');
@@ -114,5 +125,5 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='')=>{
     window.addEventListener('pagehide',()=>{void bridge.teardownResource({}, {timeout:1000}).catch(()=>{}).finally(()=>bridge.close());},{once:true});
   } else status.textContent='';
   // The child remains an opaque origin. CSP is additive and cannot be weakened by later app markup.
-  frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+measureScript+dataScript+payload.html+'<style>html{overflow-anchor:none}'+scrollbarCss+'</style>';
+  frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+(payload.kind==='visual'?'<style>'+fontFaceCss+'</style>':'')+measureScript+dataScript+payload.html+'<style>html{overflow-anchor:none}'+scrollbarCss+(payload.kind==='visual'?surfaceTypographyCss:'')+'</style>';
 };

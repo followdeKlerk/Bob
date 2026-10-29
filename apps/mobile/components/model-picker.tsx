@@ -1,5 +1,6 @@
+import {Text,TextInput} from './app-text';
 import React,{useEffect,useMemo,useState} from 'react';
-import {Modal,View,Text,TextInput,ScrollView,Pressable,StyleSheet,KeyboardAvoidingView,Platform} from 'react-native';
+import {Modal,View,ScrollView,Pressable,StyleSheet,KeyboardAvoidingView,Platform} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Check,Search,X,Zap} from 'lucide-react-native';
 import {Button} from './ui/button';

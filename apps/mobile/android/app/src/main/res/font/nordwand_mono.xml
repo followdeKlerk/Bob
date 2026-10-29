@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<font-family xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font android:font="@font/nordwand_mono_regular" android:fontWeight="400" android:fontStyle="normal" app:font="@font/nordwand_mono_regular" app:fontWeight="400" app:fontStyle="normal" />
+    <font android:font="@font/nordwand_mono_medium" android:fontWeight="500" android:fontStyle="normal" app:font="@font/nordwand_mono_medium" app:fontWeight="500" app:fontStyle="normal" />
+    <font android:font="@font/nordwand_mono_semi_bold" android:fontWeight="600" android:fontStyle="normal" app:font="@font/nordwand_mono_semi_bold" app:fontWeight="600" app:fontStyle="normal" />
+    <font android:font="@font/nordwand_mono_bold" android:fontWeight="700" android:fontStyle="normal" app:font="@font/nordwand_mono_bold" app:fontWeight="700" app:fontStyle="normal" />
+    <font android:font="@font/nordwand_mono_italic" android:fontWeight="400" android:fontStyle="italic" app:font="@font/nordwand_mono_italic" app:fontWeight="400" app:fontStyle="italic" />
+    <font android:font="@font/nordwand_mono_medium_italic" android:fontWeight="500" android:fontStyle="italic" app:font="@font/nordwand_mono_medium_italic" app:fontWeight="500" app:fontStyle="italic" />
+    <font android:font="@font/nordwand_mono_semi_bold_italic" android:fontWeight="600" android:fontStyle="italic" app:font="@font/nordwand_mono_semi_bold_italic" app:fontWeight="600" app:fontStyle="italic" />
+    <font android:font="@font/nordwand_mono_bold_italic" android:fontWeight="700" android:fontStyle="italic" app:font="@font/nordwand_mono_bold_italic" app:fontWeight="700" app:fontStyle="italic" />
+</font-family>

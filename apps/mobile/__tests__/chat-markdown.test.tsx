@@ -1,4 +1,5 @@
 import React from 'react';
+import {APP_FONT_FAMILY} from '../typography';
 import Renderer,{act} from 'react-test-renderer';
 import {Text,Image,Linking,NativeModules,StyleSheet,ScrollView} from 'react-native';
 import {CopyAction} from '../components/message-actions';
@@ -75,7 +76,7 @@ test('fenced and indented code preserve whitespace, scroll long lines and copy r
  expect(nodes(tree,'markdown-code-block')).toHaveLength(2);
  const code=tree.root.findAllByType(Text).filter(text=>text.props.selectable);
  expect(code[0].props.children).toBe(source.replace(/\n$/,''));
- expect(StyleSheet.flatten(code[0].props.style).fontFamily).toBe('monospace');
+ expect(StyleSheet.flatten(code[0].props.style).fontFamily).toBe(APP_FONT_FAMILY);
  expect(StyleSheet.flatten(code[0].props.style).flexShrink).toBe(0);
  expect(flatten(tree.toJSON())).toContain('typescript');
  const copies=tree.root.findAllByType(CopyAction);expect(copies[0].props.text).toBe(source);
@@ -95,7 +96,7 @@ test('headings, nested/started lists, quotes, breaks and inline formatting retai
  const styles=tree.root.findAllByType(Text).map(text=>StyleSheet.flatten(text.props.style)||{});
  expect(styles.some(style=>style.fontWeight==='700')).toBe(true);
  expect(styles.some(style=>style.textDecorationLine==='line-through')).toBe(true);
- expect(styles.some(style=>style.fontFamily==='monospace'&&style.padding===0)).toBe(true);
+ expect(styles.some(style=>style.fontFamily===APP_FONT_FAMILY&&style.padding===0)).toBe(true);
  await act(async()=>tree.unmount());
 });
 test('links only open HTTP(S) on an explicit tap and incomplete tables/fences remain renderable',async()=>{

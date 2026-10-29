@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useRef,useState} from 'react';
-import {Alert,Pressable,StyleSheet,Text,View} from 'react-native';
+import {Alert,Pressable,StyleSheet,View} from 'react-native';
 import {Check,ChevronRight} from 'lucide-react-native';
 import {colors} from '../theme';
 export type Question={id:string;text:string;options?:string[];multiple?:boolean};

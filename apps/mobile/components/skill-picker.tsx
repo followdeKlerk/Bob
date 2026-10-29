@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
-import {Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {Pressable,ScrollView,StyleSheet,View} from 'react-native';
 import {colors} from '../theme';
 import {filterSkills,pickerEntries,type PickerEntry} from '../skill-picker';
 

@@ -2,6 +2,8 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:fontFamily">@font/nordwand_mono</item>
+        <item name="fontFamily">@font/nordwand_mono</item>
         <item name="android:scrollbars">none</item>
         <item name="android:editTextStyle">@style/BobEditText</item>
         <item name="editTextStyle">@style/BobEditText</item>

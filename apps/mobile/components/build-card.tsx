@@ -1,5 +1,6 @@
+import {Text} from './app-text';
 import React,{useEffect,useState} from 'react';
-import {ActivityIndicator,NativeModules,Pressable,StyleSheet,Text,View} from 'react-native';
+import {ActivityIndicator,NativeModules,Pressable,StyleSheet,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {v4 as uuid} from 'uuid';

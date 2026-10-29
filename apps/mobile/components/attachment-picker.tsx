@@ -1,5 +1,6 @@
+import {Text,TextInput} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
-import {ActivityIndicator,FlatList,Image,Modal,NativeModules,PermissionsAndroid,Linking,Platform,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,FlatList,Image,Modal,NativeModules,PermissionsAndroid,Linking,Platform,Pressable,StyleSheet,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {ArrowLeft,Check,ChevronRight,FileText,Folder,FolderOpen,Image as ImageIcon,Search,Upload,X} from 'lucide-react-native';
 import {colors} from '../theme';

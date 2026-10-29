@@ -1,5 +1,6 @@
+import {Text,TextInput} from './app-text';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,AppState,FlatList,Modal,Pressable,ScrollView,StyleSheet,Text,TextInput,View,useWindowDimensions} from 'react-native';
+import {Alert,AppState,FlatList,Modal,Pressable,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {v4 as uuid} from 'uuid';
 import AsyncStorage from '@react-native-async-storage/async-storage';

@@ -1,3 +1,4 @@
+import {Text,TextInput} from './components/app-text';
 import {FileAttachment} from './components/file-attachment';
 import {emptyConversationMessage} from './empty-conversation';
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
@@ -63,8 +64,6 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
