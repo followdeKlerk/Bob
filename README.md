@@ -31,7 +31,7 @@ Ask Bob to improve a JavaScript utility, add tests and send back the updated pro
   <img src="assets/showcase/coding-demo.gif" width="420" alt="Animated recording of Bob inspecting the sample project, editing the utility, running tests and returning a ZIP">
 </p>
 
-A real model run on a disposable sample project, captured from Bob 0.3.65 in an Android 16 emulator. The 45-second recording is trimmed, not sped up; responses are not scripted. Screenshots show different points in the same conversation.
+A real model run on a disposable sample project, captured from Bob 0.3.93 in an Android 16 emulator. The recording is trimmed, not sped up; responses are not scripted. Screenshots show different points in the same conversation.
 
 ## What it does
 
