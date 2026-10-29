@@ -1,4 +1,4 @@
-jest.mock('react-native-reanimated',()=>({__esModule:true,default:{createAnimatedComponent:(component:any)=>component},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:jest.fn((value:any)=>value),withTiming:jest.fn((value:any)=>value),Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
+jest.mock('react-native-reanimated',()=>({__esModule:true,default:{createAnimatedComponent:(component:any)=>component},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:jest.fn((value:any)=>value),withTiming:jest.fn((value:any)=>value),Easing:{out:(value:any)=>value,inOut:(value:any)=>value,cubic:jest.fn()}}));
 jest.mock('react-native-svg',()=>{const create=require('react').createElement;const component=(name:string)=>(props:any)=>create(name,props,props.children);return{__esModule:true,default:component('Svg'),Path:component('Path'),Rect:component('Rect'),Circle:component('Circle'),Defs:component('Defs'),ClipPath:component('ClipPath'),G:component('G')};});
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
@@ -37,7 +37,7 @@ test('transitions retarget immediately; reduced motion and backgrounding cancel 
  await act(async()=>tree.update(<BottomTabs selected="Notes" onSelect={select}/>));
  await act(async()=>tree.update(<BottomTabs selected="Settings" onSelect={select}/>));
  expect(withSpring).toHaveBeenLastCalledWith(4,expect.objectContaining({overshootClamping:true}));
- expect(withTiming).toHaveBeenLastCalledWith(4,expect.objectContaining({duration:320}));
+ expect(withTiming).toHaveBeenLastCalledWith(4,expect.objectContaining({duration:520}));
  (withSpring as jest.Mock).mockClear();(withTiming as jest.Mock).mockClear();
  act(()=>motionListeners.reduceMotionChanged(true));
  await act(async()=>tree.update(<BottomTabs selected="Sessions" onSelect={select}/>));

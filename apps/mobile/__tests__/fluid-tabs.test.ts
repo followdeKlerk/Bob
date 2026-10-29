@@ -25,3 +25,28 @@ test('shape stretches during travel, settles exactly, and clamps spring overshoo
  expect(fluidTabPath(313,-.2,0)).toBe(fluidTabPath(313,0));
  expect(fluidTabPath(313,4.2,4)).toBe(fluidTabPath(313,4));
 });
+
+test('liquid travel stretches toward the trailing tab and lifts the rounded bottom, symmetrically',()=>{
+ const curve=(position:number,tail:number)=>{
+  const segments=fluidTabPath(360,position,tail).split(' C').slice(1).map(part=>(part.match(/-?\d+(?:\.\d+)?/g)??[]).slice(0,6).map(Number));
+  return {right:segments[0][4],left:segments[2][4],bottomX:segments[1][4],depth:segments[1][5]};
+ };
+ const still=curve(2,2),movingRight=curve(2,0),movingLeft=curve(2,4);
+ expect(still).toEqual({right:204,left:156,bottomX:180,depth:55});
+ expect(movingRight.left).toBeLessThan(still.left-30);
+ expect(movingRight.right).toBe(still.right);
+ expect(movingLeft.right).toBeGreaterThan(still.right+30);
+ expect(movingLeft.left).toBe(still.left);
+ expect(movingRight.depth).toBe(48);expect(movingLeft.depth).toBe(48);
+ expect(movingRight.bottomX+movingLeft.bottomX).toBeCloseTo(360);
+ expect(movingRight.left+movingLeft.right).toBeCloseTo(360);
+});
+
+test.each([240,313,361,760])('fractional retargets and resize remain finite and bounded at width %i',width=>{
+ for(let head=0;head<=4;head+=.2)for(let tail=0;tail<=4;tail+=.2){
+  const path=fluidTabPath(width,head,tail);
+  expect(path).not.toMatch(/NaN|Infinity/);
+  const values=(path.match(/-?\d+(?:\.\d+)?/g)??[]).map(Number);
+  expect(values.every(value=>value>=0&&value<=Math.max(width,FLUID_TAB_HEIGHT))).toBe(true);
+ }
+});

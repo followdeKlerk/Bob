@@ -26,8 +26,9 @@ export function BottomTabs({selected,onSelect,onHeight}:{selected:string;onSelec
   cancelAnimation(position);cancelAnimation(shoulder);
   if(reduceMotion||!active||width<=0){position.value=index;shoulder.value=index;}
   else{
-   position.value=withSpring(index,{damping:23,stiffness:260,mass:.7,overshootClamping:true,reduceMotion:ReduceMotion.System});
-   shoulder.value=withTiming(index,{duration:320,easing:Easing.out(Easing.cubic),reduceMotion:ReduceMotion.System});
+   position.value=withSpring(index,{damping:20,stiffness:210,mass:.8,overshootClamping:true,reduceMotion:ReduceMotion.System});
+   // A slower neck lets the leading lobe pull a liquid tail from the old tab.
+   shoulder.value=withTiming(index,{duration:520,easing:Easing.inOut(Easing.cubic),reduceMotion:ReduceMotion.System});
   }
   return()=>{cancelAnimation(position);cancelAnimation(shoulder);};
  },[index,reduceMotion,active,width,position,shoulder]);
