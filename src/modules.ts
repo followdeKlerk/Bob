@@ -55,7 +55,7 @@ export async function selectModules(state:State,runtime:Runtime,chat:Conversatio
  const inspection=await runtime.harness.inspect(ctx);
  if(inspection.tasks.some(t=>t.record.conversationId===chat.id)||inspection.submissions.some(s=>s.conversationId===chat.id))throw new HttpError(409,'Stop and settle this conversation and its background work before changing modules');
  for(const module of moduleCatalog(state))if(ids.includes(module.id)&&module.requires.some(id=>!ids.includes(id)))throw new HttpError(409,'Required module is not selected');
- await chat.configure({extensions:ids.map(id=>runtime.modules[id])},ctx);
+ await chat.configure({extensions:await runtime.delegation.selectedExtensions(runtime.harness,chat,ids.map(id=>runtime.modules[id]))},ctx);
  return listModules(state,runtime,chat);
 }
 /** Local CLI only, with a paused runtime and exclusive owner lock. No package downloads or hot replacement. */

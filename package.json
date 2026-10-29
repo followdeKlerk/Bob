@@ -35,7 +35,8 @@
     "README.md",
     "AGENTS.md",
     "FEATURES.md",
-    "OPERATIONS.md"
+    "OPERATIONS.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "npm run build --workspaces && tsc",

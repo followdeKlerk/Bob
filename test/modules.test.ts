@@ -8,6 +8,7 @@ import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
 import {moduleIds,moduleCatalog,listModules,selectModules,changeModule,validateModuleManifest} from '../src/modules.js';
 import {Todos} from '../src/documents.js';
+import {DelegationSession,delegationSnapshotName} from '../src/delegation.js';
 import {serve} from '../src/server.js';
 
 test('separate module compatibility, native selection, removal/reinstall and document preservation',async()=>{
@@ -21,8 +22,13 @@ test('separate module compatibility, native selection, removal/reinstall and doc
   const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx),id=chat.id;
   await chat.commit(async tx=>{(await tx.doc(Todos,id)).items=[{text:'Retained across package removal',done:false}];},ctx);
   await selectModules(state,runtime,chat,['resources']);
-  assert.deepEqual((await chat.agent(ctx)).extensions.map(e=>e.name),['bob.resources']);
-  assert.equal((await chat.agent(ctx)).tools.some(t=>t.name==='browser'),false);
+  const snapshot=(await runtime.harness.snapshot(DelegationSession,id,ctx))!;
+  const expectedExtensions=['bob.resources',delegationSnapshotName(snapshot.config!)];
+  // The internal wrapper retains this chat's routing schema; it grants no tools
+  // while subagents are deselected and must not revive any disabled module.
+  assert.deepEqual((await chat.agent(ctx)).extensions.map(e=>e.name),expectedExtensions);
+  assert.equal((await chat.agent(ctx)).tools.some(t=>['browser','subagent'].includes(t.name)),false);
+  assert.deepEqual((await listModules(state,runtime,chat)).filter(m=>m.selected).map(m=>m.id),['resources']);
   await assert.rejects(()=>selectModules(state,runtime,chat,['resources','resources']),/Duplicate/);
   await changeModule(state,runtime,'remove','web');
   assert.equal((await listModules(state,runtime)).find(m=>m.id==='web')?.installed,false);
@@ -34,7 +40,8 @@ test('separate module compatibility, native selection, removal/reinstall and doc
   await runtime.close();runtime=await openRuntime(state,undefined,undefined,{resume:false});
   assert.ok(runtime.registry.snapshot().extension('bob.web'));
   const restored=(await runtime.harness.conversation(id,ctx))!;
-  assert.deepEqual((await restored.agent(ctx)).extensions.map(e=>e.name),['bob.resources']);
+  assert.deepEqual((await restored.agent(ctx)).extensions.map(e=>e.name),expectedExtensions);
+  assert.equal((await restored.agent(ctx)).tools.some(t=>['browser','subagent'].includes(t.name)),false);
   const held=defineTask<null,{phase:'wait'},null>({name:'test.module-held',version:1,initial:()=>({phase:'wait'}),phases:{wait:async()=>{throw Error('Paused fixture must not execute');}}});
   await restored.commit(tx=>tx.createTask(held,null,{ownership:{kind:'conversation'}}),ctx);
   await assert.rejects(()=>changeModule(state,runtime,'remove','web'),/Unfinished/);

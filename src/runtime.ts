@@ -1,3 +1,6 @@
+import {withDelegationPeerPolicy} from './peer-policy.js';
+import {createDelegation} from './delegation.js';
+import {recoverDelegationCommands} from './delegation-command.js';
 import {createDiagnosticExtension} from './app-diagnostics.js';
 import {defineExtension} from '@earendil-works/pi-durable';
 import {sendFile} from './send-file.js';
@@ -22,7 +25,7 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import {CodingTools} from "@bob-local/coding";
-import {createResources} from "@bob-local/resources";
+import {createResources,createCorePromptReader} from "@bob-local/resources";
 import { State } from "./state.js";
 import {acquireOwner} from "./ownership.js";
 import { ChatMeta, Library, Todos, Questions } from "./documents.js";
@@ -50,12 +53,15 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   let closeMemory=async()=>{};
   let openedHarness:import('@earendil-works/pi-durable').Harness|undefined;
   try {
-    const models = testModels ?? createBackendModels(state);
+    const baseModels = testModels ?? createBackendModels(state);
     const registry = createRegistry();
     const memory=backendMemory(state);
     const web=createWebTools(state.get<string>("browserExecutable")??"/usr/bin/chromium");
     const interactive = createInteractive(state, testMcpTransport);
     let libraryId: ConversationId;
+    const corePrompt=createCorePromptReader(join(state.dir,'core-prompt.md'));
+    const delegation=createDelegation(state,baseModels,registry,()=>libraryId,()=>modules,corePrompt);
+    const models=delegation.models;
     const resources = createResources(()=>libraryId,async(source,input,context)=>{
       if(input.mode==='search')return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
       if(input.conversationId===undefined&&!input.cursor&&!input.query){const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'conversations',{...input,destinationBackendId:state.id,originConversationId:source});return {...result,readOnly:true};}
@@ -73,16 +79,16 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     },async(input,taskId,source,context)=>{
       const chat=await harness.conversation(source,context);if(!chat)throw Error('File conversation is unavailable');
       return sendFile(state,chat,taskId,input,context);
-    });
-    const peers=createPeerTools({list:()=>[{id:state.id,name:hostname(),local:true,allConversations:true,enabled:true},...listPeers(state).outbound],request:(id,action,request,signal)=>id===state.id
+    },corePrompt);
+    const peers=withDelegationPeerPolicy(createPeerTools({list:()=>[{id:state.id,name:hostname(),local:true,allConversations:true,enabled:true},...listPeers(state).outbound],request:(id,action,request,signal)=>id===state.id
       ?conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},action,{...request,destinationBackendId:state.id})
-      :requestPeer(state,id,action,request,signal)});
+      :requestPeer(state,id,action,request,signal)}));
     const custom=await loadCustomModules(state);disposeCustom=custom.dispose;
     const diagnostics=createDiagnosticExtension(state,async(id,context)=>(await harness.conversation(id as ConversationId,context))??undefined);
     // Host-composed custom extension: existing resources selections gain the tool,
     // without changing persisted module identities or any existing task definition.
     const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[]]});
-    const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:CodingTools,resources:diagnosticResources,subagents:SubagentTools,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
+    const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:CodingTools,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
     // An explicit owner-managed config provisions this newly bundled module once.
     if(memory.config.enabled&&!state.get<boolean>('hindsightProvisioned')){
       const selected=state.get<{installed:string[];defaults:string[]}>('modules');
@@ -105,6 +111,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
           await tx.doc(ChatMeta, c.id);
           await tx.doc(Todos, c.id);
           await tx.doc(Questions, c.id);
+          await delegation.created(tx,c);
         },
       },
       ctx
@@ -116,6 +123,9 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     await library.commit(async (tx) => {
       await tx.doc(Library, library.id);
     }, ctx);
+    // Reinstall persisted, immutable schema/provider aliases before any durable task resumes.
+    await delegation.restore(harness);
+    await recoverDelegationCommands(state,harness,delegation);
     if(options.resume!==false&&registry.snapshot().extension(memory.extension.name)){
       const attached=await memory.attach(harness,storage,state.id,{selectExisting:true});closeMemory=attached.close;
     }
@@ -124,6 +134,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       harness,
       library,
       interactive,
+      delegation,
       models,
       registry,
       modules,

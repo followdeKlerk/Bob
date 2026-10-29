@@ -6,7 +6,8 @@
   "exports": "./dist/index.js",
   "files": [
     "dist/*.js",
-    "dist/*.d.ts"
+    "dist/*.d.ts",
+    "core-prompt.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json"

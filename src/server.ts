@@ -1,3 +1,6 @@
+import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
+import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
+import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
 import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
 import {setTimeout as locationDelay} from 'node:timers/promises';
 import {bindLocationDevice,locationAvailability,pollLocations,pendingLocations,respondLocation} from './phone-location.js';
@@ -261,7 +264,7 @@ export async function serve(
           return send(
             res,
             200,
-            await h.snapshot(Library, runtime.library.id, ctx)
+            {...await h.snapshot(Library, runtime.library.id, ctx),commands:[delegationMenuCommand]}
           );
         if (req.method === "PUT") {
           const value = z
@@ -453,7 +456,19 @@ export async function serve(
             (tx) => tx.submissionByRequest(id, requestId),
             ctx
           );
-          if (existing) return send(res, 200, existing);
+          const title=conversationTitle(p.text);
+          const nameSession=async()=>{
+            if(!title)return;
+            await chat.commit(async tx=>{
+              const meta=await tx.doc(ChatMeta,id);
+              if(isPlaceholderTitle(meta.title))meta.title=title;
+            },ctx);
+          };
+          if (existing) {await nameSession();return send(res, 200, existing);}
+          // Authenticated owner commands are admitted without model authentication or inference.
+          const delegationCommand=await handleDelegationCommand(state,h,runtime.delegation,chat,p.text,requestId,p.requestId,p.questionId);
+          if(delegationCommand)return send(res,200,delegationCommand);
+
           const previousQuestion = (await h.snapshot(Questions, id, ctx))?.pending;
           if (p.questionId && previousQuestion?.id !== p.questionId)
             throw new HttpError(409, 'This question is no longer active. Your answer was not sent; reply to the current question instead.');
@@ -463,9 +478,7 @@ export async function serve(
               412,
               "Configure a provider credential and model; no inference was admitted"
             );
-          if (p.allowSubagents) await chat.commit(async tx => {
-            const meta = await tx.doc(ChatMeta, id); meta.subagentRequests = [...(meta.subagentRequests ?? []).filter(k => k !== requestId), requestId].slice(-100);
-          }, ctx);
+          await registerDelegationOwner(state,chat,{requestId,clientRequestId:p.requestId,deviceId:String(state.authenticate(token)!.id),allow:p.allowSubagents});
           await bindLocationDevice(chat,String(state.authenticate(token)!.id));
           const submission = await chat.submit(
             { type: "input", content: p.display ? `${p.text}
@@ -474,6 +487,7 @@ export async function serve(
               entry:{kind:'bob.user',data:{text:p.text,allowSubagents:p.allowSubagents,requestId:p.requestId}} },
             ctx
           );
+          await nameSession();
           if (previousQuestion) await chat.commit(async tx => {
             const questions = await tx.doc(Questions, id);
             if (questions.pending?.id === previousQuestion.id) delete questions.pending;
@@ -493,6 +507,7 @@ export async function serve(
         }
         if (action === "stop" && req.method === "POST") {
           const p = Stop.parse(await body(req));
+          await chat.commit(tx=>revokeDelegation(tx,id,'Owner stopped the conversation'),ctx);
           await chat.abort(ctx, { background: p.scope === "tree" });
           return send(res, 200, { status: "settled", scope: p.scope });
         }

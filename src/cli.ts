@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {describeDelegationBehavior,readDelegationBehavior,saveDelegationBehavior} from './delegation-behavior.js';
+import {describeDelegation,readDelegationConfig,saveDelegationConfig,setDelegationSecret} from './delegation-config.js';
 import { Command } from "commander";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -339,4 +341,30 @@ peers.command('grant <origin-backend-id>').requiredOption('--name <name>').requi
 });
 peers.command('connect <handoff-file>').requiredOption('--name <name>').option('--dev-loopback','Isolated loopback test only',false).action((file,o)=>{const s=state();try{console.log(JSON.stringify(connectPeer(s,resolve(file),o.name,o.devLoopback)));}finally{s.close();}});
 peers.command('revoke <id>').requiredOption('--direction <direction>','inbound or outbound').action((id,o)=>{if(!['inbound','outbound'].includes(o.direction))throw Error('Specify inbound or outbound');const s=state();try{console.log(JSON.stringify(revokePeer(s,id,o.direction)));}finally{s.close();}});
+const delegation=cli.command('delegation').description('Bob-native Advanced Delegation; validated settings apply to new chats');
+delegation.command('config').option('--show','Show configured mode/routes, never credentials').option('--set <file>','Merge a validated JSON configuration patch; - reads stdin').option('--mode <mode>','default, model_map or profile_routes').action(async o=>{
+ const s=state();try{
+  if(o.show&&(o.set||o.mode))throw Error('Use --show separately from edits');
+  if(!o.set&&!o.mode){console.log(describeDelegation(readDelegationConfig(s)));return;}
+  let patch:unknown={};
+  if(o.set){let input='';if(o.set==='-'){for await(const chunk of process.stdin){input+=chunk;if(input.length>500000)throw Error('Delegation configuration too large');}}else{if(statSync(resolve(o.set)).size>500000)throw Error('Delegation configuration too large');input=readFileSync(resolve(o.set),'utf8');}try{patch=JSON.parse(input);}catch{throw Error('Invalid delegation JSON; credential values must be supplied separately with delegation secret');}}
+  if(!patch||typeof patch!=='object'||Array.isArray(patch))throw Error('Delegation patch must be a JSON object');
+  if(o.mode)patch={...patch,mode:o.mode};
+  const saved=await saveDelegationConfig(s,createBackendModels(s),patch);console.log(describeDelegation(saved));console.log('Saved for new chats; live inference not verified. Existing chat schemas were not changed.');
+ }finally{s.close();}
+});
+delegation.command('behavior').description('Owner opt-in and deterministic helper bounds; off by default').option('--show','Show behavior and profile tool filters').option('--set <file>','Validated JSON patch; - reads stdin').option('--enabled <on|off>','Standing owner opt-in; never overrides allowSubagents:false').action(async o=>{
+ const s=state();try{
+  if(o.show&&(o.set||o.enabled))throw Error('Use --show separately from edits');
+  let patch:Record<string,unknown>={};
+  if(o.set){let input='';if(o.set==='-'){for await(const chunk of process.stdin){input+=chunk;if(input.length>50000)throw Error('Behavior configuration too large');}}else{if(statSync(resolve(o.set)).size>50000)throw Error('Behavior configuration too large');input=readFileSync(resolve(o.set),'utf8');}try{patch=JSON.parse(input);}catch{throw Error('Invalid behavior JSON');}if(!patch||typeof patch!=='object'||Array.isArray(patch))throw Error('Behavior patch must be an object');}
+  if(o.enabled){if(!['on','off'].includes(o.enabled))throw Error('Use --enabled on or off');patch.enabled=o.enabled==='on';}
+  const config=o.set||o.enabled?saveDelegationBehavior(s,patch).config:readDelegationBehavior(s);
+  console.log(describeDelegationBehavior(config));console.log(JSON.stringify({profileTools:config.profileTools}));
+ }finally{s.close();}
+});
+delegation.command('secret <name>').description('Store a dedicated profile/endpoint API key from stdin, never argv or configuration JSON').action(async name=>{
+ let key='';for await(const chunk of process.stdin){key+=chunk;if(key.length>10000)throw Error('Credential too long');}
+ const s=state();try{setDelegationSecret(s,name,key);console.log('Dedicated delegation credential stored; live inference not verified.');}finally{s.close();}
+});
 await cli.parseAsync();

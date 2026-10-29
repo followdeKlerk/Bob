@@ -1,3 +1,5 @@
+import {readCorePrompt} from './core-prompt.js';
+export {readCorePrompt,createCorePromptReader} from './core-prompt.js';
 import {defineDoc,defineExtension,defineTool,section,type ConversationId} from "@earendil-works/pi-durable";
 import {Type} from "@earendil-works/pi-ai";
 import {Library,Todos,Questions} from "@bob-local/core/documents";
@@ -8,7 +10,7 @@ export const QuestionChoices=defineDoc<{questionId?:string;options?:string[];mul
 export type LocalHistoryPort=(source:ConversationId,input:{conversationId?:number;cursor?:string;query?:string;limit?:number;mode?:'page'|'search'},context:Context)=>Promise<unknown>;
 export type MaintenancePort={describe:()=>string;request:(action:string,target:string,id:string,conversationId:number)=>unknown};
 export type NotesPort=(input:unknown,taskId:string,source:ConversationId,context:Context)=>Promise<unknown>;
-export function createResources(getLibraryId:()=>ConversationId,localHistory?:LocalHistoryPort,maintenance?:MaintenancePort,notes?:NotesPort,location?:NotesPort,sendFile?:NotesPort) {
+export function createResources(getLibraryId:()=>ConversationId,localHistory?:LocalHistoryPort,maintenance?:MaintenancePort,notes?:NotesPort,location?:NotesPort,sendFile?:NotesPort,corePrompt:()=>string=readCorePrompt) {
 return defineExtension({
       name: "bob.resources",
       sections: [
@@ -17,8 +19,7 @@ return defineExtension({
         ...(maintenance?[section("bob-self-update",()=>maintenance.describe())]:[]),
         section(
           "bob-policy",
-          () =>
-            "You are Bob. Create subagents ONLY when explicitly requested by the user. Tool and shell execution uses the backend OS account. Never claim unobserved outcomes."
+          () => corePrompt()
         ),
         section("bob-model-identity", input => `Configured model: ${input.agent.model?.provider??"unconfigured"}/${input.agent.model?.modelId??"unconfigured"}. Thinking effort: ${input.agent.thinkingLevel}. Use this actual configuration when asked which model you are; do not invent a different identity.`),
         section("bob-resources", async (input, context) => {
