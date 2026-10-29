@@ -51,6 +51,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  if(manifest.name!=='@bob-local/cli'||manifest.dependencies?.['@earendil-works/pi-durable']!=='1.4.0')throw Error('Native Durable package identity mismatch');
  release.cli=join(packageRoot,'dist/cli.js');
  stage('Checking installed package in a disposable state');
+ await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'setup','--cwd',dir],root,60000);
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'doctor'],root,60000);
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'module','list'],root,60000);
  if(sourceFingerprint(root)!==sourceHash)throw Error('Source changed during build; candidate not published. Finish editing and request a new build.');

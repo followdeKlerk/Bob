@@ -71,8 +71,10 @@ Use `node dist/cli.js --help` in the checkout or `bob --help` when installed. Al
 | Serve | `serve` defaults to loopback; remote `--host` must be a Tailscale IP with `--cert` and `--key` |
 | Pair a phone | `connect --endpoint https://<machine>.ts.net:<port>` (`pair` alias); single-use expiring QR invitation |
 | Manage device grants | `list`, `revoke <device>`; paired devices currently have broad backend conversation access |
-| Diagnose | `doctor`; reports identity/configuration/owner and Chromium presence, not successful inference/browser launch |
+| Diagnose | `doctor` inspects existing state without initialization; JSON checks with remediation hints. `doctor --check` exits 1 on configuration errors, 0 for warnings alone. No inference/browser launch or service-readiness test |
 | Unsupervised service setup | `service-install`, then explicit `start`/`stop`/`status`; see warning below |
+
+Doctor opens the control database in SQLite read-only mode and does not change configuration, migrate or repair it. This is not a filesystem-read-only guarantee: SQLite can create WAL/SHM sidecars, and the existing ownership probe opens the ownership database for an exclusive-lock check. It checks Node/platform, schema/identity, selected model and credential presence, working-folder access, executable Chromium and point-in-time runtime ownership. Both an owned (running) and available (offline) state are normal. It does not validate model availability, credential validity, TLS, phone reachability or optional integrations. Default doctor retains a successful exit for a report containing errors; use `--check` in scripts. Reports omit stored credential values but include local paths/model names; review before sharing.
 
 Bob uses explicitly configured credentials, not another application's auth files. API-key replacement supersedes subscription credentials for that provider. Never copy keys/tokens into documentation, command arguments, prompts or logs. Backups containing stored credentials must stay private.
 

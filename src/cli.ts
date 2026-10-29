@@ -15,11 +15,10 @@ import {moduleCatalog,moduleState,changeModule} from './modules.js';
 import {openRuntime,createBackendModels} from './runtime.js';
 import {importCustomModule} from './custom-modules.js';
 import {grantPeer,connectPeer,listPeers,revokePeer} from './peer-config.js';
-import {inspectOwner} from './ownership.js';
-import {migrateState,updateRelease,releaseVersion} from './update.js';
-import {controlSchema} from './control-migrations.js';
+import {diagnose} from './doctor.js';
+import {migrateState,updateRelease} from './update.js';
 import {migrateCustomModule} from './custom-migration.js';
-import {hasProviderCredential,setProviderKey} from './provider-auth.js';
+import {setProviderKey} from './provider-auth.js';
 const configPath = join(homedir(), ".config/bob/cli.json");
 const localConfig: { state?: string; endpoint?: string } = existsSync(configPath)
   ? JSON.parse(readFileSync(configPath, "utf8")) : {};
@@ -240,35 +239,14 @@ cli.command('login').description('Bob-owned ChatGPT subscription OAuth; no unrel
   console.log('Bob subscription login stored in this backend only; live inference not yet verified.');
  }finally{s.close();}
 });
-cli.command("doctor").action(() => {
-  const s = state();
-  const model=s.get<{provider:string;modelId:string}>('model');
-  const providerCredentials={openai:hasProviderCredential(s,'openai'),anthropic:hasProviderCredential(s,'anthropic')};
-  const browserExecutable=s.get<string>('browserExecutable')??'/usr/bin/chromium';
-  console.log(
-    JSON.stringify(
-      {
-        backendId: s.id,
-        node: process.version,
-        releaseVersion,
-        controlSchema:controlSchema(s),
-        platform: process.platform,
-        arch: process.arch,
-        durable: "1.4.0",
-        ownership: inspectOwner(s.dir),
-        providerCredentialPresent: model?.provider==='openai'?providerCredentials.openai:model?.provider==='anthropic'?providerCredentials.anthropic:false,
-        providerCredentials,
-        model,
-        browser: {executable:browserExecutable,present:existsSync(browserExecutable),note:'External local Chromium prerequisite; presence is not a successful launch test.'},
-        service: unitName(s),
-        tls: "Remote requires valid certificate and Tailscale binding; not automatically configured",
-      },
-      null,
-      2
-    )
-  );
-  s.close();
-});
+cli.command("doctor")
+ .description('Inspect existing local state without initializing it; JSON, no network or repairs')
+ .option('--check','Exit 1 for configuration errors (warnings alone exit 0)',false)
+ .action(o=>{
+  const report=diagnose(resolve(cli.opts().state));
+  console.log(JSON.stringify(report,null,2));
+  if(o.check&&report.status==='error')process.exitCode=1;
+ });
 cli.command("backup <destination>").action(async (path) => {
   const s = state();
   try {

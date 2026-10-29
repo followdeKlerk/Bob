@@ -48,6 +48,20 @@ You need an Android phone, a Linux x86_64 machine, a supported model provider an
 
 Follow [installation](INSTALL.md), or give your coding agent the [setup instructions](SETUP-AGENT.md). Those instructions ask it to inspect your machine, protect existing data and stop for authentication and installation approvals.
 
+## Command-line management
+
+Bob includes a small backend CLI for setup and administration. Use `bob` when installed, or `node dist/cli.js` from a built checkout. It manages the Linux backend, not the Android app.
+
+```sh
+bob --help
+bob --state /absolute/path/to/bob-state doctor
+bob --state /absolute/path/to/bob-state doctor --check
+```
+
+`doctor` prints a JSON report with actionable checks for the Node version, existing state/schema, model and credential presence, working folder, Chromium and runtime ownership. It does not initialize missing state, repair anything, contact providers or restart services. `--check` exits 1 on configuration errors; optional-browser warnings alone do not fail it. This is a local configuration check, **not proof that inference, phone connectivity or optional integrations work**. Reports omit stored credential values, but can contain local paths and model names; review them before sharing.
+
+Always specify the intended state directory: most other commands can initialize a new backend at the wrong path. Existing commands cover provider login, phone pairing, device revocation, backups and explicit module/MCP configuration. Start with `bob <command> --help`; see [CLI operations](OPERATIONS.md#cli-and-initial-configuration) for prerequisites and safety boundaries.
+
 ## Before connecting a machine
 
 **Agent tools run with the backend OS account's permissions.** A working folder is not a sandbox. Use an account and machine you are comfortable giving an agent access to.
