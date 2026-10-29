@@ -15,3 +15,13 @@ test('interactive host chrome matches the app without recoloring user-generated 
  const native=source('android/app/src/main/java/com/bobmobile/BobInteractive.kt');expect(native).toContain('setBackgroundColor(0xff000000.toInt())');expect(native).toContain('margin:0;background:#000000');
  expect(source('../interactive/host.ts')).toContain('border:0;background:#000000');
 });
+
+const tailwind=require('../tailwind.config');
+test('native and utility chrome use only black, white and grayscale tokens',()=>{
+ for(const color of [...Object.values(colors),...Object.values(tailwind.theme.extend.colors)] as string[]){
+  expect(color).toMatch(/^#[0-9a-f]{6}$/i);
+  expect(color.slice(1,3)).toBe(color.slice(3,5));expect(color.slice(3,5)).toBe(color.slice(5,7));
+ }
+ expect(tailwind.theme.extend.colors.primary).toBe(colors.accent);
+ expect(tailwind.theme.extend.colors['primary-foreground']).toBe(colors.onAccent);
+});

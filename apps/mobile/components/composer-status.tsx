@@ -29,7 +29,7 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
   const start=performance.now(),length=Array.from(label).length;
   const tick=()=>{
    if(stopped)return;
-   const next=typewriterFrame(performance.now()-start,length);
+   const next=typewriterFrame(performance.now()-start,length,Math.max(0,length-' . . .'.length));
    setFrame(previous=>previous.text===label&&previous.count===next.count&&previous.cursor===next.cursor?previous:{text:label,count:next.count,cursor:next.cursor});
    timer=setTimeout(tick,next.delay);
   };

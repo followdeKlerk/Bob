@@ -1,6 +1,6 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
+import {Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
 import {colors} from '../theme';
 import {EdgeFade} from '../components/edge-fade';
 import {SideDrawer} from '../components/side-drawer';
@@ -82,4 +82,27 @@ test('New chat uses the charcoal theme with light text and remains available in 
 
 test('drawer has a thin white right edge without changing its full-height scroll layout',()=>{
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style)).toMatchObject({borderRightWidth:1,borderRightColor:'#ffffff',height:'100%',overflow:'hidden'});
+});
+
+test('embedded Workstations is a full-width destination with pairing but no sessions',async()=>{
+ await act(async()=>tree.update(<SideDrawer embedded mode="workstations" visible onClose={close} navigation={[]} workspaces={[{id:'machine',label:'My machine',onPress:open}]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={<TextInput accessibilityLabel="Pair test"/>} onSessionAction={action}/>));
+ expect(tree.root.findAllByType(Modal)).toHaveLength(0);
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style).width).toBe('100%');
+ expect(button('My machine')).toBeDefined();expect(button('First')).toBeUndefined();expect(button('Search conversations')).toBeUndefined();expect(button('New conversation')).toBeUndefined();
+ act(()=>button('Connect backend').props.onPress());expect(tree.root.findByProps({accessibilityLabel:'Pair test'})).toBeDefined();
+});
+test('embedded Sessions preserves session actions and hides workstation/pairing controls',async()=>{
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="My machine" visible onClose={close} navigation={[]} workspaces={[{id:'machine',label:'My machine',onPress:open}]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ expect(tree.root.findAllByType(Modal)).toHaveLength(0);expect(button('First')).toBeDefined();expect(button('Connect backend')).toBeUndefined();expect(button('My machine')).toBeUndefined();expect(button('New conversation')).toBeDefined();
+ act(()=>button('First').props.onLongPress({nativeEvent:{pageY:350}}));expect(button('Rename')).toBeDefined();
+});
+
+test('Back closes embedded session controls before navigating away',async()=>{
+ let back!:()=>boolean;
+ jest.spyOn(Keyboard,'isVisible').mockReturnValue(false);
+ jest.spyOn(BackHandler,'addEventListener').mockImplementation((_name,listener)=>{back=listener as ()=>boolean;return{remove:jest.fn()};});
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ act(()=>button('First').props.onLongPress({nativeEvent:{pageY:350}}));
+ act(()=>button('Rename').props.onPress());expect(button('Save conversation name')).toBeDefined();
+ act(()=>expect(back()).toBe(true));expect(button('Save conversation name')).toBeUndefined();expect(button('First')).toBeDefined();expect(back()).toBe(false);
 });

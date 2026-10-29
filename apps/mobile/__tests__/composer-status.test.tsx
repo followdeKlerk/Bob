@@ -31,7 +31,9 @@ test('larger native status types without changing the full-label layout or acces
  act(()=>jest.advanceTimersByTime(1000));expect(visible(tree).length).toBeGreaterThan(0);expect(visible(tree)).not.toBe('Connected . . .');
  act(()=>jest.advanceTimersByTime(700));expect(visible(tree)).toBe('Connected . . .');
  expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Connected');expect(tree.root.findByProps({testID:'status-layout-reservation'}).props.children).toEqual(reserve.children);
- act(()=>jest.advanceTimersByTime(1200));expect(visible(tree)).toBe('');await act(async()=>tree.unmount());expectNoAnimationTimers();
+ act(()=>jest.advanceTimersByTime(1200));expect(visible(tree)).toBe('Connected');
+ act(()=>jest.advanceTimersByTime(200));expect(visible(tree)).toBe('Connected');
+ act(()=>jest.advanceTimersByTime(1600));expect(visible(tree)).toBe('Connected . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
 });
 test('a real status change restarts immediately without retaining letters from the previous label',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connected . . .');
@@ -61,4 +63,22 @@ test.each([
  ['',''],
 ])('status punctuation is spaced and never duplicated: %s',(input,expected)=>{
  expect(statusDisplayLabel(input)).toBe(expected);
+});
+
+test('return animation deletes only the three dots and preserves the complete status across every loop boundary',()=>{
+ const label=statusDisplayLabel('Bob is working'),length=Array.from(label).length,base=Array.from('Bob is working').length;
+ expect(label.slice(0,typewriterFrame(2440,length,base).count)).toBe('Bob is working . . .');
+ expect(label.slice(0,typewriterFrame(2580,length,base).count)).toBe('Bob is working . .');
+ expect(label.slice(0,typewriterFrame(2720,length,base).count)).toBe('Bob is working .');
+ expect(label.slice(0,typewriterFrame(2860,length,base).count)).toBe('Bob is working');
+ for(let time=2440;time<18000;time+=7)expect(typewriterFrame(time,length,base).count).toBeGreaterThanOrEqual(base);
+ expect(typewriterFrame(3000,length,base).count).toBe(base);
+ expect(typewriterFrame(4540,length,base).count).toBe(length);
+});
+
+test('rendered words never disappear during repeated dot-only cycles',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
+ act(()=>jest.advanceTimersByTime(1700));expect(visible(tree)).toBe('Connected . . .');
+ for(let step=0;step<140;step++){act(()=>jest.advanceTimersByTime(100));expect(visible(tree).startsWith('Connected')).toBe(true);}
+ await act(async()=>tree.unmount());expectNoAnimationTimers();
 });

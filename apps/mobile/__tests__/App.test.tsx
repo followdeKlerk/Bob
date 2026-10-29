@@ -1,7 +1,7 @@
-jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'}}));
+jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput} from 'react-native';
+import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {colors} from '../theme';
@@ -9,6 +9,8 @@ import {readOutbox} from '../outbox-storage';
 import {DraftInput} from '../components/draft-input';
 import {EdgeFade} from '../components/edge-fade';
 import {InlineSurface} from '../components/inline-surface';
+import {BottomTabs} from '../components/bottom-tabs';
+import {SettingsGroup} from '../components/section-ui';
 import {SideDrawer} from '../components/side-drawer';
 import App from '../App';
 // Native platform boundaries only; exercise Main's real hooks and navigation tree.
@@ -29,6 +31,9 @@ afterEach(()=>jest.restoreAllMocks());
 test('unpaired app mounts the real screen and history/navigation hooks without a blank screen',async()=>{
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const logo=tree.root.findByProps({accessibilityLabel:'Bob logo'});
+ expect(logo.type).toBe(Image);expect(logo.props.source).toEqual(require('../assets/bob-logo.png'));
+ expect(StyleSheet.flatten(logo.props.style)).toMatchObject({width:'100%',aspectRatio:1});
  act(()=>tree.root.findByProps({accessibilityLabel:'Paste pairing invitation'}).props.onPress());
  expect(tree.root.findAllByProps({accessibilityLabel:'Pairing invitation'}).length).toBeGreaterThan(0);
  await act(async()=>tree.unmount());
@@ -45,29 +50,38 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};NativeModules.BobInteractive={prepare:jest.fn(async()=> 'prepared-visual'),releasePrepared:jest.fn()};
- jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
-  const url=String(input);const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual-call',name:'render_visual',arguments:{title:'Solar system',html:'<p>Solar system</p>'}}]}]},{id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual-call',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Solar system. Open from the conversation’s interactive surfaces.`}]}]},{id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'This is a newer reply, after the illustration.'}]}]}]}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/library')?{instructions:'',templates:{},skills:{'minimal-skill-authoring':{description:'Author minimal skills',enabled:true}}}:url.endsWith('/models')?[]:url.endsWith('/configure')?{}:[];
+ let conversationConfiguration:{instructions:string|null;cwd:string}={instructions:null,cwd:'/workspace'};
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
+  const url=String(input);if(url.endsWith('/configure')&&options?.method==='PUT')conversationConfiguration={...conversationConfiguration,...JSON.parse(options.body)};const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual-call',name:'render_visual',arguments:{title:'Solar system',html:'<p>Solar system</p>'}}]}]},{id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual-call',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Solar system. Open from the conversation’s interactive surfaces.`}]}]},{id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'This is a newer reply, after the illustration.'}]}]}]}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/library')?{instructions:'',templates:{},skills:{'minimal-skill-authoring':{description:'Author minimal skills',enabled:true},bro:{description:'Simplify the last answer',enabled:true}},commands:[{name:'delegation',description:'Choose models or profiles for subagents.'}]}:url.endsWith('/models')?[]:url.endsWith('/configure')?conversationConfiguration:[];
   return {ok:true,status:200,json:async()=>data} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});expect(tree.root.findByType(DraftInput).props.compact).toBe(true);expect(StyleSheet.flatten(draft.props.style).height).toBe(48);
- act(()=>{draft.props.onChangeText('A retained draft while toggling the keyboard.');for(const callback of ime)callback({imeBottom:280});});expect(tree.root.findByType(DraftInput).props.compact).toBe(false);expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
+ act(()=>{draft.props.onChangeText('A retained draft while toggling the keyboard.');for(const callback of ime)callback({imeBottom:280});});expect(tree.root.findByType(DraftInput).props.compact).toBe(false);expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
  act(()=>draft.props.onContentSizeChange({nativeEvent:{contentSize:{height:126}}}));expect(StyleSheet.flatten(draft.props.style).height).toBe(126);
- act(()=>{for(const callback of ime)callback({imeBottom:0});});expect(tree.root.findByType(DraftInput).props.compact).toBe(true);expect(StyleSheet.flatten(draft.props.style).height).toBe(48);expect(draft.props.value).toContain('retained draft');
+ act(()=>{for(const callback of ime)callback({imeBottom:0});});expect(tree.root.findByType(DraftInput).props.compact).toBe(true);expect(StyleSheet.flatten(draft.props.style).height).toBe(48);expect(draft.props.value).toContain('retained draft');expect(tree.root.findByType(BottomTabs)).toBeDefined();
  // Slash suggestions are fetched through the active backend; selection only edits the draft.
  await act(async()=>{draft.props.onFocus();draft.props.onChangeText('/mini');});
  expect(tree.root.findByProps({testID:'skill-picker'})).toBeDefined();
  act(()=>tree.root.findByProps({accessibilityLabel:'Use skill minimal-skill-authoring'}).props.onPress());
  expect(draft.props.value).toBe('Use the skill "minimal-skill-authoring". ');
  expect(tree.root.findAllByProps({testID:'skill-picker'})).toHaveLength(0);
+ await act(async()=>draft.props.onChangeText('/bro'));
+ act(()=>tree.root.findByProps({accessibilityLabel:'Use skill bro'}).props.onPress());
+ expect(draft.props.value).toBe('Use the skill "bro". ');
+ await act(async()=>draft.props.onChangeText('/dele'));
+ act(()=>tree.root.findByProps({accessibilityLabel:'Insert command delegation'}).props.onPress());
+ expect(draft.props.value).toBe('/delegation ');
+ expect(tree.root.findAllByProps({testID:'skill-picker'})).toHaveLength(0);
+ expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
  expect((globalThis.fetch as jest.Mock).mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
  const composer=tree.root.findByProps({testID:'chat-composer'});expect(StyleSheet.flatten(composer.props.style).backgroundColor).toBe('transparent');expect(composer.findAllByType(EdgeFade)).toHaveLength(0);
  const controls=composer.findByProps({testID:'composer-controls'});expect(controls.findAllByType(TextInput)).toHaveLength(0);expect(controls.findByProps({accessibilityLabel:'Chat actions'})).toBeDefined();expect(controls.findByProps({accessibilityLabel:'Send message'})).toBeDefined();
  expect(StyleSheet.flatten(controls.findByProps({accessibilityLabel:'Send message'}).props.style).backgroundColor).toBe('transparent');
  expect(controls.findByProps({accessibilityLabel:'Send message'}).props.variant).toBe('ghost');
- const header=tree.root.findByProps({testID:'chat-header'});
- expect(header.findAllByProps({accessibilityLabel:'New conversation'})).toHaveLength(0);
- expect(header.findByProps({accessibilityLabel:'Open workspaces'})).toBeDefined();
+ expect(tree.root.findAllByProps({testID:'chat-header'})).toHaveLength(0);
+ expect(tree.root.findAllByProps({accessibilityLabel:'Select workstation'})).toHaveLength(0);
+ expect(tree.root.findByType(BottomTabs)).toBeDefined();
  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];expect(list).toBeDefined();
  expect(list.props.inverted).toBe(true);expect(list.props.initialScrollIndex).toBe(0);expect(list.props.data.map((entry:any)=>entry.id)).toEqual([3,1]);
  const latest=jest.spyOn(list.instance,'scrollToOffset').mockImplementation(()=>{});
@@ -94,15 +108,59 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  await act(async()=>{await new Promise<void>(resolve=>setTimeout(resolve,35));});scroll.mockClear();nativeEnd.mockClear();latest.mockClear();
  if(!readingEarlier)act(()=>list.props.onScroll({nativeEvent:{contentOffset:{y:0},contentSize:{height:2000},layoutMeasurement:{height:600}}}));
  if(readingEarlier){act(()=>{list.props.onScrollBeginDrag();list.props.onScroll(event);list.props.onMomentumScrollEnd(event);});expect(tree.root.findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();}
- for(const section of ['Prompts','Notes','Settings']){
-  act(()=>tree.root.findByProps({accessibilityLabel:'Open workspaces'}).props.onPress());
-  await act(async()=>{const drawer=tree.root.findByType(SideDrawer);if(section==='Settings')drawer.props.onSettings();else drawer.props.navigation.find((row:any)=>row.id===section).onPress();});
+ for(const section of ['Notes','Settings']){
+  act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+  const configurationReadsBefore=(globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET').length;
+  await act(async()=>tree.root.findByType(BottomTabs).props.onSelect(section));
   expect(tree.root.findByProps({testID:section==='Notes'?'notes-screen':'section-overlay'})).toBeDefined();expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');
   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
-  act(()=>tree.root.findByProps({accessibilityLabel:'Back to chat'}).props.onPress());
+  expect(tree.root.findAllByProps({accessibilityLabel:'Back to chat'})).toHaveLength(0);
+  if(section==='Settings'){
+   expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
+   expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
+   expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Conversation','Notifications','Voice','Location','App','Advanced']);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'})).toHaveLength(0);
+   const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
+   const fetchMock=globalThis.fetch as jest.Mock,normalFetch=fetchMock.getMockImplementation()!;
+   let releaseConfiguration!:()=>void;
+   const delayedConfiguration=new Promise<void>(resolve=>{releaseConfiguration=resolve;});
+   fetchMock.mockImplementation(async(url:any,options:any)=>{if(String(url).endsWith('/configure')&&options?.method==='GET')await delayedConfiguration;return normalFetch(url,options);});
+   act(()=>press('Instructions & folder'));
+   expect(tree.root.findAllByProps({testID:'conversation-settings-loading'}).length).toBeGreaterThan(0);
+   expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
+   const notifications=tree.root.findAll(node=>String(node.props.accessibilityLabel).startsWith('Last reply notifications:')&&typeof node.props.onPress==='function')[0];
+   expect(notifications.props.disabled).toBe(false);
+   act(()=>press('About notifications'));
+   expect(tree.root.findAll(node=>typeof node.props.children==='string'&&node.props.children.includes('Finished replies, questions')).length).toBeGreaterThan(0);
+   const pendingCalls=fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/configure')).length;
+   act(()=>tree.root.findByType(BottomTabs).props.onSelect('Settings'));
+   expect(fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/configure'))).toHaveLength(pendingCalls);
+   await act(async()=>releaseConfiguration());fetchMock.mockImplementation(normalFetch);
+   expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
+   act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('Concise replies'));
+   await act(async()=>press('Save conversation override'));
+   expect((globalThis.fetch as jest.Mock).mock.calls.some(([url,options])=>String(url).includes('/chats/7/configure')&&options?.method==='PUT'&&JSON.parse(options.body).instructions==='Concise replies')).toBe(true);
+   expect(conversationConfiguration.instructions).toBe('Concise replies');
+   expect(tree.root.findAll(node=>node.props.children==='Instructions saved.').length).toBeGreaterThan(0);
+   await act(async()=>press('Instructions & folder'));
+   expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
+  }
+  act(()=>tree.root.findByType(BottomTabs).props.onSelect('Chat'));
   expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('auto');expect(tree.root.findAllByProps({testID:'section-overlay'})).toHaveLength(0);
   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
  }
+ // Machine browsing is a distinct destination and selecting the current machine opens its sessions.
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Workstations'));
+ expect(tree.root.findByType(SideDrawer).props.mode).toBe('workstations');
+ act(()=>tree.root.findByType(SideDrawer).props.workspaces[0].onPress());
+ expect(tree.root.findByType(SideDrawer).props.mode).toBe('sessions');
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Chat'));
+ expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+ expect(draft.props.value).toBe('/delegation ');
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'rounded-app-surface'}).props.style)).toMatchObject({overflow:'hidden'});
  const historyCalls=()=> (globalThis.fetch as jest.Mock).mock.calls.filter(([url])=>String(url).includes('/history')).length;
  const before=historyCalls();
  for(let cycle=0;cycle<2;cycle++){
@@ -142,10 +200,10 @@ test('cold launch, session switches, and reopening from cache start with the new
  const first=check(7);expect(tree.root.findAllByProps({testID:'history-entry-7150'}).length).toBeGreaterThan(0);
  const userBubble=tree.root.findByProps({testID:'history-entry-7150'}).findAll(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.surface&&style?.borderRadius===20;})[0];const padding=StyleSheet.flatten(userBubble.props.style);expect(padding.paddingVertical).toBe(12);expect(padding.paddingHorizontal).toBe(16);
 expect(tree.root.findAllByProps({testID:'history-entry-7001'})).toHaveLength(0);
- act(()=>tree.root.findByProps({accessibilityLabel:'Open workspaces'}).props.onPress());await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
  const waiting=findList();expect(waiting).not.toBe(first);expect(waiting.props.inverted).toBe(true);expect(waiting.props.data).toHaveLength(0);expect(finishSecond).toBeDefined();
  await act(async()=>finishSecond!(response(pages.get(8))));check(8);
- act(()=>tree.root.findByProps({accessibilityLabel:'Open workspaces'}).props.onPress());await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='7').onPress());check(7);
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='7').onPress());check(7);
  await act(async()=>tree.unmount());holdCached=true;await act(async()=>{tree=Renderer.create(<App/>);});
  check(7);expect(finishCached).toBeDefined();expect(findList().props.data).toHaveLength(150);
  await act(async()=>finishCached!(response(pages.get(7))));check(7);await act(async()=>tree.unmount());
@@ -289,4 +347,63 @@ test('MCP app rows retain an accessible open control',async()=>{
  act(()=>tree.root.findByProps({accessibilityLabel:'Open app: Connected app'}).props.onPress());
  expect(open).toHaveBeenCalledTimes(1);expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
  await act(async()=>tree.unmount());
+});
+
+test('chat opening shows only a small spinner until restoring the draft makes typing safe',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
+ let restore!:(value:string)=>void;
+ const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((key:string)=>key===`draft:${backend.backendId}:7`?new Promise(resolve=>{restore=resolve;}):get(key));
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'New conversation'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  expect(tree.root.findByProps({testID:'chat-opening'}).props.accessibilityState.busy).toBe(true);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(false);
+  expect(tree.root.findAllByProps({testID:'connection-status'})).toHaveLength(0);
+  await act(async()=>restore('Retained draft'));
+  expect(tree.root.findAllByProps({testID:'chat-opening'})).toHaveLength(0);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props).toMatchObject({editable:true,value:'Retained draft'});
+  expect(tree.root.findAllByProps({testID:'connection-status'})).toHaveLength(0);
+ }finally{(AsyncStorage.getItem as jest.Mock).mockImplementation(get);if(tree)await act(async()=>tree.unmount());}
+});
+
+
+test('rapid A-to-B-to-A switching keeps the composer locked until the new draft read completes',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:38,versionName:'test'};
+ const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+ const reads=new Map<string,((value:string)=>void)[]>();let hold=false;
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((key:string)=>{
+  if(hold&&key.startsWith(`draft:${backend.backendId}:`))return new Promise(resolve=>{reads.set(key,[...(reads.get(key)??[]),resolve]);});
+  return get(key);
+ });
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),id=Number(/\/chats\/(\d+)/.exec(url)?.[1]??7);
+  const data=url.includes('/history')?{backendId:backend.backendId,conversationId:id,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'A'}},{id:8,meta:{title:'B'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(true);hold=true;
+  const choose=async(id:string)=>{
+   await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+   await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id===id).onPress());
+  };
+  await choose('8');await choose('7');
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(false);
+  await act(async()=>reads.get(`draft:${backend.backendId}:8`)![0]('Stale B draft'));
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(false);
+  await act(async()=>reads.get(`draft:${backend.backendId}:7`)![0]('Restored A draft'));
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props).toMatchObject({editable:true,value:'Restored A draft'});
+ }finally{(AsyncStorage.getItem as jest.Mock).mockImplementation(get);if(tree)await act(async()=>tree.unmount());}
 });

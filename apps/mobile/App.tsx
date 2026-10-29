@@ -9,11 +9,14 @@ import './global.css';
 import Animated from 'react-native-reanimated';
 import {Button as KitButton} from './components/ui/button';
 import {Text as KitText} from './components/ui/text';
-import {Menu, Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Users, Paperclip, X} from 'lucide-react-native';
+import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Users, Paperclip, X} from 'lucide-react-native';
 import {colors} from './theme';
 import {surfaceAnchors} from './surface-placement';
 import {InlineSurface} from './components/inline-surface';
-import {EdgeFade} from './components/edge-fade';
+import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
+import {SettingsGroup,SettingsRow,sectionStyles} from './components/section-ui';
+import {Bell,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
+import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {BuildCard} from './components/build-card';
 import {useBuildStatus} from './use-build-status';
@@ -24,7 +27,7 @@ import {QuestionCard,type Question} from './components/question-card';
 import {NotesScreen} from './components/notes-screen';
 import {DraftInput,composerTransition} from './components/draft-input';
 import {SkillPicker} from './components/skill-picker';
-import {skillQuery,skillRequest} from './skill-picker';
+import {skillQuery,pickerRequest} from './skill-picker';
 import {ComposerStatus} from './components/composer-status';
 import {useBackNavigation} from './use-back-navigation';
 import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
@@ -38,7 +41,6 @@ import {AttachmentThumbnail,type DraftAttachment} from './components/attachment-
 import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
-import {FileText,StickyNote,Blocks} from 'lucide-react-native';
 import {linkToolResults,type ToolMessage} from './tool-results';
 import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
@@ -55,6 +57,7 @@ import {
   PermissionsAndroid,
   Platform,
   FlatList,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -125,7 +128,7 @@ function Main() {
   const [actionsMore,setActionsMore]=useState(false);
   const [attachmentPicker,setAttachmentPicker]=useState<{scope:string;tab:'gallery'|'files';limit:number}>();
   const keyboardInset = useKeyboardInset();
-  const [headerHeight,setHeaderHeight]=useState(72),[composerHeight,setComposerHeight]=useState(84);
+  const [composerHeight,setComposerHeight]=useState(84);
   const [backends, setBackends] = useState<Backend[]>([]),
     [backend, setBackend] = useState<Backend>(),
     [chat, setChat] = useState<number>(),
@@ -152,6 +155,7 @@ function Main() {
     [templateName, setTemplateName] = useState(''),
     [templateText, setTemplateText] = useState(''),
     [chatInstructions, setChatInstructions] = useState(''),
+    [usesDefaultInstructions,setUsesDefaultInstructions]=useState(true),
     [workingDirectory, setWorkingDirectory] = useState(''),
     [todoText, setTodoText] = useState(''),
     [surfaces, setSurfaces] = useState<{backendId:string; value:ReturnType<typeof InteractiveSummary.parse>}[]>([]),
@@ -169,10 +173,11 @@ function Main() {
   const [outbox]=useState(()=>new MessageOutbox());
   const [outgoing,setOutgoing]=useState(outbox.items),[outboxError,setOutboxError]=useState<string>();
   useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
+  const [bottomBarHeight,setBottomBarHeight]=useState(60);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
-  const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-headerHeight-composerHeight-16));
+  const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-composerHeight-16-(keyboardInset<=0?bottomBarHeight:0)));
   const [draftAttachments,setDraftAttachments]=useState<Record<string,DraftAttachment[]>>({});
   useUpdateNotifications(backends);
   const build=useBuildStatus(backend);
@@ -183,6 +188,8 @@ function Main() {
     stream = useRef<SnapshotStream | null>(null),
     draftReady = useRef(false);
   const scope = backend && chat ? `${backend.backendId}:${chat}` : '';
+  const [draftLoadedScope,setDraftLoadedScope]=useState('');
+  const composerReady=!!scope&&draftLoadedScope===scope;
   useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,orbit,screen]);
   identity.current = scope;
   const [view,setView]=useScopedSnapshot<Snapshot>(scope),[childView,setChildView]=useScopedSnapshot<Snapshot>(`${scope}:child:${child}`);
@@ -207,6 +214,7 @@ function Main() {
     if(actions){setActions(false);return true;}
     if(drawer){setDrawer(false);return true;}
     if(orbit){setOrbit(false);return true;}
+    if(Keyboard.isVisible())return false;
     if(screen!=='Chat'){sectionRequest.current++;setSectionLoading(false);setScreen('Chat');return true;}
     return false;
   });
@@ -321,7 +329,7 @@ function Main() {
   },[]);
   useEffect(() => {
     if (!backend) return;
-    setLibrary(undefined); setModels([]); setScreen('Chat'); setSkillName(''); setSkillText(''); setApiKey(''); setModelId('');
+    setLibrary(undefined); setModels([]); setScreen(previous=>previous==='Workstations'||previous==='Sessions'?previous:'Chat'); setSkillName(''); setSkillText(''); setApiKey(''); setModelId('');
     setMcpConnections([]); setMcpId(''); setMcpEndpoint(''); setMcpTools(''); setMcpEnabled(false);
     setStatus('Connecting');
     const b=backend;let cancelled=false;setChats([]);setChatCursor(undefined);
@@ -342,10 +350,12 @@ function Main() {
     let cancelled=false,events:SnapshotStream|undefined,lastRaw:string|undefined;
     stream.current?.close();
     draftReady.current = false;
+    setDraftLoadedScope('');
     setView(undefined);
     setPending(undefined);
     setDraft('');setChild(undefined);setChildView(undefined);setOrbit(false);
     if (!backend || !chat) return;
+    setStatus('Connecting…');
     const current = scope,
       b = backend;
     void (async () => {
@@ -357,6 +367,7 @@ function Main() {
       if (cancelled||identity.current !== current) return;
       setDraft(saved ?? '');
       draftReady.current = true;
+      setDraftLoadedScope(current);
       if (cached) {
         try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(snapshot);setStatus('Cached • reconnecting');}}catch{}
       }
@@ -599,10 +610,22 @@ function Main() {
     if(identity.current!==target.scope)return;
     setModelChoice({model:observed.model,thinkingLevel:observed.thinkingLevel});setModelPickerTarget(undefined);
   }
+  function navigate(tab:BottomDestination){
+    if(screen===tab)return;
+    Keyboard.dismiss();setActions(false);setOrbit(false);setDrawer(false);
+    if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab));return;}
+    sectionRequest.current++;setSectionLoading(false);setScreen(tab);
+  }
+  useEffect(()=>{
+    if(screen!=='Sessions'||!backend)return;
+    const b=backend;let cancelled=false;
+    void request('chats','GET',undefined,b).then(result=>{if(cancelled||selectedBackend.current!==b.backendId)return;setChats(result.items);setChatCursor(result.next);void AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(result.items)).catch(()=>{});}).catch(()=>{});
+    return()=>{cancelled=true;};
+  },[screen,backend?.backendId]);
   async function openSection(name: string) {
     const selected = backend?.backendId;
     const current = scope;
-    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(true);
+    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name!=='Settings'&&name!=='Notes');
     setScreen(name);setDrawer(false);
     try{
     if(name==='Modules') {
@@ -620,19 +643,31 @@ function Main() {
       setLibrary(l);
       setInstructions(l.instructions);
     }
-    if (name === 'Settings') {
-      const [listed,configured] = await Promise.all([request('models'),chat?request(`chats/${chat}/configure`):Promise.resolve(undefined)]);
-      if (selectedBackend.current !== selected) return;
-      setModels(listed);
-      if (chat) {
-        if(!configured)return;
-        if (identity.current !== current) return;
-        setChatInstructions(configured.instructions ?? ''); setWorkingDirectory(configured.cwd);
-        setModelChoice({model:configured.model,thinkingLevel:configured.thinkingLevel});
-      }
-    }
     }catch(e){if(sectionRequest.current===ticket)setSectionError(String((e as Error).message??e));}
     finally{if(sectionRequest.current===ticket)setSectionLoading(false);}
+  }
+  async function loadConversationSettings():Promise<SavedConversationSettings>{
+    const b=backend,id=chat,current=scope,ticket=sectionRequest.current;
+    if(!b||!id||identity.current!==current)throw Error('Conversation changed. Reopen settings.');
+    const configured=await request(`chats/${id}/configure`,'GET',undefined,b);
+    if(identity.current!==current||sectionRequest.current!==ticket)throw Error('Conversation changed. Reopen settings.');
+    if(typeof configured?.cwd!=='string'||!(configured.instructions===null||typeof configured.instructions==='string'))throw Error('Could not load conversation settings. Try again.');
+    setChatInstructions(configured.instructions??'');setUsesDefaultInstructions(configured.instructions===null);setWorkingDirectory(configured.cwd);
+    return {instructions:configured.instructions,cwd:configured.cwd};
+  }
+  async function saveConversationSettings(change:ConversationChange):Promise<SavedConversationSettings>{
+    const b=backend,id=chat,current=scope,ticket=sectionRequest.current;
+    if(!b||!id||identity.current!==current)throw Error('Conversation changed. Reopen settings.');
+    await request(`chats/${id}/configure`,'PUT',change,b);
+    const observed=await request(`chats/${id}/configure`,'GET',undefined,b);
+    if(typeof observed?.cwd!=='string'||!(observed.instructions===null||typeof observed.instructions==='string'))throw Error('Save could not be confirmed. Reopen settings to check before retrying.');
+    if(('instructions' in change&&(observed.instructions??null)!==change.instructions)||('cwd' in change&&observed.cwd!==change.cwd))throw Error('Save could not be confirmed. Reopen settings to check before retrying.');
+    if(identity.current!==current)throw Error('Conversation changed. Reopen settings to check the save.');
+    if(sectionRequest.current!==ticket)return {instructions:observed.instructions,cwd:observed.cwd};
+    // Saving one field must not erase an unsaved edit in the other field.
+    if('instructions' in change){setChatInstructions(observed.instructions??'');setUsesDefaultInstructions(observed.instructions==null);}
+    if('cwd' in change)setWorkingDirectory(observed.cwd);
+    return {instructions:observed.instructions??null,cwd:observed.cwd??''};
   }
   async function changeMcp(method:'PUT'|'DELETE',value:unknown) {
     const b=backend;if(!b)throw Error('Select a backend');
@@ -706,15 +741,15 @@ function Main() {
         // offset zero instead of preserving an old cell and scrolling it back.
         maintainVisibleContentPosition={follow.following?undefined:{minIndexForVisible:0}}
         keyExtractor={transcriptKey}
-        contentContainerStyle={[styles.messages,!isChild&&{paddingTop:16,paddingBottom:headerHeight+44}]}
+        contentContainerStyle={[styles.messages,!isChild&&{paddingTop:16,paddingBottom:16}]}
         ListFooterComponent={<View style={{gap:12}}>
           {stored?.next&&<Button label={history.loading?'Loading history…':'Load earlier messages'} disabled={history.loading} onPress={()=>{follow.pause();run(history.load);}}/>}
           {!!history.error&&<View style={{gap:8}}><Text accessibilityLiveRegion="polite" style={styles.caption}>Couldn’t load stored history: {history.error}</Text><Button label="Retry loading history" disabled={history.loading} onPress={()=>run(history.refresh)}/></View>}
         </View>}
         ListEmptyComponent={linked.rawEntries.length?undefined:<View style={{paddingVertical:24,gap:12}}>
-          {!!emptyConversationMessage(history)&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{emptyConversationMessage(history)}</Text>}
+          {isChild&&!!emptyConversationMessage(history)&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{emptyConversationMessage(history)}</Text>}
         </View>}
-        scrollIndicatorInsets={!isChild?{top:headerHeight,bottom:0}:undefined}
+        scrollIndicatorInsets={!isChild?{top:0,bottom:0}:undefined}
 
         ListHeaderComponent={<View style={{gap:CHAT_CONTENT_GAP}} onLayout={event=>{if(!isChild)setVisualWidth(event.nativeEvent.layout.width);}}>
           {!isChild && !!surfaceError && <Text style={styles.caption}>{surfaceError}</Text>}
@@ -751,10 +786,8 @@ function Main() {
     <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle="light-content" />}
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.welcome} keyboardShouldPersistTaps="handled">
-        <View style={styles.welcomeArt} accessible={false}>
-          <Text style={styles.wordmark}>bob</Text>
-          <View style={styles.eyes}><View style={styles.eye}/><View style={styles.eye}/></View>
-          <Text style={styles.welcomeEyebrow}>YOUR MACHINE. YOUR AGENT.</Text>
+        <View style={styles.welcomeArt}>
+          <Image accessibilityLabel="Bob logo" accessibilityRole="image" source={require('./assets/bob-logo.png')} resizeMode="contain" style={styles.welcomeLogo}/>
         </View>
         <View style={styles.welcomeCopy}>
           <Text style={styles.welcomeTitle}>Your agents,{'\n'}anywhere.</Text>
@@ -765,21 +798,17 @@ function Main() {
           <Button label={welcomeHelp?'Where is the QR code? −':'Where is the QR code? +'} onPress={()=>setWelcomeHelp(!welcomeHelp)}/>
           {welcomeHelp&&<Text style={styles.welcomeSubtitle}>Run bob connect on your computer. Keep Tailscale connected on both devices, then scan the QR code.</Text>}
           <Button label={welcomeManual?'Hide manual pairing':'Paste pairing invitation'} onPress={()=>setWelcomeManual(!welcomeManual)}/>
-          {welcomeManual&&<><TextInput accessibilityLabel="Pairing invitation" style={styles.input} placeholder="Paste invitation" placeholderTextColor="#F2F0E9" value={pairing} onChangeText={setPairing} multiline autoCapitalize="none"/><Button label="Connect" disabled={!pairing.trim()} onPress={()=>run(()=>pair())}/></>}
+          {welcomeManual&&<><TextInput accessibilityLabel="Pairing invitation" style={styles.input} placeholder="Paste invitation" placeholderTextColor={colors.muted} value={pairing} onChangeText={setPairing} multiline autoCapitalize="none"/><Button label="Connect" disabled={!pairing.trim()} onPress={()=>run(()=>pair())}/></>}
           {status!=='Not paired'&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{status}</Text>}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
   return (
-    <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
-      <View style={[styles.content,{paddingBottom:Math.max(0,keyboardInset-insets.bottom)}]}>
+    <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={[styles.root,{backgroundColor:keyboardInset>0?colors.background:'#ffffff'}]}>
+      {/* BottomTabs draws the continuous rounded lower edge; rounding here would cut its neck. */}
+      <View testID="rounded-app-surface" style={[styles.content,{backgroundColor:colors.background,overflow:'hidden',paddingBottom:Math.max(0,keyboardInset-insets.bottom)}]}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle="light-content" />}
-      <View testID="chat-header" pointerEvents="box-none" onLayout={event=>setHeaderHeight(event.nativeEvent.layout.height)} style={[styles.header,{position:'absolute',top:0,left:0,right:0,zIndex:30}]}>
-        <EdgeFade edge="top" height={headerHeight+36}/>
-        <View style={{borderRadius:24,backgroundColor:colors.surface}}><IconButton icon={Menu} label="Open workspaces" onPress={()=>setDrawer(true)}/></View>
-        <View pointerEvents="none" style={{flex:1}}/>
-      </View>
       {/* Keep the same native list and viewport alive under section overlays.
           Unmounting here recreates FlatList at its initial offset on every return. */}
       <>
@@ -790,7 +819,7 @@ function Main() {
               <View style={styles.empty}>
                 <Text style={styles.hero}>A conversation that stays.</Text>
                 <Text style={styles.caption}>
-                  {backend?'Choose a conversation from Workspaces or start a new one.':'Pair your backend to begin. Your machine owns the work.'}
+                  {backend?'Choose a conversation from Sessions or start a new one.':'Pair your backend to begin. Your machine owns the work.'}
                 </Text>
                 {backend&&<BuildCard key={backend.backendId} backend={backend} state={build.state} error={build.error} focus={updatesTarget?.backendId===backend.backendId} onDismiss={()=>setUpdatesTarget(undefined)} onRefresh={build.refresh}/>}
                 {backend && (
@@ -814,7 +843,10 @@ function Main() {
             )}
           </View>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
+            {!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:((!!outboxError||/pair again|identity|authorization|offline|disconnect|interrupted|reconnecting/i.test(status)||busy||outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)||parentLinked.rawEntries.length>0)&&(
             <ComposerStatus animate={!outboxError&&!/pair again|identity|authorization/i.test(status)} text={outboxError?'Device storage issue • keep Bob open':/pair again|identity|authorization/i.test(status)?'Connection needs attention • pair again':/offline|disconnect|interrupted|reconnecting/i.test(status)?'Reconnecting…':/connecting|cached/i.test(status)?'Connecting…':outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)?'Sending • automatic retry':busy?'Bob is working':status==='Connected'?'Connected':chat?'Connecting…':'Select a conversation'}/>
+            ))}
+
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
               {attachments.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
                 {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={{uri:file.uri}} disabled={!!pending} onRemove={()=>{
@@ -823,10 +855,10 @@ function Main() {
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
               </ScrollView>}
-              <DraftInput scope={scope} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
-                maxHeight={Math.max(48,Math.min(260,windowSize.height-keyboardInset-insets.top-insets.bottom-headerHeight-48-48-40-(attachments.length?136:0)))}
-                leading={<IconButton icon={Plus} label="Chat actions" onPress={()=>{setActionsMore(false);setActions(true);}}/>}
-                trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!chat||(!showStop&&(!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
+              <DraftInput scope={scope} editable={composerReady} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
+                maxHeight={Math.max(48,Math.min(260,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
+                leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady} onPress={()=>{setActionsMore(false);setActions(true);}}/>}
+                trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||(!showStop&&(!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
               />
             </Animated.View>
           </Animated.View>
@@ -836,19 +868,19 @@ function Main() {
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
         maxHeight={skillPopupHeight}
         onDismiss={()=>setSlashDismissed(true)}
-        onSelect={skill=>{setDraft(skillRequest(skill.name));setSlashDismissed(true);}}
+        onSelect={entry=>{setDraft(pickerRequest(entry));setSlashDismissed(true);}}
       />}
-      {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={headerHeight} onBack={()=>setScreen('Chat')}/>}
-      {screen!=='Chat'&&screen!=='Notes'&&(
-        <ScrollView testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:headerHeight+24}]}>
-          <Text style={styles.title}>{screen}</Text>
+      {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
+      {screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&(
+        <ScrollView testID="section-overlay" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:24,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
+          <Text accessibilityRole="header" style={sectionStyles.title}>{screen}</Text>
           {!!sectionError&&<View style={{gap:8}}><Text style={styles.caption}>{sectionError}</Text><Button label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
           {screen === 'Todos' && <View>
             {(view?.docs['bob.todos']?.items ?? []).map((item: any, index: number) => <View key={index}>
               <Button label={`${item.done ? '✓' : '○'} ${item.text}`} onPress={() => run(async () => { const items = [...view!.docs['bob.todos'].items]; items[index] = { ...item, done: !item.done }; await request(`chats/${chat}/todos`, 'PUT', { items }); })} />
               <Button label={`Remove task ${index + 1}`} onPress={() => run(async () => { const items = view!.docs['bob.todos'].items.filter((_: unknown, i: number) => i !== index); await request(`chats/${chat}/todos`, 'PUT', { items }); })} />
             </View>)}
-            <TextInput accessibilityLabel="New todo" style={styles.input} value={todoText} onChangeText={setTodoText} placeholder="Next task" placeholderTextColor="#F2F0E9" />
+            <TextInput accessibilityLabel="New todo" style={styles.input} value={todoText} onChangeText={setTodoText} placeholder="Next task" placeholderTextColor={colors.muted} />
             <Button label="Add todo" disabled={!chat || !todoText.trim()} onPress={() => run(async () => { await request(`chats/${chat}/todos`, 'PUT', { items: [...(view?.docs['bob.todos']?.items ?? []), { text: todoText, done: false }] }); setTodoText(''); })} />
           </View>}
           {screen === 'Prompts' && (
@@ -877,8 +909,8 @@ function Main() {
                 }
               />
               <Text style={styles.title}>Message templates</Text>
-              <TextInput accessibilityLabel="Template name" style={styles.input} value={templateName} onChangeText={setTemplateName} placeholder="Template name" placeholderTextColor="#F2F0E9" />
-              <TextInput accessibilityLabel="Template message" style={styles.input} multiline value={templateText} onChangeText={setTemplateText} placeholder="Reusable message; separate from system instructions" placeholderTextColor="#F2F0E9" />
+              <TextInput accessibilityLabel="Template name" style={styles.input} value={templateName} onChangeText={setTemplateName} placeholder="Template name" placeholderTextColor={colors.muted} />
+              <TextInput accessibilityLabel="Template message" style={styles.input} multiline value={templateText} onChangeText={setTemplateText} placeholder="Reusable message; separate from system instructions" placeholderTextColor={colors.muted} />
               <Button label="Save message template" onPress={() => run(async () => {
                 if (!templateName.trim()) throw Error('Name the template');
                 await request('library', 'PUT', { instructions: library.instructions, templates: { ...library.templates, [templateName]: templateText } });
@@ -912,9 +944,9 @@ function Main() {
               <Button label={`${c.enabled?'Enabled':'Disabled'} MCP ${c.id}`} onPress={()=>{setMcpId(c.id);setMcpEndpoint(c.endpoint);setMcpTools(c.allowedTools.join(','));setMcpEnabled(c.enabled);}} />
               <Button label={`Remove MCP ${c.id}`} onPress={()=>Alert.alert('Remove connection?',`Remove ${c.id} and its stored backend credential? Existing app capabilities will no longer work.`,[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>run(()=>changeMcp('DELETE',{id:c.id}))}])} />
             </View>)}
-            <TextInput accessibilityLabel="MCP connection ID" style={styles.input} value={mcpId} onChangeText={setMcpId} placeholder="server-id" placeholderTextColor="#F2F0E9" />
-            <TextInput accessibilityLabel="MCP endpoint" style={styles.input} value={mcpEndpoint} onChangeText={setMcpEndpoint} placeholder="https://server.example/mcp" placeholderTextColor="#F2F0E9" autoCapitalize="none" />
-            <TextInput accessibilityLabel="Allowed MCP tools" style={styles.input} value={mcpTools} onChangeText={setMcpTools} placeholder="exact-tool-name,another-tool" placeholderTextColor="#F2F0E9" autoCapitalize="none" />
+            <TextInput accessibilityLabel="MCP connection ID" style={styles.input} value={mcpId} onChangeText={setMcpId} placeholder="server-id" placeholderTextColor={colors.muted} />
+            <TextInput accessibilityLabel="MCP endpoint" style={styles.input} value={mcpEndpoint} onChangeText={setMcpEndpoint} placeholder="https://server.example/mcp" placeholderTextColor={colors.muted} autoCapitalize="none" />
+            <TextInput accessibilityLabel="Allowed MCP tools" style={styles.input} value={mcpTools} onChangeText={setMcpTools} placeholder="exact-tool-name,another-tool" placeholderTextColor={colors.muted} autoCapitalize="none" />
             <Button label={mcpEnabled?'Connection enabled — disable':'Connection disabled — enable'} onPress={()=>setMcpEnabled(!mcpEnabled)} />
             <Button label={mcpEnabled?'Grant listed MCP tools and save':'Save disabled MCP connection'} onPress={()=>run(()=>changeMcp('PUT',McpConnection.parse({id:mcpId,endpoint:mcpEndpoint,allowedTools:mcpTools.split(',').map(t=>t.trim()),enabled:mcpEnabled})))} />
             <Text style={styles.caption}>Visuals reopen with their saved HTML and latest saved data; MCP Apps show the original result snapshot. Reopening never reruns the original tool. Local inputs are transient; saved data and authorized tool results remain in conversation history.</Text>
@@ -944,7 +976,7 @@ function Main() {
                 value={skillName}
                 onChangeText={setSkillName}
                 placeholder="skill-name"
-                placeholderTextColor="#F2F0E9"
+                placeholderTextColor={colors.muted}
               />
               <TextInput
                 style={styles.input}
@@ -953,7 +985,7 @@ function Main() {
                 onChangeText={setSkillText}
                 multiline
                 placeholder="Markdown"
-                placeholderTextColor="#F2F0E9"
+                placeholderTextColor={colors.muted}
               />
               <Button
                 label="Save skill"
@@ -969,7 +1001,7 @@ function Main() {
                   })
                 }
               />
-              <TextInput accessibilityLabel="Skill description" style={styles.input} value={skillDescription} onChangeText={setSkillDescription} placeholder="Skill description" placeholderTextColor="#F2F0E9" />
+              <TextInput accessibilityLabel="Skill description" style={styles.input} value={skillDescription} onChangeText={setSkillDescription} placeholder="Skill description" placeholderTextColor={colors.muted} />
               <Button label={skillEnabled ? 'Skill enabled ✓' : 'Skill disabled'} onPress={() => setSkillEnabled(!skillEnabled)} />
               <Button label="Import Markdown skill (review before saving)" onPress={() => run(async () => setSkillText(await NativeModules.BobFiles.importMarkdown()))} />
               <Button label="Delete selected skill" disabled={!skillName} onPress={() => run(async () => { await request(`skills/${encodeURIComponent(skillName)}`, 'DELETE'); setLibrary(await request('library')); setSkillName(''); setSkillText(''); })} />
@@ -977,40 +1009,40 @@ function Main() {
           )}
           {screen === 'Settings' && (
             <>
-              {networkErrors.map((error,index)=><Text key={index} style={styles.caption}>{error}</Text>)}
-              <Button label="Build & install" disabled={!backend} onPress={()=>setUpdatesTarget(backend)}/>
-              <Button label="Model & thinking" disabled={!chat} onPress={()=>run(openModelPicker)}/>
-              {chat && <View>
-                <Text style={styles.caption}>Conversation instructions override the backend default. Skills remain separate.</Text>
-                <TextInput accessibilityLabel="Conversation instructions" multiline style={styles.input} value={chatInstructions} onChangeText={setChatInstructions} />
-                <Button label="Save conversation override" onPress={() => run(async () => { await request(`chats/${chat}/configure`, 'PUT', { instructions: chatInstructions }); })} />
-                <Button label="Use backend default instructions" onPress={() => run(async () => { await request(`chats/${chat}/configure`, 'PUT', { instructions: null }); setChatInstructions(''); })} />
-                <TextInput accessibilityLabel="Backend working directory" style={styles.input} value={workingDirectory} onChangeText={setWorkingDirectory} />
-                <Button label="Set conversation folder" onPress={() => run(async () => { await request(`chats/${chat}/configure`, 'PUT', { cwd: workingDirectory }); })} />
-              </View>}
-              <Button label={notifyEnabled ? 'Last reply notifications: on' : 'Last reply notifications: off'} onPress={() => run(async () => {
-                if (!notifyEnabled && Number(Platform.Version) >= 33) {
-                  const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-                  if (permission !== PermissionsAndroid.RESULTS.GRANTED) throw Error('Notification permission was not granted');
-                }
-                const enabled = !notifyEnabled;
-                NativeModules.BobNotifications.setReplyNotifications?.(enabled);
-                await AsyncStorage.setItem('notification-opt-in', String(enabled)); setNotifyEnabled(enabled);
-              })} />
-              <Text style={styles.title}>Read aloud</Text>
-              <Text style={styles.caption}>Tap the speaker beside an assistant reply to read it aloud; tap Stop reading to stop. Uses your Android speech engine and an installed offline-capable voice. The engine receives the selected text. Voice language and speed are configured in Android. Playback stops when you leave the chat or background Bob; no automatic speech or audio export.</Text>
-              <Button label="Android text-to-speech settings" onPress={()=>run(openSpeechSettings)}/>
-              <Text style={styles.title}>Automatic location</Text>
-              <Text style={styles.caption}>For location-related questions, Bob requests a fresh fix from this phone automatically—even when locked or backgrounded while its visible Android service is running. No continuous journey tracking. Requested coordinates go to this backend and its model and remain in chat tool history.</Text>
-              <Button label={phoneLocation.busy?'Updating location…':phoneLocation.enabled?'Disable automatic location':'Enable automatic location'} disabled={!backend||!phoneLocation.supported||phoneLocation.busy} onPress={()=>run(phoneLocation.toggle)}/>
-              <Text style={styles.caption}>{phoneLocation.error||(phoneLocation.enabled?'Enabled for this backend. Android may stop the service; reopen Bob to reconnect. For best results allow precise location and unrestricted battery use.':'Off. Enable once and grant Android permissions; no manual sharing for each question.')}</Text>
-              <Button label="Android location settings" onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('location');})}/>
-              <Button label="Android app and battery settings" onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('app');})}/>
-              <Button label="Copy app diagnostics" onPress={()=>run(async()=>{await copyAppDiagnostics();Alert.alert('Diagnostics copied','Paste the report into this chat. It contains lifecycle/exit metadata, bounded memory and streaming measurements, and sanitized JavaScript code positions. No exception messages, chat text, credentials, URLs, or location.');})}/>
-              <Text style={styles.caption}>If Bob closes unexpectedly, reopen it and copy this on-phone report. Bounded crash records include exception types and code positions, not error messages or chat content. Memory/workload samples are recorded about every 10 seconds while Bob is open. Diagnostics stay on this phone until you choose to share them.</Text>
-              <Button label="Android notification settings" onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
-              <Text style={styles.caption}>Notifications show your last finished reply, questions needing your answer, and updates ready to install—not tool activity or progress. Reply previews are silent by default; change sounds in Android notification settings. Android schedules background checks and may delay delivery; force-stop pauses them. No generic monitoring indicator is used. Automatic location has its own visible service notification.</Text>
-              <Disclosure label="Provider connection · advanced">
+              {networkErrors.map((error,index)=><Text key={index} accessibilityLiveRegion="polite" style={styles.caption}>{error}</Text>)}
+              <SettingsGroup title="Conversation">
+                {chat&&<ConversationSettings key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={setChatInstructions} onFolderChange={setWorkingDirectory} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
+                {!chat&&<Text style={[styles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
+              </SettingsGroup>
+              <SettingsGroup title="Notifications">
+                <SettingsRow title="Reply notifications" label={notifyEnabled?'Last reply notifications: on':'Last reply notifications: off'} checked={notifyEnabled} icon={Bell} onPress={()=>run(async()=>{
+                  if(!notifyEnabled&&Number(Platform.Version)>=33){const permission=await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);if(permission!==PermissionsAndroid.RESULTS.GRANTED)throw Error('Notification permission was not granted');}
+                  const enabled=!notifyEnabled;NativeModules.BobNotifications.setReplyNotifications?.(enabled);await AsyncStorage.setItem('notification-opt-in',String(enabled));setNotifyEnabled(enabled);
+                })}/>
+                <SettingsRow title="Notification settings" label="Android notification settings" icon={Bell} onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
+                <Disclosure label="About notifications"><Text style={styles.caption}>Finished replies, questions and ready-to-install updates—not tool progress. Reply previews are silent by default. Android schedules background checks and may delay delivery; force-stop pauses them. Automatic location has its own visible service notification.</Text></Disclosure>
+              </SettingsGroup>
+              <SettingsGroup title="Voice">
+                <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
+                <Disclosure label="About read aloud"><Text style={styles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>
+              </SettingsGroup>
+              <SettingsGroup title="Location">
+                <SettingsRow title="Automatic location" label={phoneLocation.busy?'Updating location…':phoneLocation.enabled?'Disable automatic location':'Enable automatic location'} checked={phoneLocation.enabled} loading={phoneLocation.busy} icon={MapPin} disabled={!backend||!phoneLocation.supported||phoneLocation.busy} onPress={()=>run(phoneLocation.toggle)}/>
+                {!!phoneLocation.error&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{phoneLocation.error}</Text>}
+                <Disclosure label="Location privacy & permissions">
+                  <Text style={styles.caption}>Fresh fixes for location questions, not continuous tracking. Coordinates go to your backend and model and stay in chat history. Background or locked-phone fixes need the visible Android service. Precise location and unrestricted battery use improve availability; reopen Bob if Android stops the service.</Text>
+                  <SettingsRow title="Location permissions" label="Android location settings" icon={MapPin} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('location');})}/>
+                  <SettingsRow title="App & battery" label="Android app and battery settings" icon={SlidersHorizontal} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('app');})}/>
+                </Disclosure>
+              </SettingsGroup>
+              <SettingsGroup title="App">
+                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setUpdatesTarget(backend);navigate('Chat');}}/>
+                <SettingsRow title="Copy app diagnostics" icon={Stethoscope} onPress={()=>run(async()=>{await copyAppDiagnostics();Alert.alert('Diagnostics copied','Paste the report into this chat. It contains sanitized lifecycle, exit and workload metadata, not chat text, credentials, URLs or location.');})}/>
+                <Disclosure label="About diagnostics"><Text style={styles.caption}>If Bob closes unexpectedly, reopen it and copy this report. It includes bounded crash types and code positions, not exception messages or chat content. Workload samples are recorded about every 10 seconds while open. Reports stay on this phone until you share them.</Text></Disclosure>
+              </SettingsGroup>
+              <SettingsGroup title="Advanced">
+                <SettingsRow title="Advanced modules" icon={Blocks} disabled={!chat} onPress={()=>run(()=>openSection('Modules'))}/>
+              <Disclosure label="Provider connection">
               <Text style={styles.caption}>
                 Credentials are sent only to the selected paired backend, never
                 as chat messages.
@@ -1022,7 +1054,7 @@ function Main() {
                 value={apiKey}
                 onChangeText={setApiKey}
                 placeholder={`${providerName} API key`}
-                placeholderTextColor="#F2F0E9"
+                placeholderTextColor={colors.muted}
               />
               <TextInput
                 style={styles.input}
@@ -1030,7 +1062,7 @@ function Main() {
                 value={modelId}
                 onChangeText={setModelId}
                 placeholder="Model ID"
-                placeholderTextColor="#F2F0E9"
+                placeholderTextColor={colors.muted}
               />
               <Button
                 label="Configure backend provider"
@@ -1047,9 +1079,10 @@ function Main() {
               />
               <View style={styles.row}>{['openai','anthropic'].map(p=><Button key={p} label={p===providerName?`${p} ✓`:p} onPress={()=>setProviderName(p)}/>)}</View>
               </Disclosure>
+              </SettingsGroup>
             </>
           )}
-          <Button label="Back to chat" onPress={() => {sectionRequest.current++;setSectionLoading(false);setScreen('Chat');}} />
+          {screen!=='Settings'&&<Button label="Back to settings" onPress={()=>run(()=>openSection('Settings'))}/> }
         </ScrollView>
       )}
       <Modal visible={actions} transparent animationType="none" onRequestClose={()=>setActions(false)}>
@@ -1079,18 +1112,15 @@ function Main() {
         const current=attachmentPicker.scope;
         setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),...files]}));setAttachmentPicker(undefined);
       }}/>}
-      {sectionLoading&&screen!=='Chat'&&<View style={[StyleSheet.absoluteFill,{backgroundColor:colors.background+'DD',alignItems:'center',justifyContent:'center',zIndex:40,gap:12}]}><ActivityIndicator color={colors.accent}/><Text style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>}
+      {sectionLoading&&screen!=='Chat'&&screen!=='Settings'&&screen!=='Notes'&&<View testID="section-loading-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background+'DD',alignItems:'center',justifyContent:'center',zIndex:40,gap:12}]}><ActivityIndicator color={colors.accent}/><Text style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>}
             <ModelPicker loading={modelLoading} visible={!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>setModelPickerTarget(undefined)} onApply={applyModelChoice}/>
-      {drawer&&<SideDrawer visible={drawer} onClose={()=>setDrawer(false)} disabled={!backend}
+      {(screen==='Sessions'||screen==='Workstations')&&<SideDrawer key={screen+':'+(backend?.backendId??'')} embedded mode={screen==='Workstations'?'workstations':'sessions'} workspaceLabel={backend?.name} visible onClose={()=>setScreen('Chat')} disabled={!backend}
         onNew={()=>run(async()=>{await newChat();setDrawer(false);setScreen('Chat');})}
         onSettings={()=>run(()=>openSection('Settings'))}
-        navigation={[
-          {id:'Notes',icon:StickyNote},{id:'Prompts',icon:FileText},
-          {id:'Modules',icon:Blocks},
-        ].map(item=>({...item,label:item.id,disabled:!backend||(item.id==='Modules'&&!chat),onPress:()=>run(()=>openSection(item.id))}))}
+        navigation={[]}
         workspaces={backends.map(b=>({id:b.backendId,label:backends.filter(item=>item.name===b.name).length>1?`${b.name} · ${b.backendId.slice(0,8)}`:b.name,selected:b.backendId===backend?.backendId,onPress:()=>{
           if(b.backendId!==backend?.backendId){setChats([]);setChatCursor(undefined);setBackend(b);setChat(undefined);}
-          setScreen('Chat');setDrawer(false);
+          setScreen('Sessions');setDrawer(false);
         }}))}
         onSessionAction={sessionAction}
         conversations={chats.map(c=>({id:String(c.id),label:c.meta?.title||'Conversation',selected:c.id===chat,pinned:c.meta?.pinned,archived:c.meta?.archived,trashed:c.meta?.trashed,onPress:()=>{setChat(c.id);setScreen('Chat');setDrawer(false);}}))}
@@ -1137,6 +1167,7 @@ function Main() {
         </View>
       </Modal>
       </View>
+      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight}/>}
     </SafeAreaView>
   );
 }
@@ -1149,11 +1180,8 @@ export default function App() {
 }
 const styles = StyleSheet.create({
   welcome: {flexGrow:1,padding:24,gap:32,justifyContent:'space-between'},
-  welcomeArt:{minHeight:280,flex:1,borderRadius:36,backgroundColor:colors.surface,alignItems:'center',justifyContent:'center',padding:24},
-  wordmark:{color:colors.foreground,fontSize:96,fontWeight:'800',letterSpacing:-7},
-  eyes:{flexDirection:'row',gap:20,marginTop:8,marginBottom:36},
-  eye:{width:13,height:22,borderRadius:7,backgroundColor:colors.accent},
-  welcomeEyebrow:{color:colors.muted,fontSize:11,letterSpacing:2},
+  welcomeArt:{minHeight:240,flex:1,alignItems:'center',justifyContent:'center'},
+  welcomeLogo:{width:'100%',maxWidth:400,aspectRatio:1},
   welcomeCopy:{gap:12,paddingBottom:12},
   welcomeTitle:{color:colors.foreground,fontSize:38,lineHeight:44,fontWeight:'600',letterSpacing:-1},
   welcomeSubtitle:{color:colors.muted,fontSize:16,lineHeight:24},
@@ -1162,7 +1190,6 @@ const styles = StyleSheet.create({
   root:{flex:1,backgroundColor:colors.background},
   content:{flex:1,width:'100%',maxWidth:760,alignSelf:'center'},
   readingColumn:{width:'100%',maxWidth:760,alignSelf:'center',gap:10},
-  header:{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:12,gap:8},
   title:{color:colors.foreground,fontSize:23,fontWeight:'600'},
   chatTitle:{color:colors.muted,fontSize:14,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
   caption:{color:colors.muted,fontSize:13,lineHeight:20},
