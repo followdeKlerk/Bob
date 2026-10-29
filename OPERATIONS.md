@@ -49,6 +49,8 @@ cd android
 ./gradlew testDebugUnitTest
 ```
 
+Android project settings expire Gradle and Kotlin workers after two idle minutes (`apps/mobile/android/gradle.properties`). Active compilation is not interrupted. Do not leave test emulators running after verification; stop only the identified temporary emulator, never the paired phone or serving backend.
+
 For inline-visual regressions, `test/interactive.test.ts` also runs `test/inline-visual-lifecycle.ts` against the real host/opaque iframe in Chromium, sequentially with the existing browser test. With an already-running x86_64 Android emulator and Java/SDK configured, run `bash apps/mobile/android/inline-webview-test/run-emulator.sh emulator-SERIAL`. This opt-in harness compiles the production `BobInteractive.kt` and assets into a **separate test-only package**, never over Bob; it checks actual WebView painting/taps, natural sizing and grow/shrink, timeout/resize-ack fallback, overflow, and live data over a test-only authenticated loopback HTTP fixture (including input preservation, hidden-view pause and reconnect). It refuses physical phones. The harness also exercises the production inline React Native row in real Fabric/Hermes scroll and inverted-list views; only credential/icon chrome adapters are mocked. `App.test.tsx` separately covers history placement. Neither replaces a final installed-owner-phone chat test. Debug builds log only fallback reason and native viewport under `BobInline`, not HTML or bridge tokens.
 
 These commands do not deploy. `build:interactive` generates the mobile host asset. Native tests and release compilation require Android SDK/Java; signed installation additionally requires the existing signing identity. Use `self_update` for production releases, not `npm start`, Metro or another development server. The supervised release path runs backend build/tests and, for Android targets, interactive/mobile compilation and signed release checks; do not assume it also ran every mobile Jest/native test.
@@ -96,6 +98,8 @@ Ordinary MCP calls are composed at the same host boundary in `src/mcp-tools.ts`,
 
 `backup <new-directory>` / `export <new-directory>` require a stopped runtime/exclusive ownership. They include Durable history/documents/tasks, control configuration/credentials/grants, uploaded artifact bytes and imported custom-module packages, with checksums. This is **sensitive full-state export**, not a redacted chat export.
 
+The editable `core-prompt.md` in the state directory is independent of release packages; preserve it separately when backing up (the fixed backup/export manifest does not include it).
+
 Excluded: Android caches/drafts, external working folders, external TLS/signing material, systemd units, browser binaries, bundled runtime dependencies and external Hindsight data. Reinstall the exact compatible Bob package and provision excluded prerequisites separately.
 
 `restore <backup> <new-state-directory>` verifies hashes/integrity and refuses an existing destination. It restores identity and grants too. Never activate both original and restored copies. Disaster recovery can lose work after the backup; require explicit acceptance of that loss. **Do not restore an older backup merely to roll code back.** The maintenance pre-activation snapshot is not a substitute for this full recovery/export procedure.
@@ -128,6 +132,64 @@ Required package contract:
 
 Explicit schema migration uses `bob module migrate` with `--replace`, `--backup`, `--destination` and `--trust-backend-code`. The replacement exports `bobMigration={from,to,documents:[...]}` for exactly the next stateVersion, using extension-owned native singleton conversation document tokens and their `migrate(value,fromVersion)` functions. It runs only on a backed-up clone through public Durable APIs; original data remains untouched. Review `src/custom-migration.ts` and tests before use. A changed binary alone cannot roll back a data migration.
 
+### Advanced Delegation configuration
+
+The host adapter in `src/delegation.ts` preserves the original `subagent-tools` identity and Anchor/Reporter definitions. Separate version-1 native documents hold session snapshots, routed-child metadata and command intents; old code ignores them. Provider aliases are reconstructed before work resumes. Configuration and dedicated secrets use existing control-store keys, not a second task database or another Harness. Compatibility fences and original task schemas remain unchanged.
+
+**Rollback to a pre-Advanced-Delegation release requires settling all routed/background work first.** An unchanged compatibility hash is not a routing guarantee: older code does not resolve `bob-ad-*` provider aliases or enforce the new route/profile policy. Routed children cannot reliably continue there, and pending legacy tool calls could use parent routing. Returning to the new code restores definitions, not already-failed task outcomes. Retain current data; never rewind a database to roll back this feature.
+
+Use the intended backend's explicit `--state` path. Configuration patches are strict JSON and replace only the supplied top-level fields; a supplied route/profile block replaces that block. Unknown fields, inline keys and unsupported settings are refused before saving. Commands preserve unrelated settings and validate against Bob's registered provider catalog/auth; they do not prove a live model request works.
+
+```sh
+bob --state /absolute/backend/state delegation config --show
+bob --state /absolute/backend/state delegation config --set /absolute/routes.json
+bob --state /absolute/backend/state delegation config --mode model_map
+# A dedicated credential is read from stdin, never argv or the JSON file:
+bob --state /absolute/backend/state delegation secret reviewer-key
+```
+
+Example `routes.json` (replace the model with an exact available ID and choose a supported effort):
+
+```json
+{
+  "mode": "model_map",
+  "modelMap": {
+    "options": [{
+      "name": "review",
+      "description": "Careful code review.",
+      "provider": "openai",
+      "model": "<configured-model-id>",
+      "reasoning_effort": "high"
+    }],
+    "default": "review"
+  }
+}
+```
+
+`defaultRoute` is a route object or `null`. `modelMap` contains `options` and an optional `default`; `profileRoutes` contains allowlisted `{name,description}` entries under `profiles` and an optional `default`. The separate top-level `profiles` list defines `{name,route,instructions,skills,cwd,modules}`. Profile credentials must be explicit: `route.credential` is `{kind:"secret",name:"reviewer-key"}` or an explicitly selected `{kind:"provider",provider:"openai"}`. Profiles cannot select subagents; selected skill bodies are captured at spawn, with Bob's safety sections retained even without resource tools. A missing selected skill/module refuses spawn. Model routes may omit `credential` to use their named provider's existing Bob credential. No ambient Hermes credential discovery occurs.
+
+Custom OpenAI-compatible routes declare `endpoint:{baseUrl,api,contextWindow,maxTokens,thinkingLevels}` (`api` is `openai-completions` or `openai-responses`) and require a dedicated secret reference or explicit `{kind:"none"}`. HTTPS is required except loopback HTTP; URLs cannot contain user information, query strings or fragments. Backend provider credentials are never forwarded to custom endpoints. Endpoint model/capability declarations are owner-supplied, not remotely discovered or verified.
+
+`service_tier` defaults to `normal`. `fast` is limited to native OpenAI Responses with API-key auth; an unconfirmed priority response is refused. `ultrafast`, credential pools, fallback-provider lists, unsupported provider/tier combinations and Hermes-specific configuration fields are not implemented and are rejected, never silently downgraded. Bob uses validated JSON/CLI configuration rather than Hermes's terminal editor. See [third-party attribution](THIRD_PARTY_NOTICES.md).
+
+Adaptive delegation is configured separately from the frozen routing/profile v1 format. It defaults to off; routing/profile selection never grants standing consent. Use `bob --state /absolute/backend/state delegation behavior --show`, `--enabled on|off`, or `--set /absolute/behavior.json`. A patch can set `enabled`, `maxActive` (1–8, default 4), `maxDispatches` (1–32, default 12) and `profileTools`. For example, `"profileTools":{"reviewer":["read"]}` binds that exact tool selection to the currently saved reviewer's fingerprint. Save profiles first; changing their identity requires an explicit tool-policy rebind. Omitted keys are preserved; supplying `profileTools` replaces that map. Exact native `tools` selections restrict direct and nested calls; a policy containing `bash` is not read-only or an OS sandbox. Child policy is captured separately, and missing/mismatched policy fails closed.
+
+Existing chats do not adopt saved profiles or tool scopes implicitly. Use a new chat or the explicit, settled `/delegation profiles --now` refresh. Adaptive profile mode rejects an unprofiled parent fallback from a stale/default snapshot; default-off manual behavior remains available. Helper names used for new work must be nonblank and non-reserved.
+
+On first upgrade, bounded native provisioning captures existing enabled tool sets for genuine pre-extension profile children and their forks, preserving native `modelTools` restrictions. Eligibility uses a persisted cutoff and verified lineage, and closes before work resumes. New/migrated children require their saved policy; later missing policy is not recreated permissively. If a module was deliberately removed, startup intersects available tools with the captured policy, including an exact empty set, rather than failing the whole backend or inheriting other capabilities. The policy stays intact; new spawn/send/module-reselection checks remain strict.
+
+The host extension retains native task definitions and the native current-input grant predicate. An additive native scope/dispatch ledger records exact owner and Reporter lineage, bounds spawn **and send**, and rechecks authorization in the task-creation transaction. A genuine report is not itself permission: only a still-valid owner-derived scope can grant its existing native receipt. Owner denial, Stop/revoke, changed behavior revision and newer normal owner input invalidate continuation. Forks start without a grant chain; restart retains valid lineage/budgets but revalidates temporary report grants. Native scope revocation and dispatch accounting are transactional; the separate control-store configuration is **not** part of that native transaction. Native command intents and operation/CAS receipts reconcile configuration changes without claiming cross-store atomicity.
+
+`/delegation auto status` is an authenticated, inference-free, read-only check that preserves the scope. Plain “Status” is an ordinary owner input and supersedes it: outstanding helpers may still finish/report, but those older reports cannot authorize a new phase. `/delegation auto revoke` revokes this chat's authority; `on`/`off` change standing consent for subsequent owner tasks and revoke the issuing chat's earlier scope. These controls do not cancel already-running helpers; use native tree stop for that. Do not work around a revoked scope with dummy sends, fake owner input or inferred report text.
+
+If old/new-scope sends to one child coalesce, native reported-answer deduplication may let the revoked older Reporter emit the answer while the newer Reporter emits nothing. This intentionally fails closed: never transfer authority by helper name or answer text.
+
+**Downgrade boundary:** settle delegated/background work and revoke standing continuation authority before reverting to code without this extension. Older code does not implement these budget/revocation checks, even if it understands saved native tool names. An unchanged task compatibility fingerprint does not prove equivalent authorization behavior. Never roll back stored chat data.
+
+The authenticated `/v1/library` response advertises the native `delegation` command alongside the saved skills. This read-only menu metadata is not a Library document field or a saved skill. The mobile picker accepts commands only from the active backend response and inserts a draft without submitting; old backends remain skills-only. `test/slash-menu.test.ts` and the mobile picker/App tests cover discovery and draft insertion.
+
+`/delegation` settings changes and native chat receipts span two stores, not one atomic transaction. Durable command intents, control-store revision/CAS receipts and startup reconciliation prevent an old retry from reverting newer settings. `--now` checks settled work before admission and again before applying a snapshot; if work races the save, the reply distinguishes a saved future setting from an unapplied current-chat change. Never claim the chat changed merely because the global setting was saved. Relevant checks: `test/delegation-review.test.ts`, `test/advanced-delegation*.test.ts`, `test/adaptive-delegation.test.ts` and `test/adaptive-delegation-review.test.ts`.
+
 ### MCP, peers and memory
 
 - **MCP:** `bob mcp configure <id> --endpoint <url> --tools <exact,names>` explicitly grants tools; owner-requested setup can be performed by the assistant without updating the app. MCP configuration is no longer in the burger menu. `mcp_tool` discovers/calls ordinary tools; `mcp_app` separately opens genuine MCP Apps resources. `bob mcp key <id>` reads a bearer credential from stdin. `list`, `enable`, `disable`, `remove` manage configuration. An endpoint must use verified HTTPS or explicit backend-loopback HTTP. Configuration does not prove a server/action works.
@@ -141,7 +203,8 @@ Explicit schema migration uses `bob module migrate` with `--replace`, `--backup`
 | Runtime/HTTP/auth/ownership | `src/runtime.ts`, `src/server.ts`, `src/state.ts`, `src/ownership.ts` | `test/authority.test.ts`, `test/integration.test.ts`, `test/crash.test.ts`, `test/tls.test.ts` |
 | Tool contracts and instructions | `packages/*/src/index.ts`, `packages/core/src/contracts.ts` | `test/modules.test.ts`, `test/prompts.test.ts` |
 | Notes | `src/notes.ts`, `src/notes-agent.ts`, `apps/mobile/notes-store.ts` | `test/notes*.test.ts`, mobile `notes-*.test.tsx` / `notes-store.test.ts` |
-| History/peers/subagents | `src/conversation-network.ts`, `packages/peers`, `packages/subagents` | `test/local-history.test.ts`, `test/connected-network.test.ts`, `test/lifecycle.test.ts` |
+| Session topic titles | `src/conversation-title.ts`, message admission in `src/server.ts` | `test/conversation-title.test.ts`, `test/integration.test.ts` |
+| History/peers/subagents | `src/conversation-network.ts`, `packages/peers`, `packages/subagents`, `src/delegation*.ts` | `test/local-history.test.ts`, `test/connected-network.test.ts`, `test/lifecycle.test.ts`, `test/delegation-review.test.ts`, `test/adaptive-delegation*.test.ts` |
 | Memory | `packages/memory`, `src/memory.ts` | `test/memory.test.ts` |
 | Views/files/web | `packages/interactive`, `apps/interactive/host.ts`, `src/artifacts.ts`, `packages/web` | `test/interactive.test.ts`, `test/mcp-http.test.ts`, `test/browser.test.ts` |
 | Phone/notifications | `src/phone-location.ts`, mobile Kotlin `BobLocation.kt`, `BobNotifications.kt` | `test/phone-location.test.ts`, mobile/native location and notification tests |
@@ -156,3 +219,5 @@ For a phone crash, **Settings → Copy app diagnostics** provides an owner-share
 Use the owner's **Settings → Copy app diagnostics** report. Schema 3 retains bounded memory/workload samples and sanitized JavaScript code positions in addition to existing lifecycle/crash/exit history. Distinguish Android backgrounding from confirmed process death, old versions from current, and allocation measurements from proof of a leak. Diagnostic capture never replaces normal failure handling and is best-effort.
 
 Release assembly privately archives the exact composed Hermes map and bundle under ignored `docs/diagnostic-symbols/<versionCode>-<bundle-hash-prefix>/`, with APK/bundle/map hashes in `identity.json`. Match the report to the verified release before symbolication; positions use the engine's raw coordinate convention. Never publish those maps or use a different build's map. A source-map retention failure blocks release assembly. Do not assume a successful debug compile verified release artifacts or physical-phone capture.
+
+Peer delegation prompt wording is composed by `src/peer-policy.ts` at the runtime boundary. This preserves the original peer documents, tools and persistent task definitions in the compatibility-protected package.

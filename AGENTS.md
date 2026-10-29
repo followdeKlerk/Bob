@@ -14,7 +14,7 @@ Live tool schemas and current configuration take precedence over these guides. S
 ## Non-negotiable boundaries
 
 - Use existing capabilities for the requested task. A feature-use request is not permission to extend or redeploy Bob.
-- Create subagents only on an explicit user request. Existing peer conversations are independent agents, not owned children.
+- By default, create subagents only on an explicit user request. The owner may explicitly enable bounded adaptive delegation for substantial, authorized work; complexity alone does not enable that policy. Respect native permission, budget and stop/revocation checks. Existing peer conversations are independent agents, not owned children.
 - Preserve official Pi Durable authority. Do not edit its database, bypass the owner lock or start another owner of the live state.
 - Use `self_update` for authorized application changes. Do not restart/kill the serving backend, uninstall Android or restore old chat data to roll code back.
 - Distinguish admission, completion and delivery. Reconcile uncertain side effects instead of resending them.
