@@ -33,7 +33,6 @@
   "files": [
     "dist/*.js",
     "README.md",
-    "AGENTS.md",
     "FEATURES.md",
     "OPERATIONS.md",
     "THIRD_PARTY_NOTICES.md"

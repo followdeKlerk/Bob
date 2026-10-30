@@ -1,23 +1,13 @@
-# Bob Android client
+# Bob Android app
 
-This is Bob's React Native/TypeScript client, with Kotlin integrations for pairing, attachments, isolated views, notification checks, on-demand location, manual reply read-aloud and diagnostics. Android is the supported target; the generated iOS scaffold is not a supported release.
+The Android app connects to your Bob backends for conversations, files, Notes, delegated agents and settings. It also supports notifications, on-demand location, reply read-aloud and diagnostics. Android is the supported platform; there is no supported iOS release.
 
-Start with the root [application overview](../../README.md), [feature contracts](../../FEATURES.md) and [operations guide](../../OPERATIONS.md). Those guides are the maintained authority; do not infer production procedures from React Native's generated scripts.
+- [Install Bob](../../INSTALL.md) — install the app, configure a backend and pair your phone.
+- [Features](../../FEATURES.md) — app navigation and everyday workflows.
+- [Operations](../../OPERATIONS.md) — backend configuration, updates and recovery.
 
-## Local checks
+## Updates
 
-After installing/building root dependencies, run from this directory:
+For a managed deployment, ask Bob to update Android using `self_update` with target `android` or `all`. Once the signed APK is ready, approve installation through **Build & install**. Keep the existing app installed to preserve its local data; updates use the same signing identity.
 
-```sh
-npm ci
-../../node_modules/.bin/tsc --noEmit
-npm test -- --runInBand
-```
-
-For interactive-host changes, run `npm run build:interactive` at the repository root. Native Kotlin changes also need the appropriate Gradle unit tests (`cd android && ./gradlew testDebugUnitTest`) and release compilation with the configured SDK/Java toolchain.
-
-## Production updates
-
-Use Bob's `self_update` with target `android` or `all`, then end the turn. The supervised build produces the signed release; the owner approves in-place installation through **Build & install**. Do not run Metro/a development server against the production workflow, uninstall the app, or assume an available USB/emulator device is the owner's phone.
-
-Backend work and history remain authoritative on the selected backend. Local drafts, caches, outbox identities and offline Notes edits must stay backend-scoped. Compilation/unit tests are not evidence of physical-device layout, GPS, notification delivery or installation; verify those separately when authorized.
+Each backend keeps its own conversations and configuration. Drafts, cached history, queued messages and offline Notes edits remain associated with the backend where you created them.

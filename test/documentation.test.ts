@@ -6,7 +6,7 @@ import {CodingTools} from '@earendil-works/pi-durable/tools';
 import {CODEMODE_TOOL_NAME} from '@earendil-works/pi-durable/codemode';
 
 // Structural guards, not a claim that a model understands or obeys the manual.
-const guides = ['README.md', 'INSTALL.md', 'SETUP-AGENT.md', 'AGENTS.md', 'FEATURES.md', 'OPERATIONS.md',
+const guides = ['README.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'OPERATIONS.md',
   'apps/mobile/README.md', 'packages/memory/README.md', 'assets/showcase/README.md'];
 const read = (path: string) => readFileSync(path, 'utf8');
 const withoutFences = (text: string) => text.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, '');

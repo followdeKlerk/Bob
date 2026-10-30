@@ -39,13 +39,13 @@ Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Se
 - Lets you choose models and thinking effort, with favourites saved on your phone.
 - Lets you exchange files with an agent, keep notes and return to earlier work.
 
-The app uses React Native/TypeScript with native Android integrations. The Node.js backend runs agents through [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable).
+The backend runs agents through [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable).
 
 ## Try it
 
 You need an Android phone, a Linux x86_64 machine, a supported model provider and Tailscale/HTTPS connectivity between them. There is no hosted service or one-click installer. iOS is not supported.
 
-Follow [installation](INSTALL.md), or give your coding agent the [setup instructions](SETUP-AGENT.md). Those instructions ask it to inspect your machine, protect existing data and stop for authentication and installation approvals.
+Follow [installation](INSTALL.md), or give your agent the [setup instructions](SETUP-AGENT.md). Those instructions ask it to inspect your machine, protect existing data and stop for authentication and installation approvals.
 
 ## Command-line management
 
@@ -66,5 +66,4 @@ Always specify the intended state directory: most other commands can initialize 
 
 - [Installation](INSTALL.md) — prerequisites, building, configuration and pairing.
 - [Features](FEATURES.md) — current behaviour and limitations.
-- [Operations](OPERATIONS.md) — development, maintenance, updates and recovery.
-- [Agent working rules](AGENTS.md) — boundaries for agents working in this checkout.
+- [Operations](OPERATIONS.md) — configuration, maintenance, updates and recovery.

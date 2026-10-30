@@ -1,15 +1,21 @@
-# @bob-local/memory — Hindsight for Pi Durable
+# Hindsight memory for Bob
 
-A separately packaged, removable native extension for **official Pi Durable 1.4.0**. No fork, patches, monkey-patching, private imports, or access to upstream SQL tables. Hermes is not a runtime dependency. HTTP uses Node's native fetch; no Python/SDK subprocess is installed.
+Hindsight gives Bob long-term recall and conversation saving. It runs as a separately configured service; Hermes is not required. This memory module supports **Pi Durable 1.4.0**.
 
 ## Behaviour
 
-- Fresh synchronous automatic recall from `bob` and `hermes` before answering each ordinary owner input. Cache across tool rounds and use Durable hook memos for request replay. Requests time out/fail open; one unavailable bank does not hide another's results.
-- Bounded/deduplicated historical reference messages injected for the current model request only. They are not system instructions or transcript entries. Current instructions/evidence override stale memory. Default recall types include observations **and raw world/experience facts**, to preserve reach into older Hermes memories; the server prefers consolidated observations where available. Score floors are configurable, not assumed calibrated.
-- Automatic retention of **canonical owner user text + final assistant text** after committed successful settlement. The generic module admits `pi.user` by default; Bob's trusted host adapter explicitly also admits its app's `bob.user` entry kind. This exact allowlist is shared by recall and retention; arbitrary custom/peer kinds are never admitted. No raw tool outputs, reasoning, images, system prompts, UI display hints, peer/custom inputs, task-owned/background conversations, compaction summaries or replayed recall blocks are exported. Memory-tool inspection/control turns are excluded to avoid feedback/duplication.
-- Writes only to `bob` by default. The legacy `hermes` write-bank name is refused; existing historical data is never renamed, imported, overwritten or deleted by this module.
-- Durable save intent, stable document/operation identities and asynchronous operation polling. Lost acknowledgements/transient retries reuse the same idempotent operation. Server extraction completion is distinguished from queue admission. Server-side processing warnings, including child-operation failures, are shown in receipts.
-- A startup catch-up scan of committed submissions closes the settlement→outbox crash window. Receipt families deduplicate capture. First installation establishes a boundary and does **not** bulk-export old conversations. Consent is checkpointed per input: re-enabling later cannot export a turn made while saving was off; a `#nomem` steer revokes retention for other inputs sharing its answer.
+### Recall
+
+- Queries `bob` and `hermes` before answering ordinary owner inputs. On timeout or failure, the answer continues with results from any available bank.
+- Supplies bounded, deduplicated historical references for the current model request. Treat these as context subordinate to current instructions and evidence; they stay outside system instructions and the saved transcript.
+- Recalls observations and raw world/experience facts by default, including older Hermes memories. Use `types` to select the memory types and `minRerankerScore` to set an optional score floor; evaluate filtering against your own queries before relying on it.
+
+### Saving and recovery
+
+- Saves **owner text + final assistant text** after a successful completed answer. Recall and saving are limited to owner conversations and exclude memory-tool inspection/control turns to avoid feedback. Tool outputs, reasoning, images, system prompts, display hints, peer/custom inputs, task-owned/background conversations, compaction summaries and recalled context stay outside the export.
+- Writes to `bob` by default; `hermes` is read-only. Existing historical data stays in place and unchanged.
+- Saves survive backend restarts. Lost acknowledgements and transient retries reuse the same operation to avoid duplicate saves. Server extraction completion is distinguished from queue admission. Server-side processing warnings, including child-operation failures, are shown in receipts.
+- At startup, recovers missed saves without duplicating completed work. Capture starts at first installation and does not bulk-export old conversations. Turns made while saving was off stay excluded after re-enabling; a `#nomem` steer also excludes other inputs sharing its answer.
 - A failed connection retries up to five times with exponential backoff. Terminal server failures remain visible for an explicit retry; the server also has its own extraction retry policy. A server-retry mutation with an uncertain acknowledgement is not automatically repeated.
 
 ## Owner configuration in Bob
@@ -31,60 +37,55 @@ Place `hindsight.json` in the backend state directory (mode 0600), then activate
 
 The validated owner configuration is also persisted in Bob’s control store, so standard backups/restores preserve it even without the override file. Environment-provided keys remain external and must be restored separately. Removing the override file is not a disable action; set `enabled:false` explicitly.
 
-Unconfigured backends default to disabled and make no Hindsight calls, including in tests and release verification. The host provisions the module for existing owner conversations once when enabled, preserving all other selections. Afterwards ordinary per-conversation module selection remains authoritative. New conversations inherit the module's configured host default. Setting `enabled:false` cancels unsent automatic work when its task runs; operations already sent may still finish. Removing an active module is refused by Bob's normal unsettled-work guard.
+Unconfigured backends default to disabled and make no Hindsight calls. Enabling memory selects the module for existing owner conversations once, preserving all other selections. Afterwards, per-conversation module selections remain authoritative. New conversations inherit the configured default. Setting `enabled:false` cancels unsent automatic work when it next runs; operations already sent may still finish. Settle or cancel active work before removing the module.
 
-Optional configuration: `types`, `minRerankerScore`, `maxTurnChars` (24000), `maxAttempts` (5), `retryDelayMs` (2000), `pollDelayMs` (2000), `apiKey`. Prefer `BOB_HINDSIGHT_API_KEY` to putting a credential in JSON. HTTPS is required for non-loopback endpoints; no redirects are followed. Do not expose an unauthenticated Hindsight service to the network.
+### Optional settings
+
+- Recall: `types` and `minRerankerScore`.
+- Saving: `maxTurnChars` (24000), `maxAttempts` (5), `retryDelayMs` (2000), `pollDelayMs` (2000).
+- Authentication: `apiKey`.
+
+Prefer `BOB_HINDSIGHT_API_KEY` to putting a credential in JSON. HTTPS is required for non-loopback endpoints; no redirects are followed. Do not expose an unauthenticated Hindsight service to the network.
+
+### Existing Hermes memories
+
+The legacy `hermes` bank remains available for read-only recall. Bob recalls the current input before answering and defaults to a 1600-token text allowance. File-memory mirroring, template imports and service administration remain separate operations.
 
 ## Local CPU recall performance
 
-Database health does not establish recall latency. Inspect Hindsight's per-phase timings before changing Bob's deadline: local cross-encoder reranking can dominate while embeddings/retrieval remain fast. Reducing `maxTokens` alone does not cap reranker candidates; even `budget:"low"` can retain the service's default 300-candidate cap.
+Use Hindsight's per-phase timings to find slow stages. Local cross-encoder reranking can dominate while embeddings/retrieval remain fast. Tune its candidate cap separately from `maxTokens`; even `budget:"low"` can use the service's default 300 candidates.
 
-[`examples/hindsight-recall-performance.conf`](examples/hindsight-recall-performance.conf) is an optional **Hindsight user-service** systemd drop-in, not Bob configuration. It keeps the existing model/reranking, uses two native threads and two reranker workers, enables length-bucketed batches, and caps `mid` at 100 candidates. `high` retains the default 300. These are host-specific settings, not universal defaults: one-native-thread testing was slower on this installation. The smaller pool can miss relevant memories or change rankings; compare both banks and known answers, not just result counts. No bank contents or per-bank configuration need changing.
+Apply the optional [`examples/hindsight-recall-performance.conf`](examples/hindsight-recall-performance.conf) systemd drop-in to the **Hindsight user service**. It keeps the existing model/reranking, uses two native threads and two reranker workers, enables length-bucketed batches, and caps `mid` at 100 candidates. `high` retains the default 300. Tune these settings for your host. The smaller pool can miss relevant memories or change rankings; compare both banks and known answers as well as result counts. Leave bank contents and per-bank configuration unchanged.
 
-Only apply/restart with owner authorization. Verify service ownership and that all banks have no pending/processing operations immediately before a graceful Hindsight-only restart. Wait for actual API readiness, then benchmark concurrent two-bank recalls through `HindsightClient`. Roll back by removing the drop-in and repeating the same safe restart procedure; do not modify databases or restart Bob to tune Hindsight.
+Only apply/restart with owner authorization. Verify service ownership and that all banks have no pending/processing operations immediately before a graceful Hindsight-only restart. Wait for actual API readiness, then check recall latency and relevance across both banks. Roll back by removing the drop-in and repeating the same safe restart procedure; do not modify databases or restart Bob to tune Hindsight.
 
-Choose Bob's `recallTimeoutMs` from measured latency plus headroom, not as a substitute for speeding retrieval. A 15000 ms owner override provides headroom for this installation's measured 6–9 s two-bank checks. Bob reads its override on backend activation, so a file edit alone does not change the running deadline. Keep benchmarks bounded and report cold starts, system contention and limited relevance coverage; this is not an SLA or proof of unchanged retrieval quality. Bob deliberately keeps fresh current-query recall on the answer path rather than reusing previous-turn background results.
+After tuning, set `recallTimeoutMs` to measured latency plus headroom. This installation used a 15000 ms owner override for measured 6–9 s two-bank recalls; measure your own host with bounded checks that include cold starts, system contention and relevance. Bob reads the override on backend activation.
 
 ## Tools and controls
 
 - `hindsight_recall({query})`: relevant facts, with source-bank/document attribution.
 - `hindsight_reflect({query})`: on-demand synthesis from each configured recall bank.
-- `hindsight_retain({content,tags?})`: explicit selected-knowledge save to Bob. Returns a **queued receipt**, not an extraction-success claim.
-- `hindsight_memory({action:"status"})`: API connectivity, capture attachment and accepted owner input kinds, current preferences, last recall and up to 30 recent save receipts. API/database health alone does not imply working extraction credentials.
-- `hindsight_memory({action:"doctor"})`: deliberate LLM-health probe; makes real provider calls. Not for background polling.
+- `hindsight_retain({content,tags?})`: explicit selected-knowledge save to Bob. Returns a **queued receipt**; check its status for extraction completion.
+- `hindsight_memory({action:"status"})`: API connectivity, whether conversation saving is connected, current preferences, last recall and up to 30 recent save receipts. Use `doctor` when you also need to check extraction credentials.
+- `hindsight_memory({action:"doctor"})`: on-demand LLM-health probe that makes real provider calls; reserve it for explicit checks.
 - `hindsight_memory({action:"configure",autoRecall:false,autoRetain:false})`: persistent controls for this conversation.
 - `hindsight_memory({action:"retry",key:"input:123"})`: explicitly reconcile/retry a failed save from status. Keeps the original document/operation identities.
 - Add `#nomem` or `#skip` to a user input to exclude that run's shared answer from automatic memory. This does not delete the normal chat transcript.
 
-The model can operate these tools from plain-language requests such as “turn memory off in this conversation” or “check memory status.” Notes are entirely separate and are never silently edited or used as the outbox.
-
-## Embedding in another Durable host
-
-```ts
-const memory = createHindsightMemory({ enabled: true }, fetch, {
-  ownerInputKinds: ['pi.user'], // Add only your host's canonical owner kind, e.g. Bob's 'bob.user'.
-});
-registry.install(memory.extension);
-// Select memory.extension through the host's native settings/conversation agent.
-const harness = await Harness.open(storage, { models, registry }, context);
-const attached = await memory.attach(harness, storage, stableBackendId);
-harness.resume();
-// At orderly shutdown, before harness.close():
-await attached.close();
-```
-
-Attach after root creation, before resuming/serving inputs. The storage port uses only public `scanSubmissions` reads. All writes use public Harness/Tx APIs. The synchronous commit subscriber merely schedules asynchronous capture; it never calls back into Session inline. The optional `selectExisting:true` provisions existing owner conversations once and should only be used with owner authorization.
+Ask in plain language, for example, “turn memory off in this conversation” or “check memory status.” Manage Notes separately through Bob's Notes tools.
 
 ## Privacy and limits
 
-Auto-retention sends normal conversation text to Hindsight's extraction model. **Local API/database hosting does not imply local model inference.** Known tokens, bearer credentials, secret assignments and private keys are redacted best-effort; arbitrary secrets cannot be reliably detected. Use opt-out controls for sensitive conversations. Very long turns are capped, preserving a bounded portion of both user and assistant text. No file/archive/backfill ingestion, automatic legacy-bank writes, mental-model-management UI or flat-file-memory mirroring is included.
+Auto-retention sends conversation text to Hindsight's extraction model, which may use an external provider even when the API/database is local. Redaction covers known token formats, bearer credentials, secret assignments and private keys on a best-effort basis. Use opt-out controls for sensitive conversations. Long turns retain a bounded portion of both user and assistant text.
 
-The module stores new version-1 documents/tasks in `bob.memory.*` only; no existing Durable/control schema migration is needed. Module compatibility is pinned and must be tested on future Durable upgrades. Removing the package is not deleting the Hindsight database. Settle/cancel its tasks before unregistering it. Rollback never rewinds chat data.
+This package handles conversation capture and the tools above. File/archive imports, backfills, legacy-bank writes, mental-model management and flat-file-memory mirroring need separate tooling.
 
-## Verification and service authentication
+Before removing the memory module, settle or cancel its active work; removing it does not delete the Hindsight database. Use a compatible backend release and preserve chat data when rolling back. See [Operations](../../OPERATIONS.md) for backend maintenance.
 
-`test/memory.test.ts` uses the real Durable harness, SQLite reopening, a real SIGKILL after server acceptance, the authenticated app HTTP message route, and a deterministic Hindsight transport. The app-route regression verifies `bob.user` recall, canonical text retention, UI-hint exclusion, request deduplication, opt-out, disabled saving, and peer exclusion. Both native and app steering paths test late opt-out. Upgrading an input-kind allowlist never retrospectively grants consent: app turns skipped by older releases lack generation-time consent checkpoints and are not backfilled. It covers injection, deduplication, privacy, steering, outages, retry identity, explicit tools, capture recovery and module selection. All tests run without touching the real service.
+Previously skipped app turns remain excluded after an upgrade; upgrading does not retrospectively grant consent to save them.
 
-Current service health must come from `hindsight_memory(action="status")`, and an explicitly needed `doctor`/end-to-end check—not a past smoke-test report. API availability and accepted retention do not prove extraction authentication works.
+## Service health and authentication
 
-Administer Hindsight through the service and authentication mechanism configured for the deployment. Credential renewal is owner-interactive, not something this module silently performs. After renewal, use `doctor` and an isolated save/recall verification before calling the write path ready.
+Check current service health with `hindsight_memory(action="status")`. When extraction needs verification, run an authorized `doctor`/end-to-end check; API availability and queue admission only cover the earlier stages.
+
+Administer Hindsight through the service and authentication mechanism configured for the deployment. The owner completes credential renewal interactively. After renewal, use `doctor` and an isolated save/recall verification before calling the write path ready.
