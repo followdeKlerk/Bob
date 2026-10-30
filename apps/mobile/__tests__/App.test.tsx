@@ -442,6 +442,46 @@ test('rapid A-to-B-to-A switching keeps the composer locked until the new draft 
  }finally{(AsyncStorage.getItem as jest.Mock).mockImplementation(get);if(tree)await act(async()=>tree.unmount());}
 });
 
+test('Send hands off to Android before JS persistence completes and immediate backgrounding',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const enqueue=jest.fn(async()=>true);NativeModules.BobOutbox={enqueue,status:jest.fn(async()=>JSON.stringify({state:'pending'})),list:jest.fn(async()=>[]),remove:jest.fn(async()=>true)};
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[]} as Response;});
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;let release!:(value?:unknown)=>void;
+ jest.spyOn(AsyncStorage,'setItem').mockImplementation(async(key,value)=>{if(key==='message-outbox:v2')await new Promise(resolve=>{release=resolve;});await write(key,value);});
+ try{
+  act(()=>tree.root.findByProps({accessibilityLabel:'Message draft'}).props.onChangeText('Lock immediately'));
+  act(()=>tree.root.findByProps({accessibilityLabel:'Send message'}).props.onPress());
+  expect(enqueue).toHaveBeenCalledTimes(1);expect(JSON.parse((enqueue.mock.calls[0] as unknown as any[])[5]).text).toBe('Lock immediately');
+  jest.replaceProperty(AppState,'currentState','background');
+  await act(async()=>{for(let i=0;i<20;i++)await Promise.resolve();});expect(release).toBeDefined();expect(enqueue).toHaveBeenCalledTimes(1);
+  await act(async()=>release());
+ }finally{await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
+});
+
+test('Sessions assigns working state by Durable conversation ID, not by the selected chat',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.endsWith('/status')?{backendId:backend.backendId,inspection:{tasks:[{record:{conversationId:8,background:false}},{record:{conversationId:7,background:true}}],submissions:[{conversationId:9}]}}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[7,8,9].map(id=>({id,meta:{title:`Chat ${id}`}}))}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  expect((globalThis.fetch as jest.Mock).mock.calls.some(([url])=>String(url).endsWith('/status'))).toBe(false);
+  await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+  expect(tree.root.findByType(SideDrawer).props.conversations.map(({id,selected,working}:any)=>({id,selected,working}))).toEqual([
+   {id:'7',selected:true,working:false},{id:'8',selected:false,working:true},{id:'9',selected:false,working:true},
+  ]);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
 test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe reachable location (%s)',async(placement)=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  const surface={id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Nested visual',kind:'visual',presentation:'fullscreen',allowedTools:[]};

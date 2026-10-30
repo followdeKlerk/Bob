@@ -14,7 +14,7 @@ Use a dedicated OS account if appropriate. Agents execute with that account's au
 
 ## 1. Build the backend
 
-While this repository is private, GitHub access is required. From a new checkout:
+From a new checkout:
 
 ```sh
 git clone https://github.com/followdeKlerk/Bob.git

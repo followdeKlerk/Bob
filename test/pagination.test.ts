@@ -6,6 +6,7 @@ import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
 import {serve} from '../src/server.js';
 import {HistoryPage} from '../src/contracts.js';
+import {defineTask} from '@earendil-works/pi-durable';
 
 test('stored history and conversations paginate completely with scoped tamper-resistant cursors',async()=>{
  const state=new State(mkdtempSync(join(process.env.TMPDIR!,'bob-history-'))),runtime=await openRuntime(state);
@@ -14,6 +15,9 @@ test('stored history and conversations paginate completely with scoped tamper-re
  try {
   const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
   const other=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
+  const task=defineTask({name:'test-owner',version:1,initial:()=>({phase:'wait'}),phases:{wait:async()=>({status:'completed' as const,result:null})},abort:async()=>{}});
+  const taskId=await runtime.harness.commit(tx=>tx.createTask(task,null,{conversationId:chat.id,ownership:{kind:'conversation',conversationId:chat.id}}),ctx);
+  const owned=await runtime.harness.createConversation({ownership:{kind:'task',taskId}},ctx);
   await chat.commit(async tx=>{for(let i=0;i<235;i++)await tx.appendEntry(chat.id,{kind:'bob.history-fixture',data:{index:i,text:'Committed deterministic history fixture'}});},ctx);
   await chat.reset(undefined,ctx);
   await chat.commit(async tx=>{for(let i=235;i<250;i++)await tx.appendEntry(chat.id,{kind:'bob.history-fixture',data:{index:i}});},ctx);
@@ -30,6 +34,6 @@ test('stored history and conversations paginate completely with scoped tamper-re
   for(let i=0;i<105;i++)await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
   const ids=new Set<number>();cursor=undefined;
   do {const response=await fetch(base+'/chats'+(cursor?'?cursor='+encodeURIComponent(cursor):''),{headers});assert.equal(response.status,200);const page=await response.json();for(const c of page.items){assert.equal(ids.has(c.id),false);ids.add(c.id);}cursor=page.next;}while(cursor);
-  assert.equal(ids.size,107);assert.equal(ids.has(runtime.library.id),false);
+  assert.equal(ids.size,107);assert.equal(ids.has(runtime.library.id),false);assert.equal(ids.has(owned.id),false,'owned child conversations are excluded from regular session list');
  }finally{await app.close();state.close();}
 });

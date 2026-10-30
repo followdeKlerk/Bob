@@ -1,6 +1,6 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
+import {ActivityIndicator,Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
 import {colors} from '../theme';
 import {EdgeFade} from '../components/edge-fade';
 import {SideDrawer} from '../components/side-drawer';
@@ -105,4 +105,25 @@ test('Back closes embedded session controls before navigating away',async()=>{
  act(()=>button('First').props.onLongPress({nativeEvent:{pageY:350}}));
  act(()=>button('Rename').props.onPress());expect(button('Save conversation name')).toBeDefined();
  act(()=>expect(back()).toBe(true));expect(button('Save conversation name')).toBeUndefined();expect(button('First')).toBeDefined();expect(back()).toBe(false);
+});
+
+test('session rows are compact single-line targets with independent working indicators',async()=>{
+ const sessions=[{id:'7',label:'Selected idle session',selected:true,pinned:true,onPress:open,working:false},{id:'8',label:'Another session working',onPress:open,working:true},{id:'9',label:'Archived work',archived:true,onPress:open,working:true}];
+ const render=(conversations=sessions)=><SideDrawer embedded mode="sessions" visible onClose={close} navigation={[]} workspaces={[]} conversations={conversations} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>;
+ await act(async()=>tree.update(render()));
+ for(const label of ['Selected idle session','Another session working']){
+  const row=button(label),style=StyleSheet.flatten(row.props.style);
+  expect(style.minHeight).toBe(50);expect(style.marginBottom).toBeUndefined();expect(style.borderWidth).toBeUndefined();
+  expect(row.findAllByType(Text)[0].props.numberOfLines).toBe(1);
+ }
+ expect(button('Selected idle session').props.accessibilityState).toMatchObject({selected:true,busy:false});
+ expect(StyleSheet.flatten(button('Selected idle session').props.style).backgroundColor).toBe(colors.surface);
+ expect(button('Selected idle session').findAllByType(ActivityIndicator)).toHaveLength(0);
+ expect(button('Another session working').props.accessibilityState).toMatchObject({selected:false,busy:true,disabled:false});
+ expect(button('Another session working').findByType(ActivityIndicator).props.size).toBe('small');
+ act(()=>button('Another session working').props.onPress());expect(open).toHaveBeenCalled();
+ await act(async()=>tree.update(render(sessions.map(row=>({...row,working:false})))));
+ expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+ await act(async()=>tree.update(render()));
+ act(()=>button('Archived').props.onPress());expect(button('Archived work').findAllByType(ActivityIndicator)).toHaveLength(1);
 });

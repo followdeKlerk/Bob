@@ -2,8 +2,8 @@ import type {Message} from '../../src/contracts';
 import {readOutbox,writeOutbox} from './outbox-storage';
 import type {DraftAttachment} from './components/attachment-thumbnail';
 export type OutgoingMessage={
-  id:string; scope:string; backend:{backendId:string;endpoint:string;name:string}; chat:number;
-  localId:number; afterEntryId?:number; createdAt?:number; message:ReturnType<typeof Message.parse>; files:DraftAttachment[]; admitted?:boolean; entry?:number; rejected?:boolean; attempts?:number; retryAt?:number; retryAfterAt?:number; lastError?:string;
+  id:string; scope:string; foregroundOnly?:boolean; backend:{backendId:string;endpoint:string;name:string}; chat:number;
+  localId:number; afterEntryId?:number; createdAt?:number; message:ReturnType<typeof Message.parse>; files:DraftAttachment[]; admitted?:boolean; entry?:number; rejected?:boolean; uncertain?:boolean; attempts?:number; retryAt?:number; retryAfterAt?:number; lastError?:string;
 };
 /** Local presentation is synchronous; storage and transport are deliberately separate. */
 export class MessageOutbox {
@@ -84,7 +84,7 @@ export function mergeOutgoing<T extends PositionedEntry>(entries:T[],items:Outgo
   return merged.reverse();
 }
 export function outgoingLabel(item:OutgoingMessage):string {
-  return item.admitted?'Queued':item.rejected?'Not sent':item.attempts?'Retrying automatically':'Waiting to send';
+  return item.admitted?'Queued':item.rejected?(item.uncertain?'Delivery unconfirmed':'Not sent'):item.attempts?'Retrying automatically':'Waiting to send';
 }
 
 /** Keep the same native cell when a local bubble becomes a stored message. */

@@ -12,6 +12,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createServer as httpsServer } from "node:https";
+import { isIPv4 } from "node:net";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { once } from "node:events";
@@ -88,7 +89,7 @@ export async function serve(
   const host = options.host ?? "127.0.0.1";
   if (
     !["127.0.0.1", "::1"].includes(host) &&
-    (!/^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) || !options.tls)
+    (!isIPv4(host) || !/^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) || !options.tls)
   )
     throw new Error(
       "Remote binding requires a Tailscale IPv4 address and verified TLS certificate configuration"
@@ -303,19 +304,26 @@ export async function serve(
       }
       if (path === "/v1/chats") {
         if (req.method === "GET") {
-          const page = await h.commit(
-            (tx) => tx.scanConversations({order:'descending'}, 100,decodeCursor(state,'chats',url.searchParams.get('cursor'))),
-            ctx
-          );
-          const items = await Promise.all(
-            page.items
-              .filter((c) => c.id !== runtime.library.id)
-              .map(async (c) => ({
-                ...c,
-                meta: {...await h.snapshot(ChatMeta,c.id,ctx),...await h.snapshot(SessionUI,c.id,ctx)},
-              }))
-          );
-          return send(res, 200, { items, next: encodeCursor(state,'chats',page.next) });
+          const requested=decodeCursor(state,'chats',url.searchParams.get('cursor'));
+          const page=await h.commit(async tx=>{
+            let cursor=requested;const visible=[];
+            // Skip owned children without stranding older ownerless sessions behind a full raw page.
+            // Bound each request; an empty filtered page may still carry a continuation cursor.
+            for(let scanned=0;scanned<10;scanned++){
+              const batch=await tx.scanConversations({order:'descending'},100,cursor);
+              visible.push(...batch.items.filter(c=>c.id!==runtime.library.id&&c.owner===undefined));
+              cursor=batch.next;
+              if(visible.length>=100||!cursor)break;
+            }
+            return {items:visible.slice(0,100),next:cursor};
+          },ctx);
+          // Child conversations remain durable and reachable via Agents/direct transcript access;
+          // they simply do not belong in the regular top-level Sessions list.
+          const items=await Promise.all(page.items.map(async c=>({
+            ...c,
+            meta:{...await h.snapshot(ChatMeta,c.id,ctx),...await h.snapshot(SessionUI,c.id,ctx)},
+          })));
+          return send(res,200,{items,next:encodeCursor(state,'chats',page.next)});
         }
         if (req.method === "POST") {
           const p = CreateChat.parse(await body(req));

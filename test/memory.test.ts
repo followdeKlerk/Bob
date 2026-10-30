@@ -10,17 +10,18 @@ import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {Type} from '@earendil-works/pi-ai';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall,fauxThinking} from '@earendil-works/pi-ai/providers/faux';
-import {createHindsightMemory,MemoryActivity,MemoryPreferences,MemorySaves,MemoryInstallation,MemoryTurnPolicy,HindsightClient,memoryConfig,redact} from '@bob-local/memory';
+import {createHindsightMemory,MemoryActivity,MemoryPreferences,MemorySaves,MemoryInstallation,MemoryTurnPolicy,HindsightClient,memoryConfig,redact,isTrivialMemoryPrompt,type MemoryConfig} from '@bob-local/memory';
 import {State} from '../src/state.js';
 import {openRuntime} from '../src/runtime.js';
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(check:()=>Promise<boolean>,ms=4000){const end=Date.now()+ms;while(Date.now()<end){if(await check())return;await sleep(10);}throw Error('Timed out');}
 function server(){
- const calls:{path:string;body:any}[]=[],ops=new Map<string,string>();let rejectSubmit=0,loseAck=false,down=false;
+ const calls:{path:string;body:any}[]=[],ops=new Map<string,string>(),bankConfig:Record<string,string>={};let rejectSubmit=0,loseAck=false,down=false;
  const transport:typeof fetch=async(url,init)=>{
   const path=new URL(String(url)).pathname,body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({path,body});
   if(down)throw Error('Offline');
   if(path.endsWith('/health'))return Response.json({status:'healthy'});
+  if(path.endsWith('/config')){if(init?.method==='PATCH')Object.assign(bankConfig,body.updates);return Response.json({config:{...bankConfig,api_key:'MUST_NOT_BE_EXPOSED'}});}
   if(path.endsWith('/memories/recall'))return Response.json({results:[{id:'fact-1',text:'Historic work used PostgreSQL.',type:'observation'},{id:'fact-duplicate',text:'Historic work used PostgreSQL.',type:'world'}]});
   if(path.endsWith('/reflect'))return Response.json({text:'Historic project context.'});
   if(path.endsWith('/memories')){
@@ -34,8 +35,8 @@ function server(){
  };
  return {calls,ops,transport,setReject:(n:number)=>rejectSubmit=n,loseAck:()=>loseAck=true,setDown:(b:boolean)=>down=b};
 }
-async function setup(options:{storage?:any;fake?:ReturnType<typeof server>;extra?:any;attach?:boolean;ownerInputKinds?:string[]}={}){
- const fake=options.fake??server(),storage=options.storage??new MemoryStorage(),memory=createHindsightMemory({enabled:true,retryDelayMs:10,pollDelayMs:10},fake.transport,{ownerInputKinds:options.ownerInputKinds});
+async function setup(options:{storage?:any;fake?:ReturnType<typeof server>;extra?:any;attach?:boolean;ownerInputKinds?:string[];config?:Partial<MemoryConfig>}={}){
+ const fake=options.fake??server(),storage=options.storage??new MemoryStorage(),memory=createHindsightMemory({enabled:true,retryDelayMs:10,pollDelayMs:10,...options.config},fake.transport,{ownerInputKinds:options.ownerInputKinds});
  const models=createModels(),faux=fauxProvider({tokensPerSecond:100000});models.setProvider(faux.provider);
  const registry=createRegistry();registry.install(memory.extension);if(options.extra)registry.install(options.extra);
  const h=await Harness.open(storage,{registry,models,settings:{extensions:[memory.extension,...(options.extra?[options.extra]:[])]}},ctx);await h.root(ctx);
@@ -57,7 +58,7 @@ test('native module recalls both banks once per run, deduplicates, and retains o
   const retained=r.fake.calls.find(c=>c.path.endsWith('/memories'))!;
   assert.ok(retained.path.includes('/banks/bob/'));assert.match(retained.body.items[0].content,/User: What did my old project use/);assert.match(retained.body.items[0].content,/Assistant: The historical/);
   assert.doesNotMatch(retained.body.items[0].content,/RAW_TOOL_OUTPUT_SECRET|HIDDEN_REASONING_SECRET|SCREEN_SECRET|Hindsight memory/);
-  const entries=await c.entries({},100,undefined,ctx);assert.equal(entries.items.some(e=>JSON.stringify(e.model).includes('untrusted historical reference')),false);
+  const entries=await c.entries({},100,undefined,ctx);assert.equal(entries.items.some(e=>JSON.stringify(e.model??[]).includes('untrusted historical reference')),false);
   assert.ok(r.fake.calls.every(c=>!c.path.includes('/banks/hermes/memories')||c.path.endsWith('/recall')),'legacy bank is never written');
  }finally{await r.close();}
 });
@@ -241,5 +242,75 @@ test('Bob owner kind is opt-in for other hosts, and missing consent checkpoints 
   await r.attached!.flush();assert.equal(fake.calls.length,0,'no retrospective consent inferred during upgrade');
   r.faux.setResponses([fauxAssistantMessage('New app answer.')]);const restored=(await r.h.conversation(c.id,ctx))!;
   await(await restored.submit({type:'input',content:'New app message',entry:{kind:'bob.user'}},ctx)).wait(ctx);await r.attached!.flush();await until(async()=>(await saves(r.h,c.id))[0]?.status==='completed');assert.equal((await saves(r.h,c.id)).length,1);
+ }finally{await r.close();}
+});
+
+test('stable Hermes zero-signal gate is anchored, punctuation-aware and not a short-query heuristic',()=>{
+ for(const value of ['', '  ', 'Hi', 'hi!', 'THANK YOU :)', 'okay…', 'continue', 'go ahead!', 'do it', 'next', 'lgtm', '/notes find x'])assert.equal(isTrivialMemoryPrompt(value),true,value);
+ for(const value of ['Hi, what did I ask for?', 'Okay, compare the options', 'note', 'k8s', 'yolo', 'CV', 'C++'])assert.equal(isTrivialMemoryPrompt(value),false,value);
+});
+
+test('trivial turns skip recall but keep capture consent; status entries never reach model or retention',{timeout:15000},async()=>{
+ const r=await setup(),seen:any[]=[];
+ r.faux.setResponses(['Hi!','You are welcome.','The historical project used PostgreSQL.'].map(text=>request=>{seen.push(request.messages);return fauxAssistantMessage(text);}));
+ try{
+  const c=await chat(r.h);
+  for(const text of ['Hi!', 'Thanks :)', 'What did my old project use?'])await(await c.submit({type:'input',content:text},ctx)).wait(ctx);
+  await r.attached!.flush();await until(async()=>(await saves(r.h,c.id)).length===3&&(await saves(r.h,c.id)).every(s=>s.status==='completed'));
+  assert.equal(r.fake.calls.filter(c=>c.path.endsWith('/memories/recall')).length,2);
+  assert.equal(seen.slice(0,2).some(messages=>JSON.stringify(messages).includes('Hindsight memory')),false);
+  assert.equal(seen.some(messages=>JSON.stringify(messages).includes('Hindsight — save queued')),false);
+  const entries=(await c.entries({},100,undefined,ctx)).items,status=entries.filter(e=>e.kind==='bob.memory-status');
+  assert.equal(status.filter(e=>(e.data as any).phase==='recall').length,1);
+  assert.equal(status.filter(e=>(e.data as any).phase==='save-queued').length,3);
+  assert.ok(status.every(e=>!e.model?.length));
+  for(const write of r.fake.calls.filter(c=>c.path.endsWith('/memories')))assert.doesNotMatch(write.body.items[0].content,/Hindsight —|bob.memory-status/);
+ }finally{await r.close();}
+});
+
+test('filtered-empty recall injects no reference or recall indicator and flags can silence passive events',{timeout:12000},async()=>{
+ const fake=server(),base=fake.transport;
+ fake.transport=async(url,init)=>{
+  const response=await base(url,init);
+  return String(url).endsWith('/memories/recall')?Response.json({results:[{id:'noise',text:'Unrelated old build.',scores:{reranker:0.00003}}]}):response;
+ };
+ const r=await setup({fake,config:{minScores:{reranker:0.25},retainIndicator:false}}),seen:any[]=[];
+ r.faux.setResponses([request=>{seen.push(request.messages);return fauxAssistantMessage('Hello.');}]);
+ try{
+  const c=await chat(r.h);await(await c.submit({type:'input',content:'Tell me about a completely new subject'},ctx)).wait(ctx);await r.attached!.flush();
+  await until(async()=>(await saves(r.h,c.id))[0]?.status==='completed');
+  assert.doesNotMatch(JSON.stringify(seen),/Hindsight memory|Unrelated old build/);
+  assert.equal((await r.h.snapshot(MemoryActivity,c.id,ctx))?.lastRecall?.count,0);
+  assert.equal((await c.entries({},100,undefined,ctx)).items.filter(e=>e.kind==='bob.memory-status').length,0);
+ }finally{await r.close();}
+});
+
+test('reflection has its own tag scope and never silently inherits recall tags',{timeout:15000},async()=>{
+ for(const explicit of [false,true]){
+  const r=await setup({config:{recallTags:['project-code'],recallTagsMatch:'all_strict',...(explicit?{reflectTags:['owner-profile'],reflectTagsMatch:'any_strict' as const}:{})}});
+  r.faux.setResponses([fauxAssistantMessage([fauxToolCall('hindsight_reflect',{query:'What preferences have I stated?'})],{stopReason:'toolUse'}),fauxAssistantMessage('Historical preferences.')]);
+  try{
+   const c=await chat(r.h);await(await c.submit({type:'input',content:'Summarize my previous preferences.'},ctx)).wait(ctx);
+   const requests=r.fake.calls.filter(c=>c.path.endsWith('/reflect'));assert.equal(requests.length,2);
+   for(const call of requests){assert.deepEqual(call.body.tags,explicit?['owner-profile']:undefined);assert.equal(call.body.tags_match,explicit?'any_strict':undefined);}
+  }finally{await r.close();}
+ }
+});
+
+test('bank shaping is explicit, write-bank-only, selective and does not expose unrelated server settings',{timeout:15000},async()=>{
+ const r=await setup(),seen:any[]=[];
+ r.faux.setResponses([
+  fauxAssistantMessage([fauxToolCall('hindsight_memory',{action:'bank_status'})],{stopReason:'toolUse'}),
+  fauxAssistantMessage([fauxToolCall('hindsight_memory',{action:'configure_bank',bankSettings:{retainMission:'Remember lasting preferences; ignore transient build output.'}})],{stopReason:'toolUse'}),
+  request=>{seen.push(request.messages);return fauxAssistantMessage('The extraction mission is configured.');}
+ ]);
+ try{
+  const c=await chat(r.h);await(await c.submit({type:'input',content:'Set my memory extraction mission to preserve lasting preferences.'},ctx)).wait(ctx);
+  const calls=r.fake.calls.filter(c=>c.path.endsWith('/config'));assert.equal(calls.length,3);
+  assert.ok(calls.every(c=>c.path.includes('/banks/bob/')));
+  assert.deepEqual(calls[2].body,{updates:{retain_mission:'Remember lasting preferences; ignore transient build output.'}});
+  assert.doesNotMatch(JSON.stringify(seen),/MUST_NOT_BE_EXPOSED/);
+  assert.equal(r.fake.calls.some(c=>c.path.includes('/import')),false);
+  await r.attached!.flush();assert.equal((await saves(r.h,c.id)).length,0,'bank-control turns are not themselves retained');
  }finally{await r.close();}
 });

@@ -6,9 +6,11 @@ Hindsight gives Bob long-term recall and conversation saving. It runs as a separ
 
 ### Recall
 
-- Queries `bob` and `hermes` before answering ordinary owner inputs. On timeout or failure, the answer continues with results from any available bank.
+- Queries `bob` and `hermes` before answering each substantive owner input. Greetings, acknowledgements, bare continuations, empty input and slash commands skip recall while leaving retention enabled. On timeout or failure, the answer continues with results from any available bank.
 - Supplies bounded, deduplicated historical references for the current model request. Treat these as context subordinate to current instructions and evidence; they stay outside system instructions and the saved transcript.
-- Recalls observations and raw world/experience facts by default, including older Hermes memories. Use `types` to select the memory types and `minRerankerScore` to set an optional score floor; evaluate filtering against your own queries before relying on it.
+- Recalls consolidated `observation` by default, matching Hermes's denser knowledge layer. Set `types:["observation","world","experience"]` to include raw supporting evidence. Automatic and tool recall share this policy.
+- Configured `minScores` are sent to the server and checked against each returned result. All named stages must meet their inclusive floors; a missing/null named stage fails. Entirely absent/null score metadata is retained for compatibility with older servers, matching Hermes. Scores are preserved in explicit recall output. Score floors are off by default; evaluate thresholds against the actual banks, queries and multilingual content before enabling them.
+- The mobile viewer shows recalled counts and save **queue admission** separately from model messages and retained conversation text. `recallIndicator`/`retainIndicator` default true. Check save receipts for extraction completion.
 
 ### Saving and recovery
 
@@ -41,13 +43,17 @@ Unconfigured backends default to disabled and make no Hindsight calls. Enabling 
 
 ### Optional settings
 
-- Recall: `types` and `minRerankerScore`.
+- Recall: `types`, `maxInputChars` (800), `minScores` (finite `reranker`/`final`/`semantic`/`keyword` floors), and legacy `minRerankerScore`. An explicit `minScores.reranker` wins over the legacy floor; otherwise the legacy floor combines with general floors.
+- Tags: `recallTags`/`recallTagsMatch` and independent `reflectTags`/`reflectTagsMatch`. Modes are `any`/`all`/`any_strict`/`all_strict`/`exact`. Empty `exact` selects untagged/global memories; empty ordinary scopes leave retrieval unconstrained. Set reflection tags separately from recall tags.
+- Status: `recallIndicator`/`retainIndicator`.
 - Saving: `maxTurnChars` (24000), `maxAttempts` (5), `retryDelayMs` (2000), `pollDelayMs` (2000).
 - Authentication: `apiKey`.
 
 Prefer `BOB_HINDSIGHT_API_KEY` to putting a credential in JSON. HTTPS is required for non-loopback endpoints; no redirects are followed. Do not expose an unauthenticated Hindsight service to the network.
 
 ### Existing Hermes memories
+
+Recall compatibility follows [Hindsight's Hermes plugin 1.2.3 (pinned revision `d952b6e`)](https://github.com/vectorize-io/hindsight/tree/d952b6e655fccab4581ee0722b51c5f103873d12/hindsight-integrations/hermes), selected by stable Hermes v0.22.5.
 
 The legacy `hermes` bank remains available for read-only recall. Bob recalls the current input before answering and defaults to a 1600-token text allowance. File-memory mirroring, template imports and service administration remain separate operations.
 
@@ -66,7 +72,9 @@ After tuning, set `recallTimeoutMs` to measured latency plus headroom. This inst
 - `hindsight_recall({query})`: relevant facts, with source-bank/document attribution.
 - `hindsight_reflect({query})`: on-demand synthesis from each configured recall bank.
 - `hindsight_retain({content,tags?})`: explicit selected-knowledge save to Bob. Returns a **queued receipt**; check its status for extraction completion.
-- `hindsight_memory({action:"status"})`: API connectivity, whether conversation saving is connected, current preferences, last recall and up to 30 recent save receipts. Use `doctor` when you also need to check extraction credentials.
+- `hindsight_memory({action:"status"})`: API connectivity, whether conversation saving is connected, effective recall policy, current preferences, last recall and up to 30 recent save receipts. Use `doctor` when you also need to check extraction credentials.
+- `hindsight_memory({action:"bank_status"})`: reads only the write bank's extraction/observation/reflection missions; never exposes provider keys or unrelated server configuration.
+- `hindsight_memory({action:"configure_bank",bankSettings:{retainMission:"…",observationsMission:"…",reflectMission:"…"}})`: with owner authorization, updates only supplied mission fields on the Bob write bank. Read `bank_status` first; evaluate changes on subsequent processing. Templates, stored facts, mental models and directives stay unchanged. Check whether an uncertain configuration change succeeded before retrying. Full bank template imports require a separately authorized Hindsight operation.
 - `hindsight_memory({action:"doctor"})`: on-demand LLM-health probe that makes real provider calls; reserve it for explicit checks.
 - `hindsight_memory({action:"configure",autoRecall:false,autoRetain:false})`: persistent controls for this conversation.
 - `hindsight_memory({action:"retry",key:"input:123"})`: explicitly reconcile/retry a failed save from status. Keeps the original document/operation identities.

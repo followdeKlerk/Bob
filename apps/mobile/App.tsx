@@ -20,10 +20,12 @@ import {Bell,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 
 import {AgentsScreen} from './components/agents-screen';
 import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
+import {useSessionWorking} from './use-session-working';
 import {BuildCard} from './components/build-card';
 import {useBuildStatus} from './use-build-status';
 import {MessageOutbox,visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
 import {OutboxDelivery} from './outbox-delivery';
+import {BackgroundOutbox,type BackgroundPort} from './background-outbox';
 import {responseData} from './network-policy';
 import {QuestionCard,type Question} from './components/question-card';
 import {NotesScreen} from './components/notes-screen';
@@ -85,7 +87,7 @@ type Entry = {
   model?: ToolMessage[];
   data?: unknown;
 };
-type Chat = { id: number; meta?: { title: string; pinned?:boolean;archived?:boolean;trashed?:boolean }; owner?: unknown };
+type Chat = { id: number; meta?: { title: string; pinned?:boolean;archived?:boolean;trashed?:boolean }; owner?: {conversationId?:number;taskId?:number} };
 const snapshotLifecycle:SnapshotLifecycle={
  active:()=>AppState.currentState!=='background'&&AppState.currentState!=='inactive',
  subscribe:listener=>AppState.addEventListener('change',state=>listener(state==='active')),
@@ -171,7 +173,12 @@ function Main() {
     [notifyEnabled, setNotifyEnabled] = useState(true),
     [pending, setPending] = useState<string>();
   const [outbox]=useState(()=>new MessageOutbox());
+  const [backgroundOutbox]=useState(()=>NativeModules.BobOutbox?new BackgroundOutbox(NativeModules.BobOutbox as BackgroundPort,async id=>{const value=await Keychain.getGenericPassword({service:`bob.${id}`});return value?value.password:undefined;}):undefined);
   const [outgoing,setOutgoing]=useState(outbox.items),[outboxError,setOutboxError]=useState<string>();
+  const [backgroundReady,setBackgroundReady]=useState<string[]>([]);
+  useEffect(()=>{if(!backgroundOutbox)return;let current=true;setBackgroundReady([]);for(const b of backends)void backgroundOutbox.prepare(b.backendId).then(()=>{if(!current)return;if(backgroundOutbox.ready(b.backendId))setBackgroundReady(ids=>[...ids,b.backendId]);else if(selectedBackend.current===b.backendId)setStatus('Pair again: device credential missing');}).catch(()=>{if(current&&selectedBackend.current===b.backendId)setStatus('Pair again: device credential unavailable');});return()=>{current=false;};},[backgroundOutbox,backends]);
+  const sendReady=!backgroundOutbox||backgroundReady.includes(backend?.backendId??'');
+  useEffect(()=>{if(!backgroundOutbox)return;void(async()=>{await outbox.ready;for(const item of await backgroundOutbox.recover())if(!outbox.items.some(local=>local.id===item.id))await outbox.add(item);})().catch(()=>setOutboxError('Unable to recover background message queue'));},[backgroundOutbox,outbox]);
   useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
   const [bottomBarHeight,setBottomBarHeight]=useState(60);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
@@ -495,15 +502,19 @@ function Main() {
     setChats(items);setChatCursor(result.next);await AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items));
   }
   async function submit(mode: 'steer' | 'followUp',answer?:{questionId:string;text:string}) {
-    if (!backend || !chat || (!answer&&!hasDraft) || pending || pendingOperations.current.has(scope)) return;
+    if (!sendReady || !backend || !chat || (!answer&&!hasDraft) || pending || pendingOperations.current.has(scope)) return;
     if(answer&&(view?.docs['bob.questions']?.pending?.id!==answer.questionId||outbox.items.some(item=>item.scope===scope&&item.message.questionId===answer.questionId&&(!item.rejected||item.admitted))))return;
     parentFollow.resume();
     const current=scope,files=answer?[]:attachments,op=uuid();
-    const item:OutgoingMessage={id:op,scope:current,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
+    const foregroundOnly=files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
+    const item:OutgoingMessage={id:op,scope:current,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
       message:Message.parse({requestId:op,...(answer?{questionId:answer.questionId}:{}),text:answer?.text??(draft.trim()?draft:'Please look at the attached file'+(files.length===1?'.':'s.')),mode,allowSubagents:true,
         ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:420},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
     // Publish the ordinary chat bubble and clear the composer before any await.
     const saved=outbox.add(item);
+    // Dispatch to native before awaiting JS storage: locking may suspend JS immediately.
+    const handedOff=backgroundOutbox?.enqueue(item);
+    void handedOff?.catch(()=>{});
     Keyboard.dismiss();
     if(!answer){setDraft('');setDraftAttachments(previous=>({...previous,[current]:[]}));}
     try {await saved;void drainOutbox();}
@@ -511,6 +522,11 @@ function Main() {
   }
   const transport=useRef({request,backends});transport.current={request,backends};
   const [delivery]=useState(()=>new OutboxDelivery(outbox,{
+    ...(backgroundOutbox?{background:(item:OutgoingMessage)=>{
+      const preceding=outbox.items.slice(0,outbox.items.findIndex(value=>value.id===item.id));
+      if(preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve(undefined);
+      return backgroundOutbox.deliver(item);
+    }}:{}),
     backends:()=>transport.current.backends,
     request:(path,method,body,b)=>transport.current.request(path,method,body,b),
     async upload(item,b){
@@ -615,6 +631,7 @@ function Main() {
     if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab));return;}
     sectionRequest.current++;setSectionLoading(false);setScreen(tab);
   }
+  const sessionWorking=useSessionWorking(backend,screen==='Sessions',signal=>request('status','GET',undefined,backend,signal));
   useEffect(()=>{
     if(screen!=='Sessions'||!backend)return;
     const b=backend;let cancelled=false;
@@ -704,7 +721,7 @@ function Main() {
     const entries=[...(parentHistory.page?.items??[]),...(view?.entries??[])];
     for(const item of outgoing){
       if(item.scope!==scope)continue;
-      if(!visibleOutgoing([item],scope,entries).length)void outbox.remove(item.id).catch(()=>{});
+      if(!visibleOutgoing([item],scope,entries).length)void(async()=>{await backgroundOutbox?.remove(item.id);await outbox.remove(item.id);})().catch(()=>{});
       else if(item.afterEntryId===undefined&&entries.length)void outbox.update(item.id,{afterEntryId:outgoingAnchor(item,entries)}).catch(()=>{});
     }
   },[outgoing,scope,view?.entries,parentHistory.page,outbox]);
@@ -787,7 +804,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -863,7 +880,7 @@ function Main() {
               <DraftInput scope={scope} editable={composerReady} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
                 maxHeight={Math.max(48,Math.min(260,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady} onPress={()=>{setActionsMore(false);setActions(true);}}/>}
-                trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||(!showStop&&(!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
+                trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
               />
             </Animated.View>
           </Animated.View>
@@ -1129,7 +1146,7 @@ function Main() {
           setScreen('Sessions');setDrawer(false);
         }}))}
         onSessionAction={sessionAction}
-        conversations={chats.map(c=>({id:String(c.id),label:c.meta?.title||'Conversation',selected:c.id===chat,pinned:c.meta?.pinned,archived:c.meta?.archived,trashed:c.meta?.trashed,onPress:()=>{setChat(c.id);setScreen('Chat');setDrawer(false);}}))}
+        conversations={chats.filter(c=>!c.owner).map(c=>({id:String(c.id),label:c.meta?.title||'Conversation',selected:c.id===chat,working:sessionWorking.has(c.id),pinned:c.meta?.pinned,archived:c.meta?.archived,trashed:c.meta?.trashed,onPress:()=>{setChat(c.id);setScreen('Chat');setDrawer(false);}}))}
         loadMore={chatCursor?()=>run(async()=>{
           const b=backend;if(!b)return;
           const page=await request('chats?cursor='+encodeURIComponent(chatCursor),'GET',undefined,b);

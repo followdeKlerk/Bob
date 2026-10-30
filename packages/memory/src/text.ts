@@ -11,6 +11,11 @@ export function cleanText(text:string):string {
  return text.replace(/\n*\[Bob display context for this request:[\s\S]*$/,'').trim();
 }
 export function noMemory(text:string){return /(?:^|\s)#(?:nomem|skip)\b/i.test(text);}
+/** Stable Hermes v0.22.5's anchored zero-signal gate; never classify by length alone. */
+export function isTrivialMemoryPrompt(text:string):boolean {
+ const value=text.trim();
+ return !value||value.startsWith('/')||/^(?:yes|no|ok|okay|sure|thanks|thank you|y|n|yep|nope|yeah|nah|hi|hey|hello|yo|sup|continue|go ahead|do it|proceed|got it|cool|nice|great|done|next|lgtm|k)[\s!?.:;,"'~\u2018\u2019\u201c\u201d\u2014\u2013\u2026()\[\]{}<>*&^%$#@!+=`\u00a0]*$/i.test(value);
+}
 /** Defence in depth, not a guarantee that arbitrary secrets can be detected. */
 export function redact(text:string):string {
  return text.replace(/-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?-----END (?:[A-Z ]*PRIVATE KEY)-----/g,'[REDACTED PRIVATE KEY]')

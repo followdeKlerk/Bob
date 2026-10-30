@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { Server as HttpsServer } from "node:https";
 import QRCode from "qrcode";
 import { State } from "./state.js";
 import { serve } from "./server.js";
@@ -86,17 +87,19 @@ cli
   .option("--cert <file>")
   .option("--key <file>")
   .action(async (o) => {
+    if ((o.cert !== undefined) !== (o.key !== undefined))
+      throw new Error("--cert and --key must be supplied together");
     const s = state();
     const app = await serve(s, {
       host: o.host,
       port: Number(o.port),
-      tls: o.cert && o.key ? { cert: o.cert, key: o.key } : undefined,
+      tls: o.cert !== undefined ? { cert: o.cert, key: o.key } : undefined,
     });
     console.log(
       JSON.stringify({
         backendId: s.id,
         listening: app.server.address(),
-        encrypted: !!o.cert,
+        encrypted: app.server instanceof HttpsServer,
       })
     );
     let closing = false;

@@ -6,64 +6,81 @@
 
 An Android app for working with AI agents on your own Linux machines.
 
-I built Bob because I wanted to use my agents from my phone, not just from a terminal. I use it myself, and it keeps changing as I find things I need. **This is an unfinished personal project, not a polished product.** Expect rough edges and a hands-on setup.
+I built Bob because I wanted to use my agents from my phone, not just from a terminal. Give an agent something to work on, see what it's doing, and pick the conversation up later. The work runs on your machine; you don't have to keep the chat open.
 
-## Around the app
+I use it myself, and it keeps changing as I find things I need. It's still a hands-on setup: you build it from source, connect your own model provider and pair your phone. There's no hosted Bob service.
 
-Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Settings** within reach. The model picker shows the conversation’s current model and thinking level, with locally saved favourites pinned first. Agents has a full-height, view-only transcript: working/stopping agents appear by default, while History reveals inactive ones without deleting them. The edge-to-edge Android surface leaves bottom navigation available rather than requiring a preliminary reveal swipe.
+## A task, from your phone
+
+Here's a small coding example: ask for a change, follow the tests, and get the updated project back as a ZIP.
 
 <table>
   <tr>
-    <th>Choose a favourite</th>
-    <th>Watch an agent</th>
-    <th>Return to its history</th>
+    <th>Ask for a change</th>
+    <th>Follow the work</th>
+    <th>Get the result</th>
   </tr>
   <tr>
-    <td><img src="assets/showcase/model-picker.png" width="240" alt="Compact model picker showing the current model, thinking effort and a starred favourite pinned first"></td>
-    <td><img src="assets/showcase/agents-active.png" width="240" alt="Agents tab with the active-agent selector and a full-height view-only transcript using labelled demo data"></td>
-    <td><img src="assets/showcase/agents-history.png" width="240" alt="The minimal History switch reveals an inactive demo agent and its retained transcript"></td>
+    <td><img src="assets/showcase/coding-request.png" width="240" alt="Asking Bob to improve a slugify function and add tests"></td>
+    <td><img src="assets/showcase/coding-tests.png" width="240" alt="Tool output showing five passing tests and the project being zipped"></td>
+    <td><img src="assets/showcase/coding-result.png" width="240" alt="The finished change with a downloadable project ZIP"></td>
   </tr>
 </table>
 
-<p align="center">
-  <img src="assets/showcase/coding-demo.gif" width="420" alt="Recorded tour of the current Bob app: saved coding results, model favourites, active agents and retained agent history">
-</p>
+These captures show a saved coding run. The [recorded app tour](assets/showcase/coding-demo.gif) also includes staged model and agent data; available models depend on your provider. [Capture details](assets/showcase/README.md).
 
+## More than a remote terminal
 
-## What it does
+You can switch between machines without mixing up their conversations, send files back and forth, and keep notes alongside your work. When an agent delegates a task, you can follow that agent's conversation too, including after it's finished.
 
-- Streams conversations and tool results to your phone. Backend work can continue when you leave the chat.
-- Connects to multiple Linux backends, each with its own conversations and configuration.
-- Gives agents file, shell and web tools, with optional memory and interactive views.
-- Shows delegated agents in a dedicated read-only viewer, separating active work from retained history.
-- Lets you choose models and thinking effort, with favourites saved on your phone.
-- Lets you exchange files with an agent, keep notes and return to earlier work.
+There are file, shell and web tools, plus optional memory and interactive views. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
 
-The backend runs agents through [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable).
+<details>
+  <summary>Around the app</summary>
 
-## Try it
+<table>
+  <tr>
+    <th>Choose a model</th>
+    <th>Follow an agent</th>
+    <th>Come back later</th>
+  </tr>
+  <tr>
+    <td><img src="assets/showcase/model-picker.png" width="240" alt="Model picker with a starred favourite; model catalog is staged demo data"></td>
+    <td><img src="assets/showcase/agents-active.png" width="240" alt="Active agent viewer showing labelled example data"></td>
+    <td><img src="assets/showcase/agents-history.png" width="240" alt="An inactive example agent and its retained transcript"></td>
+  </tr>
+</table>
 
-You need an Android phone, a Linux x86_64 machine, a supported model provider and Tailscale/HTTPS connectivity between them. There is no hosted service or one-click installer. iOS is not supported.
+</details>
 
-Follow [installation](INSTALL.md), or give your agent the [setup instructions](SETUP-AGENT.md). Those instructions ask it to inspect your machine, protect existing data and stop for authentication and installation approvals.
+## Where things run
 
-## Command-line management
+The Android app talks to your Linux backend over authenticated HTTPS through Tailscale. The backend runs the agents using [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable), calls your chosen model provider and keeps your conversations.
 
-Bob includes a small backend CLI for setup and administration. Use `bob` when installed, or `node dist/cli.js` from a built checkout. It manages the Linux backend, not the Android app.
-
-```sh
-bob --help
-bob --state /absolute/path/to/bob-state doctor
-bob --state /absolute/path/to/bob-state doctor --check
+```text
+Your Android phone
+        │ HTTPS over Tailscale
+Your Linux machine
+        ├─ agents, tools and saved conversations
+        └─ your chosen model provider and optional services
 ```
 
-`doctor` prints a JSON report with actionable checks for the Node version, existing state/schema, model and credential presence, working folder, Chromium and runtime ownership. It does not initialize missing state, repair anything, contact providers or restart services. `--check` exits 1 on configuration errors; optional-browser warnings alone do not fail it. This is a local configuration check, **not proof that inference, phone connectivity or optional integrations work**. Reports omit stored credential values, but can contain local paths and model names; review them before sharing.
+Running the backend yourself doesn't mean everything stays local: prompts and relevant context go to the providers and services you use. Agents also run with the backend OS account's permissions—the working folder isn't a sandbox. Use an account and machine you're comfortable giving that access to.
 
-Always specify the intended state directory: most other commands can initialize a new backend at the wrong path. Existing commands cover provider login, phone pairing, device revocation, backups and explicit module/MCP configuration. Start with `bob <command> --help`; see [CLI operations](OPERATIONS.md#cli-and-initial-configuration) for prerequisites and safety boundaries.
+## Trying it
 
+You'll need an Android phone, a Linux x86_64 machine, a supported model provider and Tailscale with HTTPS set up between the devices. Model use may cost money. There's no one-click installer, and iOS isn't supported.
 
-## Documentation
+The [installation guide](INSTALL.md) covers the build and pairing. If you'd rather have an agent help with setup, give it [this checklist](SETUP-AGENT.md).
 
-- [Installation](INSTALL.md) — prerequisites, building, configuration and pairing.
-- [Features](FEATURES.md) — current behaviour and limitations.
-- [Operations](OPERATIONS.md) — configuration, maintenance, updates and recovery.
+For the details: [features and limitations](FEATURES.md), or [operations](OPERATIONS.md) for the backend CLI, updates and backups.
+
+## Bugs, ideas and changes
+
+If you try Bob, I'd like to hear what works and what gets in your way. Bug reports and small, focused pull requests are welcome. For a bigger change, open an issue first so we can talk it through. This is a personal project, so there's no promised support or release schedule.
+
+Please keep credentials and private conversations out of issues and screenshots. For security problems, see [SECURITY.md](SECURITY.md).
+
+## License
+
+Bob is [MIT licensed](LICENSE). You're welcome to use it, change it and build on it; keep the license and copyright notice. Third-party code and assets retain their own licenses—see [the notices](THIRD_PARTY_NOTICES.md).

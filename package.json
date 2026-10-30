@@ -1,5 +1,6 @@
 {
   "name": "@bob-local/cli",
+  "license": "MIT",
   "version": "0.3.0",
   "private": true,
   "type": "module",

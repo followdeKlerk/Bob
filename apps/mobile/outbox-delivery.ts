@@ -2,6 +2,7 @@ import {MessageOutbox,type OutgoingMessage} from './message-outbox';
 import {retryDelay,retryableError} from './network-policy';
 type Backend=OutgoingMessage['backend'];
 type Port={
+ background?(item:OutgoingMessage):Promise<import('./background-outbox').BackgroundReceipt|undefined>;
  backends():Backend[];
  request(path:string,method:string,body:unknown,backend:Backend):Promise<any>;
  upload(item:OutgoingMessage,backend:Backend):Promise<void>;
@@ -38,14 +39,20 @@ export class OutboxDelivery {
    try{
     // A timeout is not evidence of rejection. Always recover a receipt before
     // attempting the exact same request identity again.
-    let admission=(await this.port.request(`chats/${item.chat}/operations/${item.id}`,'GET',undefined,backend)).admission;
-    if(!admission&&!item.admitted){
+    const background=this.port.background?await this.port.background(item):undefined;
+    if(background?.state==='rejected'){
+     await this.box.update(item.id,{rejected:true,uncertain:background.uncertain===true,lastError:background.error??'Message could not be sent',retryAt:undefined});blocked.add(item.scope);continue;
+    }
+    if(background?.state==='pending'){blocked.add(item.scope);continue;}
+    let admission=background?.admission;
+    if(!background)admission=(await this.port.request(`chats/${item.chat}/operations/${item.id}`,'GET',undefined,backend)).admission;
+    if(!background&&!admission&&!item.admitted){
      if(item.files.length)await this.port.upload(item,backend);
      admission=await this.port.request(`chats/${item.chat}/messages`,'POST',item.message,backend);
     }
     if(admission){
      if(typeof admission!=='object'||typeof admission.status!=='string'||(admission.entry!==undefined&&(!Number.isSafeInteger(admission.entry)||admission.entry<=0)))throw Error('Invalid delivery receipt');
-     await this.box.update(item.id,{admitted:true,entry:admission.entry,attempts:0,retryAt:admission.entry===undefined?Date.now()+5000:undefined,retryAfterAt:undefined,lastError:undefined});
+     await this.box.update(item.id,{admitted:true,uncertain:false,entry:admission.entry,attempts:0,retryAt:admission.entry===undefined?Date.now()+5000:undefined,retryAfterAt:undefined,lastError:undefined});
      await this.port.cleanup(item).catch(()=>{});
      if(!item.admitted)await this.port.watch(item,backend).catch(()=>{});
     }else{

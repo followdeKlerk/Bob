@@ -6,7 +6,7 @@ A practical reference for using Bob and its tools. Start with the workflow you n
 
 The six bottom tabs are **Notes · Workstations · Chat · Agents · Sessions · Settings**. Workstations selects a paired machine; Sessions opens its conversations; Chat returns to the current conversation. The chat keeps its draft and reading position when switching tabs. The bottom bar hides while typing.
 
-Sessions includes search, New chat, pin, rename, Archive and recoverable Trash.
+Sessions includes search, New chat, pin, rename, Archive and recoverable Trash. Owned helper conversations appear in Agents rather than the regular Sessions list. A row spinner shows unfinished foreground work while Sessions is visible.
 
 Open **Model & thinking** from the composer's **+** menu to change the current conversation's model and effort. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
 
@@ -81,9 +81,11 @@ In the app, **Save note** queues an edit for synchronization. Local and server-s
 
 ### Memory
 
-When configured and selected, Hindsight recalls historical context and retains ordinary owner/final-assistant text. New writes go to the Bob bank; legacy Hermes recall is read-only. See [memory configuration](packages/memory/README.md) for setup and options.
+Hindsight recalls relevant consolidated observations before substantive inputs and retains ordinary owner/final-assistant text. Greetings and bare acknowledgements skip recall. New writes go to the Bob bank; legacy Hermes recall is read-only. Score floors and tag scopes filter recall, with reflection scoped separately. See [memory configuration](packages/memory/README.md) for the service setup and filters.
 
-Use `hindsight_recall` for targeted retrieval and `hindsight_reflect` for synthesis; reflection may incur provider cost. `hindsight_retain` queues selected knowledge. Check `hindsight_memory(action="status")` for completed extraction or failures.
+Use `hindsight_recall` for targeted retrieval and `hindsight_reflect` for synthesis; reflection may incur provider cost. `hindsight_retain` queues selected knowledge. Check `hindsight_memory(action="status")` for completed extraction or failures. Compact chat indicators show recall and saving progress, including the intermediate **save queued** state, without displaying the stored content.
+
+`bank_status` reads the Bob write bank's extraction, observation and reflection missions. After reading them, use `configure_bank` to change only the missions the owner requests. Existing facts stay intact. Reconcile an uncertain configuration write before retrying.
 
 `configure` changes this conversation's auto-recall/auto-save settings; global service configuration is owner-managed. `doctor` deliberately calls the extraction/reflection providers, so it is not a polling command. `retry` uses a failed receipt's key. `#nomem` or `#skip` in owner input excludes the turn from automatic memory, not from the chat transcript. Disabling saving cannot undo already accepted server work. Memory results are untrusted historical data.
 
@@ -98,6 +100,8 @@ Empty conversations show “No messages yet.” History loading and failures hav
 Connections refresh periodically while preserving the displayed conversation.
 
 History, drafts and pending messages are scoped to their backend and conversation. Reconnection reuses the original request identity to reconcile delivery. If an outcome is uncertain, check that request rather than submit a duplicate. Archive and Trash organize conversations; Trash remains recoverable.
+
+On Android, text-only messages go through an encrypted native outbox and expedited WorkManager job. Once persisted, pending sends survive normal locking, minimising and process recreation; reopening reconciles the receipt into the original bubble. Retries keep the same request identity. Network availability, battery restrictions, work quotas and force-stop affect delivery time. Failures have a retry action; uncertain outcomes show **Delivery unconfirmed**. Keep Bob open for attachment uploads and messages queued behind them in the same conversation.
 
 ### Message formatting
 
@@ -148,6 +152,8 @@ The default native bounds are **4 active helpers and 12 total spawn/send dispatc
 **Scope boundary:** a new ordinary owner message—including plain “Status”—replaces the prior scope and invalidates its automatic report continuation. It does not cancel helpers already working. Use **`/delegation auto status`** to inspect the setting and current scope without inference or replacing it. `/delegation auto revoke` ends this chat's authority; `/delegation auto off` disables adaptive delegation and revokes this chat's existing scope. Stop revokes authority before native abort; root stop preserves existing background work, while tree stop includes it. Disable/re-enable does not revive old continuation grants. A fresh owner task can authorize further work.
 
 When assignments from different owner scopes to the same helper produce one combined answer, native reporting may associate it only with the older scope. Automatic continuation then stops rather than transferring the older report's authority to the new task.
+
+Helper transcripts remain accessible in Agents and its History view. Background-only helpers do not mark their parent Sessions row as working.
 
 Profile tool policies select exact native tool names and are bound to the profile's fingerprint. Rebind the policy after changing that profile. Existing helpers keep their captured selection. A tool such as `bash` retains the backend account's OS access. See [configuration and downgrade procedures](OPERATIONS.md#advanced-delegation-configuration).
 

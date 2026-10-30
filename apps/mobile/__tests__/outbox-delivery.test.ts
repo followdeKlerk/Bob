@@ -99,3 +99,16 @@ test('a later receipt authorization error cannot relabel an already admitted mes
  const box=new MessageOutbox();await box.ready;await box.add({...item(),admitted:true});const io=port();io.request.mockRejectedValue(Object.assign(Error('Pair again'),{httpStatus:401}));
  await new OutboxDelivery(box,io).drain();expect(outgoingLabel(box.items[0])).toBe('Queued');expect(box.items[0].lastError).toBe('Pair again');expect(io.request.mock.calls.some(call=>call[1]==='POST')).toBe(false);
 });
+test('Android-owned pending delivery never falls back to a foreground POST',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io={...port(),background:jest.fn(async()=>({state:'pending' as const}))};
+ await new OutboxDelivery(box,io).drain();expect(io.background).toHaveBeenCalledTimes(1);expect(io.request).not.toHaveBeenCalled();expect(box.items[0].admitted).toBeUndefined();
+});
+test('Android receipt merges into local bubble and native rejection stays visible',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io={...port(),background:jest.fn(async():Promise<import('../background-outbox').BackgroundReceipt>=>({state:'rejected',error:'Pair again'}))};
+ const delivery=new OutboxDelivery(box,io);await delivery.drain();expect(box.items[0]).toMatchObject({rejected:true,lastError:'Pair again'});expect(io.request).not.toHaveBeenCalled();
+ await box.update('first',{rejected:false});io.background.mockResolvedValue({state:'admitted',admission:{status:'placed',entry:42}});await delivery.drain();expect(box.items[0]).toMatchObject({admitted:true,entry:42});expect(io.cleanup).toHaveBeenCalledTimes(1);
+});
+test('an exhausted uncertain Android POST is not falsely labelled Not sent',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io={...port(),background:jest.fn(async()=>({state:'rejected' as const,uncertain:true,error:'Delivery not confirmed'}))};
+ await new OutboxDelivery(box,io).drain();expect(outgoingLabel(box.items[0])).toBe('Delivery unconfirmed');expect(io.request).not.toHaveBeenCalled();
+});
