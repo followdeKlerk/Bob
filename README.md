@@ -8,8 +8,6 @@ An Android app for working with AI agents on your own Linux machines.
 
 I built Bob because I wanted to use my agents from my phone, not just from a terminal. I use it myself, and it keeps changing as I find things I need. **This is an unfinished personal project, not a polished product.** Expect rough edges and a hands-on setup.
 
-Bob is increasingly being tailored towards people who code: access to a working folder, files and tools, persistent conversations, and agents on connected machines. It is not an on-device model or a full mobile IDE.
-
 ## Around the app
 
 Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Settings** within reach. The model picker shows the conversation’s current model and thinking level, with locally saved favourites pinned first. Agents has a full-height, view-only transcript: working/stopping agents appear by default, while History reveals inactive ones without deleting them. The edge-to-edge Android surface leaves bottom navigation available rather than requiring a preliminary reveal swipe.
@@ -31,7 +29,6 @@ Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Se
   <img src="assets/showcase/coding-demo.gif" width="420" alt="Recorded tour of the current Bob app: saved coding results, model favourites, active agents and retained agent history">
 </p>
 
-Captured from the signed **Bob 0.3.101** app in a disposable Android 16 emulator. The GIF records browsing at normal speed; its coding conversation replays saved output from an earlier real model run, not a new live coding session. Agent activity and model-menu options are staged UI fixtures; no production conversations or provider credentials were used. See [capture notes](assets/showcase/README.md) for provenance and verification limits.
 
 ## What it does
 
@@ -64,11 +61,6 @@ bob --state /absolute/path/to/bob-state doctor --check
 
 Always specify the intended state directory: most other commands can initialize a new backend at the wrong path. Existing commands cover provider login, phone pairing, device revocation, backups and explicit module/MCP configuration. Start with `bob <command> --help`; see [CLI operations](OPERATIONS.md#cli-and-initial-configuration) for prerequisites and safety boundaries.
 
-## Before connecting a machine
-
-**Agent tools run with the backend OS account's permissions.** A working folder is not a sandbox. Use an account and machine you are comfortable giving an agent access to.
-
-Model inference, and optional memory processing, may use external providers. Running the backend yourself does not mean inference stays local. Keep credentials and private files out of screenshots, shared conversations and commits.
 
 ## Documentation
 
@@ -76,5 +68,3 @@ Model inference, and optional memory processing, may use external providers. Run
 - [Features](FEATURES.md) — current behaviour and limitations.
 - [Operations](OPERATIONS.md) — development, maintenance, updates and recovery.
 - [Agent working rules](AGENTS.md) — boundaries for agents working in this checkout.
-
-No roadmap or planning archive is published here. The documentation describes what exists, not promises about future releases.
