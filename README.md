@@ -10,25 +10,6 @@ I built Bob because I wanted to use my agents from my phone, not just from a ter
 
 Bob is increasingly being tailored towards people who code: access to a working folder, files and tools, persistent conversations, and agents on connected machines. It is not an on-device model or a full mobile IDE.
 
-## A small coding task
-
-Ask Bob to improve a JavaScript utility, add tests and send back the updated project.
-
-<table>
-  <tr>
-    <th>Ask for a change</th>
-    <th>Check the tests</th>
-    <th>Get the project</th>
-  </tr>
-  <tr>
-    <td><img src="assets/showcase/coding-request.png" width="240" alt="A coding request in Bob with agent tool activity"></td>
-    <td><img src="assets/showcase/coding-tests.png" width="240" alt="Bob's terminal tool result showing all five tests passing"></td>
-    <td><img src="assets/showcase/coding-result.png" width="240" alt="The updated project attached as a ZIP, with a short summary"></td>
-  </tr>
-</table>
-
-The coding screenshots replay saved output from a real model run on a disposable sample project, displayed in the current app—not a new inference run.
-
 ## Around the app
 
 Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Settings** within reach. The model picker shows the conversation’s current model and thinking level, with locally saved favourites pinned first. Agents has a full-height, view-only transcript: working/stopping agents appear by default, while History reveals inactive ones without deleting them. The edge-to-edge Android surface leaves bottom navigation available rather than requiring a preliminary reveal swipe.
@@ -50,7 +31,7 @@ Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Se
   <img src="assets/showcase/coding-demo.gif" width="420" alt="Recorded tour of the current Bob app: saved coding results, model favourites, active agents and retained agent history">
 </p>
 
-Captured from the signed **Bob 0.3.101** app in a disposable Android 16 emulator. The GIF records browsing at normal speed, not a new live coding session. Agent activity and model-menu options are staged UI fixtures; no production conversations or provider credentials were used. See [capture notes](assets/showcase/README.md) for provenance and verification limits.
+Captured from the signed **Bob 0.3.101** app in a disposable Android 16 emulator. The GIF records browsing at normal speed; its coding conversation replays saved output from an earlier real model run, not a new live coding session. Agent activity and model-menu options are staged UI fixtures; no production conversations or provider credentials were used. See [capture notes](assets/showcase/README.md) for provenance and verification limits.
 
 ## What it does
 
