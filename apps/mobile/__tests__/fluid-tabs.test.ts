@@ -1,11 +1,11 @@
 import {FLUID_TAB_HEIGHT,fluidTabPath} from '../fluid-tabs';
-test.each([240,313,361,760])('fluid geometry stays bounded at width %i, including edge tabs and rapid reversals',width=>{
- for(let position=0;position<=4;position+=.125){
-  for(const shoulder of [0,2,4]){
-   const path=fluidTabPath(width,position,shoulder);
+test.each([5,6].flatMap(count=>[240,313,361,760].map(width=>[count,width])))('fluid geometry for %i tabs stays bounded at width %i, including edge tabs and rapid reversals',(count,width)=>{
+ for(let position=0;position<=count-1;position+=.125){
+  for(const shoulder of [0,2,count-1]){
+   const path=fluidTabPath(width,position,shoulder,count);
    expect(path).not.toMatch(/NaN|Infinity/);
    expect(path.startsWith(`M0 0 H${width} `)).toBe(true);
-   const values=(path.match(/-?\d+(?:\.\d+)?/g)??[]).map(Number);
+   const values=(path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)??[]).map(Number);
    expect(values.every(value=>value>=0&&value<=Math.max(width,FLUID_TAB_HEIGHT))).toBe(true);
    expect(path.endsWith('Q0 8 0 0 Z')).toBe(true);
   }
@@ -28,7 +28,7 @@ test('shape stretches during travel, settles exactly, and clamps spring overshoo
 
 test('liquid travel stretches toward the trailing tab and lifts the rounded bottom, symmetrically',()=>{
  const curve=(position:number,tail:number)=>{
-  const segments=fluidTabPath(360,position,tail).split(' C').slice(1).map(part=>(part.match(/-?\d+(?:\.\d+)?/g)??[]).slice(0,6).map(Number));
+  const segments=fluidTabPath(360,position,tail).split(' C').slice(1).map(part=>(part.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)??[]).slice(0,6).map(Number));
   return {right:segments[0][4],left:segments[2][4],bottomX:segments[1][4],depth:segments[1][5]};
  };
  const still=curve(2,2),movingRight=curve(2,0),movingLeft=curve(2,4);
@@ -42,11 +42,23 @@ test('liquid travel stretches toward the trailing tab and lifts the rounded bott
  expect(movingRight.left+movingLeft.right).toBeCloseTo(360);
 });
 
-test.each([240,313,361,760])('fractional retargets and resize remain finite and bounded at width %i',width=>{
- for(let head=0;head<=4;head+=.2)for(let tail=0;tail<=4;tail+=.2){
-  const path=fluidTabPath(width,head,tail);
+test.each([5,6].flatMap(count=>[240,313,361,760].map(width=>[count,width])))('fractional retargets for %i tabs and resize remain finite and bounded at width %i',(count,width)=>{
+ for(let head=0;head<=count-1;head+=.2)for(let tail=0;tail<=count-1;tail+=.2){
+  const path=fluidTabPath(width,head,tail,count);
   expect(path).not.toMatch(/NaN|Infinity/);
-  const values=(path.match(/-?\d+(?:\.\d+)?/g)??[]).map(Number);
+  const values=(path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)??[]).map(Number);
   expect(values.every(value=>value>=0&&value<=Math.max(width,FLUID_TAB_HEIGHT))).toBe(true);
  }
+});
+
+test.each([313,361,760])('six-tab lobes settle at all six slot centers at width %i',width=>{
+  for(let index=0;index<6;index++){
+   const path=fluidTabPath(width,index,index,6);
+   const bottom=(path.split(' C')[2].match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)??[]).slice(0,6).map(Number);
+   expect(bottom[4]).toBeCloseTo(width*(index+.5)/6);
+   expect(bottom[5]).toBe(55);
+  }
+  expect(fluidTabPath(width,5,5,6)).not.toBe(fluidTabPath(width,4,4,6));
+  expect(fluidTabPath(width,5.2,5.2,6)).toBe(fluidTabPath(width,5,5,6));
+  expect(fluidTabPath(width,-.2,-.2,6)).toBe(fluidTabPath(width,0,0,6));
 });

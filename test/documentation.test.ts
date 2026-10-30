@@ -6,7 +6,7 @@ import {CodingTools} from '@earendil-works/pi-durable/tools';
 
 // Structural guards, not a claim that a model understands or obeys the manual.
 const guides = ['README.md', 'INSTALL.md', 'SETUP-AGENT.md', 'AGENTS.md', 'FEATURES.md', 'OPERATIONS.md',
-  'apps/mobile/README.md', 'packages/memory/README.md'];
+  'apps/mobile/README.md', 'packages/memory/README.md', 'assets/showcase/README.md'];
 const read = (path: string) => readFileSync(path, 'utf8');
 const withoutFences = (text: string) => text.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, '');
 function anchors(text: string) {
@@ -29,6 +29,12 @@ function linkErrors(file: string, text: string) {
     if (!existsSync(target)) errors.push(`Missing target: ${file} -> ${link}`);
     else if (fragment && !anchors(read(target)).has(decodeURIComponent(fragment)))
       errors.push(`Missing heading: ${file} -> ${link}`);
+  }
+  for (const match of withoutFences(text).matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)) {
+    const link = match[1]!;
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(link)) continue;
+    if (!existsSync(resolve(dirname(file), decodeURIComponent(link))))
+      errors.push(`Missing image: ${file} -> ${link}`);
   }
   return errors;
 }
@@ -54,6 +60,7 @@ test('every declared Bob tool and upstream coding tool appears in FEATURES', () 
 });
 test('documentation guards detect drift rather than silently passing', () => {
   assert.equal(linkErrors('README.md', '[bad](nonexistent-documentation-target.md)').length, 1);
+  assert.equal(linkErrors('README.md', '<img src="nonexistent-showcase.png">').length, 1);
   assert.equal(linkErrors('README.md', '[bad](FEATURES.md#nonexistent-heading)').length, 1);
   assert.deepEqual(missingTools(['new_tool'], '`notes`'), ['new_tool']);
   assert.deepEqual(declaredTools('fixture.ts', 'defineTool({name:"new_tool", description:"example"})'), ['new_tool']);

@@ -1,14 +1,16 @@
 export const FLUID_TAB_HEIGHT=60;
 /** One continuous lower edge: tangent shoulders, a rounded lobe, and outer corners.
- * Positions are tab indices, so resizing never changes the selected destination. */
-export function fluidTabPath(width:number,position:number,shoulderPosition=position):string{
+ * Positions are tab indices, so resizing never changes the selected destination.
+ * The default count preserves geometry for existing five-tab callers. */
+export function fluidTabPath(width:number,position:number,shoulderPosition=position,tabCount=5):string{
  'worklet';
- const w=Math.max(1,width),p=Math.max(0,Math.min(4,position));
- const x=w*(p+.5)/5;
+ const count=Math.max(1,Math.floor(tabCount));
+ const w=Math.max(1,width),p=Math.max(0,Math.min(count-1,position));
+ const x=w*(p+.5)/count;
  // The lobe leads while the neck trails. Bound deformation to a tab-relative
  // distance so long jumps stretch visibly without sweeping across the bar.
- const slot=w/5,maxDrag=Math.min(56,slot*.9);
- const trailing=Math.max(0,Math.min(4,shoulderPosition));
+ const slot=w/count,maxDrag=Math.min(56,slot*.9);
+ const trailing=Math.max(0,Math.min(count-1,shoulderPosition));
  const offset=Math.max(-maxDrag,Math.min(maxDrag,(trailing-p)*slot));
  const strain=Math.abs(offset)/maxDrag;
  const radius=Math.min(24,w/12),neck=x+offset;

@@ -27,17 +27,38 @@ Ask Bob to improve a JavaScript utility, add tests and send back the updated pro
   </tr>
 </table>
 
+The coding screenshots replay saved output from a real model run on a disposable sample project, displayed in the current app—not a new inference run.
+
+## Around the app
+
+Six bottom tabs keep **Notes · Workstations · Chat · Agents · Sessions · Settings** within reach. The model picker shows the conversation’s current model and thinking level, with locally saved favourites pinned first. Agents has a full-height, view-only transcript: working/stopping agents appear by default, while History reveals inactive ones without deleting them. The edge-to-edge Android surface leaves bottom navigation available rather than requiring a preliminary reveal swipe.
+
+<table>
+  <tr>
+    <th>Choose a favourite</th>
+    <th>Watch an agent</th>
+    <th>Return to its history</th>
+  </tr>
+  <tr>
+    <td><img src="assets/showcase/model-picker.png" width="240" alt="Compact model picker showing the current model, thinking effort and a starred favourite pinned first"></td>
+    <td><img src="assets/showcase/agents-active.png" width="240" alt="Agents tab with the active-agent selector and a full-height view-only transcript using labelled demo data"></td>
+    <td><img src="assets/showcase/agents-history.png" width="240" alt="The minimal History switch reveals an inactive demo agent and its retained transcript"></td>
+  </tr>
+</table>
+
 <p align="center">
-  <img src="assets/showcase/coding-demo.gif" width="420" alt="Animated recording of Bob inspecting the sample project, editing the utility, running tests and returning a ZIP">
+  <img src="assets/showcase/coding-demo.gif" width="420" alt="Recorded tour of the current Bob app: saved coding results, model favourites, active agents and retained agent history">
 </p>
 
-A real model run on a disposable sample project, captured from Bob 0.3.93 in an Android 16 emulator. The recording is trimmed, not sped up; responses are not scripted. Screenshots show different points in the same conversation.
+Captured from the signed **Bob 0.3.101** app in a disposable Android 16 emulator. The GIF records browsing at normal speed, not a new live coding session. Agent activity and model-menu options are staged UI fixtures; no production conversations or provider credentials were used. See [capture notes](assets/showcase/README.md) for provenance and verification limits.
 
 ## What it does
 
 - Streams conversations and tool results to your phone. Backend work can continue when you leave the chat.
 - Connects to multiple Linux backends, each with its own conversations and configuration.
 - Gives agents file, shell and web tools, with optional memory and interactive views.
+- Shows delegated agents in a dedicated read-only viewer, separating active work from retained history.
+- Lets you choose models and thinking effort, with favourites saved on your phone.
 - Lets you exchange files with an agent, keep notes and return to earlier work.
 
 The app uses React Native/TypeScript with native Android integrations. The Node.js backend runs agents through [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable).

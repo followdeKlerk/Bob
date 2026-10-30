@@ -6,7 +6,7 @@ import {TabGlyph,type TabGlyphName} from './tab-glyph';
 import {colors} from '../theme';
 import {FLUID_TAB_HEIGHT,fluidTabPath} from '../fluid-tabs';
 export type BottomDestination=TabGlyphName;
-const tabs=[{id:'Notes'},{id:'Workstations'},{id:'Chat'},{id:'Sessions'},{id:'Settings'}] as const;
+const tabs=[{id:'Notes'},{id:'Workstations'},{id:'Chat'},{id:'Agents'},{id:'Sessions'},{id:'Settings'}] as const;
 const AnimatedPath=Animated.createAnimatedComponent(Path);
 export function BottomTabs({selected,onSelect,onHeight}:{selected:string;onSelect:(tab:BottomDestination)=>void;onHeight?:(height:number)=>void}){
  const index=Math.max(0,tabs.findIndex(tab=>tab.id===selected));
@@ -32,12 +32,12 @@ export function BottomTabs({selected,onSelect,onHeight}:{selected:string;onSelec
   }
   return()=>{cancelAnimation(position);cancelAnimation(shoulder);};
  },[index,reduceMotion,active,width,position,shoulder]);
- const surfaceProps=useAnimatedProps(()=>({d:fluidTabPath(width,position.value,shoulder.value)}));
+ const surfaceProps=useAnimatedProps(()=>({d:fluidTabPath(width,position.value,shoulder.value,tabs.length)}));
  return <View testID="bottom-tabs" accessibilityRole="tablist" onLayout={event=>{const {width:w,height}=event.nativeEvent.layout;if(Number.isFinite(w)&&w>0)setWidth(w);onHeight?.(height);}} style={s.bar}>
   {width>0&&<View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={StyleSheet.absoluteFill}>
    <Svg width={width} height={FLUID_TAB_HEIGHT}>
     <AnimatedPath testID="fluid-tab-surface" animatedProps={surfaceProps} fill={colors.background}/>
-    {tabs.map(({id},i)=><TabGlyph key={id} name={id} x={width*(i+.5)/5-12} y={19} color={id===selected?'#ffffff':'#111111'}/>)}
+    {tabs.map(({id},i)=><TabGlyph key={id} name={id} x={width*(i+.5)/tabs.length-12} y={19} color={id===selected?'#ffffff':'#111111'}/>)}
    </Svg>
   </View>}
   {tabs.map(({id})=><Pressable key={id} accessibilityRole="tab" accessibilityLabel={id} accessibilityState={{selected:selected===id}} onPress={()=>onSelect(id)} style={s.tab}/>)}

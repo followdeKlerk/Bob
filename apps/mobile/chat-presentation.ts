@@ -15,6 +15,20 @@ export function inputAttribution(entry:ToolEntry):{owner:boolean;label?:string} 
 }
 export const isActiveSubagent=(status:string|undefined)=>status==='working'||status==='stopping';
 
+/** Passive backend metadata only, never model/tool content. Ignore supplied text:
+ * only known phases and nonnegative safe integer counts produce status labels.
+ * Undefined deliberately leaves malformed/unknown entries on the normal path. */
+export function memoryStatusText(entry:ToolEntry):string|undefined {
+ if(entry.kind!=='bob.memory-status'||entry.model?.length)return undefined;
+ const data=entry.data;
+ if(!data||typeof data!=='object'||Array.isArray(data))return undefined;
+ const {phase,count}=data as {phase?:unknown;count?:unknown};
+ if(count!==undefined&&(typeof count!=='number'||!Number.isSafeInteger(count)||count<0))return undefined;
+ if(phase==='recall'&&typeof count==='number')return `Hindsight — recalled ${count} memories`;
+ if(phase==='save-queued')return 'Hindsight — save queued';
+ return undefined;
+}
+
 /** Transcript projection only: never delete stored tools or their recorded output. */
 export function hasVisibleChatContent(entry:ToolEntry):boolean {
  if(!entry.model?.length)return !entry.kind.startsWith('pi.')||entry.kind==='pi.user'||entry.kind==='pi.assistant';
@@ -37,4 +51,16 @@ export function isRecordedToolGeneration(entries:ToolEntry[],content:unknown):bo
  const recorded=new Set<string>();
  for(const entry of entries)for(const message of entry.model??[])if(message.role==='assistant'&&Array.isArray(message.content))for(const block of message.content)if(block?.type==='toolCall')recorded.add(block.id);
  return ids.every(id=>recorded.has(id));
+}
+
+/** Display-only: coalesce consecutive identical passive indicators, keeping the
+ * newest event. Never move events across messages or discard stored history. */
+export function compactMemoryStatuses<T extends ToolEntry>(entries:readonly T[]):T[]{
+ const result:T[]=[];
+ for(const entry of entries){
+  const status=memoryStatusText(entry),last=result[result.length-1];
+  if(status!==undefined&&last&&memoryStatusText(last)===status)result[result.length-1]=entry;
+  else result.push(entry);
+ }
+ return result;
 }

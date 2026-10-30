@@ -10,13 +10,14 @@ import './global.css';
 import Animated from 'react-native-reanimated';
 import {Button as KitButton} from './components/ui/button';
 import {Text as KitText} from './components/ui/text';
-import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Users, Paperclip, X} from 'lucide-react-native';
+import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, X} from 'lucide-react-native';
 import {colors} from './theme';
 import {surfaceAnchors} from './surface-placement';
 import {InlineSurface} from './components/inline-surface';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {SettingsGroup,SettingsRow,sectionStyles} from './components/section-ui';
 import {Bell,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
+import {AgentsScreen} from './components/agents-screen';
 import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {BuildCard} from './components/build-card';
@@ -43,7 +44,7 @@ import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults,type ToolMessage} from './tool-results';
-import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent} from './chat-presentation';
+import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,compactMemoryStatuses} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -137,10 +138,10 @@ function Main() {
     [draft, setDraft] = useState(''),
     [status, setStatus] = useState('Not paired'),
     [drawer, setDrawer] = useState(false),
-    [orbit, setOrbit] = useState(false),
     [actions, setActions] = useState(false),
     [child, setChild] = useState<number>(),
     [childStatus,setChildStatus]=useState(''),
+    [agentHistory,setAgentHistory]=useState(false),
     [pairing, setPairing] = useState(''),
     [welcomeHelp, setWelcomeHelp] = useState(false),
     [welcomeManual, setWelcomeManual] = useState(false),
@@ -189,7 +190,7 @@ function Main() {
   const scope = backend && chat ? `${backend.backendId}:${chat}` : '';
   const [draftLoadedScope,setDraftLoadedScope]=useState('');
   const composerReady=!!scope&&draftLoadedScope===scope;
-  useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,orbit,screen]);
+  useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,screen]);
   identity.current = scope;
   const [view,setView]=useScopedSnapshot<Snapshot>(scope),[childView,setChildView]=useScopedSnapshot<Snapshot>(`${scope}:child:${child}`);
   const attachments=draftAttachments[scope]??[];
@@ -212,7 +213,6 @@ function Main() {
   useBackNavigation(()=>{
     if(actions){setActions(false);return true;}
     if(drawer){setDrawer(false);return true;}
-    if(orbit){setOrbit(false);return true;}
     if(Keyboard.isVisible())return false;
     if(screen!=='Chat'){sectionRequest.current++;setSectionLoading(false);setScreen('Chat');return true;}
     return false;
@@ -321,7 +321,7 @@ function Main() {
         const b=paired.find(item=>item.backendId===notice.backendId);if(!b)return;
         Keyboard.dismiss();
         if(notice.screen==='updates'){setUpdatesTarget(b);return;}
-        setBackend(b);setChat(notice.conversationId);setScreen('Chat');setDrawer(false);setOrbit(false);
+        setBackend(b);setChat(notice.conversationId);setScreen('Chat');setDrawer(false);
       })().catch(()=>setStatus('Notification destination unavailable; open its conversation manually'));
     });
     return()=>listener.remove();
@@ -352,7 +352,7 @@ function Main() {
     setDraftLoadedScope('');
     setView(undefined);
     setPending(undefined);
-    setDraft('');setChild(undefined);setChildView(undefined);setOrbit(false);
+    setDraft('');setChild(undefined);setChildView(undefined);
     if (!backend || !chat) return;
     setStatus('Connecting…');
     const current = scope,
@@ -409,8 +409,8 @@ function Main() {
     return () => {cancelled=true;events?.close();};
   }, [scope]);
   useEffect(()=>{
-    setChildView(undefined);setChildStatus('Connecting child');
-    if(!orbit||!child||!backend)return;
+    if(screen!=='Agents'||!child||!backend)return;
+    setChildStatus('Connecting agent');
     const b=backend,current=scope,id=child;let cancelled=false,events:SnapshotStream|undefined;
     void (async()=>{
       try {
@@ -430,7 +430,7 @@ function Main() {
       }catch{if(!cancelled&&identity.current===current)setChildStatus('Child offline • last cached state');}
     })();
     return()=>{cancelled=true;events?.close();};
-  },[scope,child,orbit]);
+  },[scope,child,screen]);
   useEffect(() => {
     if (scope && draftReady.current)
       void AsyncStorage.setItem(`draft:${scope}`, draft);
@@ -611,7 +611,7 @@ function Main() {
   }
   function navigate(tab:BottomDestination){
     if(screen===tab)return;
-    Keyboard.dismiss();setActions(false);setOrbit(false);setDrawer(false);
+    Keyboard.dismiss();setActions(false);setDrawer(false);
     if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab));return;}
     sectionRequest.current++;setSectionLoading(false);setScreen(tab);
   }
@@ -679,12 +679,22 @@ function Main() {
     { conversationId: number; status?:string },
   ][];
   const activeAgents=agents.filter(([,agent])=>isActiveSubagent(agent.status));
+  const inactiveAgents=agents.filter(([,agent])=>!isActiveSubagent(agent.status));
+  const visibleAgents=agentHistory?inactiveAgents:activeAgents;
+  const displayedChild=visibleAgents.some(([,agent])=>agent.conversationId===child)?child:undefined;
+  useEffect(()=>{setChild(undefined);setAgentHistory(false);},[scope]);
+  useEffect(()=>{if(screen!=='Agents')setAgentHistory(false);},[screen]);
+  useEffect(()=>{
+    if(screen!=='Agents')return;
+    if(displayedChild)return;
+    setChild(visibleAgents[0]?.[1].conversationId);
+  },[scope,screen,child,agentHistory,view?.docs['app.subagents']]);
   const busy = !!view?.docs['pi.live']?.run || !!view?.work?.some(t=>t.kind==='bob.mcp-ui-action'&&!t.background);
   const showStop=busy&&!hasDraft;
   const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page)=>{
     const entries=page?Array.from(new Map([...(page.items as Entry[]),...(snapshot?.entries??[])].map(entry=>[entry.id,entry])).values()).sort((a,b)=>a.id-b.id):snapshot?.entries??[];
     const linked=linkToolResults(entries,snapshot?.docs['pi.live']),anchors=surfaceAnchors(entries,snapshot?.docs['pi.live']),surfaceEntries=new Set(anchors.values());
-    return {...linked,rawEntries:entries,entries:linked.entries.filter(entry=>entry.kind!=='pi.system'&&(hasInlineChatContent(entry)||surfaceEntries.has(entry.id))).reverse(),surfaceAnchors:anchors};
+    return {...linked,rawEntries:entries,entries:compactMemoryStatuses(linked.entries.filter(entry=>entry.kind!=='pi.system'&&(hasInlineChatContent(entry)||surfaceEntries.has(entry.id)))).reverse(),surfaceAnchors:anchors};
   };
   const parentLinked=useMemo(()=>{
     const linked=linkedTranscript(view,parentHistory.page);
@@ -760,10 +770,11 @@ function Main() {
           {!isChild&&v?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===v.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted))&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
           {/* Inverted header is the physical bottom of the chat. Keep live
               replies and the composer clearance here, below stored messages. */}
-          {!isChild&&<View pointerEvents="none" accessible={false} style={{height:composerHeight+(activeAgents.length?80:44)}}/>}
+          {!isChild&&<View pointerEvents="none" accessible={false} style={{height:composerHeight+44}}/>}
         </View>}
         renderItem={({ item }) => {
           const attribution=inputAttribution(item),user=attribution.owner;
+          const memoryStatus=memoryStatusText(item);
           const peerAdmission=item.kind==='bob.peer-admission';
           const artifact=(item.kind==='bob.artifact'||item.kind==='bob.file')&&Attachment.safeParse(item.data).success;
           const fallback=()=>textOf(item.data)||'Stored event has no displayable text.';
@@ -772,7 +783,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -830,16 +841,7 @@ function Main() {
               </View>
             )}
             {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,elevation:4}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
-            {activeAgents.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Toggle subagents, ${activeAgents.length} active agents`}
-                style={[styles.orbit,{bottom:composerHeight+12}]}
-                onPress={() => setOrbit(!orbit)}
-              >
-                <Users size={18} color={colors.accent}/><Text style={styles.buttonText}>Agents · {activeAgents.length}</Text><ChevronRight size={16} color={colors.muted}/>
-              </Pressable>
-            )}
+
           </View>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
             {!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:((!!outboxError||/pair again|identity|authorization|offline|disconnect|interrupted|reconnecting/i.test(status)||busy||outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)||parentLinked.rawEntries.length>0)&&(
@@ -862,15 +864,16 @@ function Main() {
             </Animated.View>
           </Animated.View>
       </>
-      {backend&&chat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!orbit&&<SkillPicker key={scope} scope={scope} query={slashQuery}
+      {backend&&chat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&<SkillPicker key={scope} scope={scope} query={slashQuery}
         loadLibrary={()=>request('library','GET',undefined,backend)}
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
         maxHeight={skillPopupHeight}
         onDismiss={()=>setSlashDismissed(true)}
         onSelect={entry=>{setDraft(pickerRequest(entry));setSlashDismissed(true);}}
       />}
+      {<AgentsScreen visible={screen==='Agents'} agents={visibleAgents} selected={displayedChild} onSelect={setChild} history={agentHistory} historyCount={inactiveAgents.length} onHistoryChange={value=>{setChild(undefined);setAgentHistory(value);}} status={childStatus} hasConversation={!!backend&&!!chat}>{displayedChild&&transcript(childView,true)}</AgentsScreen>}
       {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
-      {screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&(
+      {screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <ScrollView testID="section-overlay" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:24,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
           <Text accessibilityRole="header" style={sectionStyles.title}>{screen}</Text>
           {!!sectionError&&<View style={{gap:8}}><Text style={styles.caption}>{sectionError}</Text><Button label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
@@ -1101,7 +1104,7 @@ function Main() {
               <Button label="Build & install" disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
               <Button label="Conversation settings" disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Settings'));}}/>
               {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
-              {agents.length>0&&<Button label="Agent history" onPress={()=>{setActions(false);setOrbit(true);}}/>}
+              {agents.length>0&&<Button label="Agent history" onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
               {(busy||activeAgents.length>0)&&<Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>}
             </ScrollView>
           </SafeAreaView>}
@@ -1137,36 +1140,9 @@ function Main() {
           <Button label="Pair this backend" onPress={()=>run(pair)}/>
         </>}
       />}
-      <Modal
-        visible={orbit}
-        transparent
-        animationType="none"
-        onRequestClose={() => setOrbit(false)}
-      >
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <Text style={styles.title}>Subagents</Text>
-            <Text style={styles.caption}>
-              Closing this overlay never stops work.
-            </Text>
-            {agents.map(([name, a]) => (
-              <Button
-                key={name}
-                label={`${name} · ${a.conversationId} · ${a.status??'unknown'}`}
-                onPress={() => setChild(a.conversationId)}
-              />
-            ))}
-            {!!child&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{childStatus}</Text>}
-            {child && transcript(childView,true)}
-            <Button
-              label="Collapse subagents"
-              onPress={() => setOrbit(false)}
-            />
-          </View>
-        </View>
-      </Modal>
+
       </View>
-      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight}/>}
+      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Agents','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight}/>}
     </SafeAreaView>
   );
 }
@@ -1192,6 +1168,7 @@ const styles = StyleSheet.create({
   title:{color:colors.foreground,fontSize:22,fontWeight:'600'},
   chatTitle:{color:colors.muted,fontSize:13,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
   caption:{color:colors.muted,fontSize:12,lineHeight:20},
+  memoryStatus:{color:colors.muted,fontSize:13,lineHeight:21,paddingVertical:2},
   status:{color:colors.muted,paddingHorizontal:24,paddingVertical:8,fontSize:13,lineHeight:21},
   button:{minHeight:48,height:'auto',paddingHorizontal:16,paddingVertical:12,borderRadius:14,marginVertical:4},
   buttonText:{color:colors.foreground,fontSize:14,textAlign:'center',flexShrink:1},
@@ -1208,7 +1185,6 @@ const styles = StyleSheet.create({
   composerCapsuleCompact:{padding:0,gap:0},
   input:{color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
   row:{flexDirection:'row',gap:8,flexWrap:'wrap'},
-  orbit:{position:'absolute',right:24,bottom:18,minHeight:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,flexDirection:'row',gap:8,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
   overlay:{flex:1,backgroundColor:'#00000088',padding:18,justifyContent:'center'},
   sheet:{height:'80%',width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:24,padding:20},
   actionOverlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
