@@ -7,6 +7,7 @@ import {colors} from '../theme';
 import {CopyAction} from './message-actions';
 import {toolPresentation,toolResultPreview,toolText} from '../tool-presentation';
 import type {LinkedResult} from '../tool-results';
+import {NestedToolActivity} from './nested-tool-activity';
 function pretty(content:string){try{return JSON.stringify(JSON.parse(content),null,2);}catch{return content;}}
 
 /** Useful collapsed previews; original arguments and full recorded output stay expandable. */
@@ -29,6 +30,7 @@ function Content({name,content,result,quiet=false}:{name:string;content:string;r
    {!!preview&&<View style={{gap:3}}><Text style={styles.label}>{result?.isError?'Error':'Result'}</Text><Text numberOfLines={2} style={[styles.output,result?.isError&&styles.error]}>{preview}</Text></View>}
    {result?.isError&&!preview&&<Text style={styles.error}>Tool failed — expand for details.</Text>}
   </View>}
+  {result?.nested&&<NestedToolActivity activity={result.nested}/>}
   {open&&<View style={styles.details}>
    <View style={styles.row}><Text style={styles.label}>Arguments / content</Text><CopyAction text={content} label={`Copy tool content: ${name}`}/></View>
    <Text selectable style={styles.code}>{pretty(content)}</Text>
@@ -58,4 +60,4 @@ const styles=StyleSheet.create({
  error:{color:colors.foreground,fontSize:12,lineHeight:20},
 });
 
-export const ToolContent=React.memo(Content,(a,b)=>a.quiet===b.quiet&&a.name===b.name&&a.content===b.content&&a.result?.status===b.result?.status&&a.result?.isError===b.result?.isError&&a.result?.content===b.result?.content);
+export const ToolContent=React.memo(Content,(a,b)=>a.quiet===b.quiet&&a.name===b.name&&a.content===b.content&&a.result?.status===b.result?.status&&a.result?.isError===b.result?.isError&&a.result?.content===b.result?.content&&a.result?.nested===b.result?.nested);

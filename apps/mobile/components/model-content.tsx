@@ -39,7 +39,7 @@ export const ModelContent=React.memo(Content,(before,after)=>{
  if(!Array.isArray(before.value))return true;
  for(const block of before.value)if(block?.type==='toolCall'){
   const a=before.results?.get(block.id),b=after.results?.get(block.id);
-  if(a?.status!==b?.status||a?.isError!==b?.isError||a?.content!==b?.content)return false;
+  if(a?.status!==b?.status||a?.isError!==b?.isError||a?.content!==b?.content||a?.nested!==b?.nested)return false;
  }
  return true;
 });

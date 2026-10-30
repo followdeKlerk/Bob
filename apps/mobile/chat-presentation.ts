@@ -31,6 +31,8 @@ export function memoryStatusText(entry:ToolEntry):string|undefined {
 
 /** Transcript projection only: never delete stored tools or their recorded output. */
 export function hasVisibleChatContent(entry:ToolEntry):boolean {
+ // Surface receipts are placement metadata; the surface itself owns the row.
+ if(entry.kind==='bob.nested-surface'&&!entry.model?.length)return false;
  if(!entry.model?.length)return !entry.kind.startsWith('pi.')||entry.kind==='pi.user'||entry.kind==='pi.assistant';
  return entry.model.some(message=>message.role!=='toolResult'&&(Array.isArray(message.content)
   ?message.content.some(block=>block&&block.type!=='toolCall'&&block.type!=='thinking'&&block.type!=='redactedThinking'&&(block.type!=='text'||!!replyText(block.text)))

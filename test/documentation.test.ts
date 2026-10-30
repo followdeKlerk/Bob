@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {existsSync, globSync, readFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {CodingTools} from '@earendil-works/pi-durable/tools';
+import {CODEMODE_TOOL_NAME} from '@earendil-works/pi-durable/codemode';
 
 // Structural guards, not a claim that a model understands or obeys the manual.
 const guides = ['README.md', 'INSTALL.md', 'SETUP-AGENT.md', 'AGENTS.md', 'FEATURES.md', 'OPERATIONS.md',
@@ -54,7 +55,7 @@ test('maintained documentation links and headings resolve locally', () => {
 test('every declared Bob tool and upstream coding tool appears in FEATURES', () => {
   const paths = globSync(['src/**/*.ts', 'packages/*/src/**/*.ts']);
   const names = [...new Set([...paths.flatMap(path => declaredTools(path, read(path))),
-    ...(CodingTools.tools ?? []).map(tool => tool.name)])];
+    ...(CodingTools.tools ?? []).map(tool => tool.name), CODEMODE_TOOL_NAME])];
   assert.ok(names.length > 0, 'No tools discovered');
   assert.deepEqual(missingTools(names, read('FEATURES.md')), [], 'Document each tool by its exact backticked name');
 });

@@ -1,6 +1,7 @@
-export type ToolMessage={role:string;content:unknown;toolCallId?:string;toolName?:string;isError?:boolean};
+import {codemodeAudit,liveNestedActivity,type NestedToolActivity} from './nested-tool-results';
+export type ToolMessage={role:string;content:unknown;toolCallId?:string;toolName?:string;isError?:boolean;details?:unknown};
 export type ToolEntry={id:number;kind:string;model?:ToolMessage[];data?:unknown};
-export type LinkedResult={content:unknown;status:string;isError?:boolean};
+export type LinkedResult={content:unknown;status:string;isError?:boolean;nested?:NestedToolActivity};
 // Join only by real call identity within the selected conversation. Never by name/order.
 export function linkToolResults(entries:ToolEntry[],live:any) {
  const callIds=new Set<string>();
@@ -9,8 +10,9 @@ export function linkToolResults(entries:ToolEntry[],live:any) {
  collect(live?.generation?.message?.content);
  const persistedIds=new Set<string>();
  const results=new Map<string,LinkedResult>();
- for(const tool of live?.tools??[])if(typeof tool.callId==='string')results.set(tool.callId,{content:tool.output,status:tool.status??'running',isError:tool.isError===true||tool.status==='failed'||tool.status==='error'});
- for(const entry of entries)for(const message of entry.model??[])if(message.role==='toolResult'&&typeof message.toolCallId==='string'){persistedIds.add(message.toolCallId);results.set(message.toolCallId,{content:message.content,status:message.isError?'failed':'done',isError:message.isError});}
+ const nested=liveNestedActivity(live);
+ for(const tool of live?.tools??[])if(typeof tool.callId==='string')results.set(tool.callId,{content:tool.output,status:tool.status??'running',isError:tool.isError===true||tool.status==='failed'||tool.status==='error',nested:nested.get(tool.callId)});
+ for(const entry of entries)for(const message of entry.model??[])if(message.role==='toolResult'&&typeof message.toolCallId==='string'){persistedIds.add(message.toolCallId);results.set(message.toolCallId,{content:message.content,status:message.isError?'failed':'done',isError:message.isError,nested:codemodeAudit(message.toolName,message.details)});}
  const visible=entries.flatMap(entry=>{
   if(!entry.model?.length)return [entry];
   const model=entry.model.filter(message=>!(message.role==='toolResult'&&message.toolCallId&&callIds.has(message.toolCallId)));

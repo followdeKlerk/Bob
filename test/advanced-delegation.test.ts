@@ -70,7 +70,7 @@ test('AD profile credentials/persona/skills/modules/cwd isolate from parent; fai
   await rt.library.commit(async tx=>{const library=await tx.doc(Library,rt.library.id);library.instructions='PARENT PERSONA';library.skills.selected={enabled:false,description:'Chosen',markdown:'SELECTED SKILL'};library.skills.other={enabled:true,description:'Other',markdown:'UNSELECTED SKILL'};},ctx);
   const chat=await rt.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'parent',modelId:'parent-1'},instructions:'PARENT CHAT INSTRUCTIONS'}},ctx);await spawn(chat);await settle(rt);
   const id=(await rt.harness.snapshot(Subagents,chat.id,ctx))!.agents.worker.conversationId,child=(await rt.harness.conversation(id,ctx))!,agent=await child.agent(ctx);
-  assert.equal(agent.cwd,f.dir);assert.deepEqual(agent.tools.map(t=>t.name).sort(),rt.modules.coding.tools!.map(t=>t.name).sort());assert.equal(credential,'fixture-private-profile-key');
+  assert.equal(agent.cwd,f.dir);assert.deepEqual(agent.tools.map(t=>t.name).sort(),rt.modules.coding.tools!.filter(t=>!t.callers||t.callers.includes('model')).map(t=>t.name).sort());assert.equal(credential,'fixture-private-profile-key');
   assert.match(system,/ISOLATED PERSONA/);assert.match(system,/SELECTED SKILL/);assert.match(system,/Follow the current delegation policy and permissions/);assert.match(system,/You cannot start subagents/);assert.doesNotMatch(system,/PARENT PERSONA|PARENT CHAT INSTRUCTIONS|UNSELECTED SKILL|fixture-private-profile-key/);
   assert.doesNotMatch(JSON.stringify((await chat.entries({},100,undefined,ctx)).items),/fixture-private-profile-key/);
   // Missing selected skill throws after the original native callback staged creation.

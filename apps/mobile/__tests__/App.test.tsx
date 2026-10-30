@@ -441,3 +441,38 @@ test('rapid A-to-B-to-A switching keeps the composer locked until the new draft 
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props).toMatchObject({editable:true,value:'Restored A draft'});
  }finally{(AsyncStorage.getItem as jest.Mock).mockImplementation(get);if(tree)await act(async()=>tree.unmount());}
 });
+
+test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe reachable location (%s)',async(placement)=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ const surface={id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Nested visual',kind:'visual',presentation:'fullscreen',allowedTools:[]};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};NativeModules.BobInteractive={open:jest.fn(async()=>{}),prepare:jest.fn()};
+ const entries=[
+  ...(placement==='parent'?[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'code',name:'codemode',arguments:{code:'tools.render_visual(...)'}}]}]}]:[]),
+  ...(placement!=='unlinked'?[{id:2,kind:'bob.nested-surface',data:{appId:surface.id,parentToolCallId:'code',toolName:'render_visual'}}]:[]),
+  {id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'A later reply, not the producing call.'}]}]},
+ ];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/library')?{instructions:'',templates:{},skills:{}}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  expect(tree.root.findByProps({testID:'history-entry-3'}).findAllByType(InlineSurface)).toHaveLength(0);
+  expect(NativeModules.BobInteractive.open).not.toHaveBeenCalled();expect(NativeModules.BobInteractive.prepare).not.toHaveBeenCalled();
+  const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
+  if(placement==='unlinked'){
+   expect(tree.root.findAllByType(InlineSurface)).toHaveLength(0);
+   await act(async()=>press('Other interactive surfaces'));
+   expect(NativeModules.BobInteractive.open).not.toHaveBeenCalled();
+   await act(async()=>press('Open Nested visual'));
+  }else{
+   expect(tree.root.findByProps({testID:`history-entry-${placement==='parent'?1:2}`}).findAllByType(InlineSurface)).toHaveLength(1);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
+   await act(async()=>press('Expand visual: Nested visual'));
+  }
+  expect(NativeModules.BobInteractive.open).toHaveBeenCalledWith(backend.endpoint,backend.backendId,'test-token',7,surface.id);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});

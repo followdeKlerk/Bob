@@ -78,7 +78,7 @@ test('adaptive review upgrade: a settled pre-behavior profile child must not pre
   await fork.configure({tools:[read,bash],modelTools:[read]},ctx);
   const legacy=[child,fork],previous=[];
   for(const item of legacy){const agent=await item.agent(ctx);previous.push({tools:agent.tools.map(tool=>tool.name),callable:agent.callable.map(tool=>tool.name)});}
-  assert.deepEqual(previous[0].tools,['read']);assert.deepEqual(previous[0].callable,['read','edit','bash']);
+  assert.deepEqual(previous[0].tools,['read']);assert.deepEqual(previous[0].callable,coding.filter(tool=>tool.name!=='write'&&(!tool.callers||tool.callers.includes('tools'))).map(tool=>tool.name));
   // Native-state upgrade fixture, not an old-release binary: none of these documents
   // or the new explicit policy-required marker existed in pre-behavior AD.
   await rt.harness.commit(async tx=>{

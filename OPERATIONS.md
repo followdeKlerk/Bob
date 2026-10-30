@@ -120,6 +120,14 @@ Bundled module IDs are `coding`, `resources`, `subagents`, `web`, `interactive`,
 
 `bob module install|remove|enable|disable <id> --version <exact>` operates through paused/exclusively owned runtime maintenance; settle work first. Removal retains module documents/package archives and removes activation/selections. Do not remove definitions needed by pending tasks.
 
+### Code mode integration
+
+`src/codemode.ts` composes the official Durable 1.4.0 code-mode tools and prompt sections into the existing `coding-tools` extension. Runtime creation/close owns its QuickJS worker sandbox. Existing coding-module selections gain the optional tool without rewriting conversation configuration; explicit native tool/model-tool selections remain authoritative. Direct tools remain available. This is separate from upstream's unreleased performance work and does not upgrade Durable.
+
+Nested surface tools are wrapped at the host interactive boundary (`src/nested-surfaces.ts`), preserving the original surface/task definitions. A task-scoped receipt makes the display-only `bob.nested-surface` entry idempotent; the entry records a verified surface ID and native parent call identity so mobile can place surfaces even after the script ends. The receipt grants no UI/backend capability.
+
+The adapter uses native nested `pi.tool` tasks and upstream code-mode run/journal/store documents. Preserve those definitions and the pinned adapter version across recovery. Before rolling back to code without this capability, settle active code-mode calls; old code cannot resume a missing tool implementation. Retain chat/state data rather than restore a database. Verify native tool scope, script execution, cancellation/reopen, and nested activity display when changing the integration. Script-controlled external actions retain their original tool's permission and replay semantics. Regression coverage lives in `test/codemode.test.ts` (including built-in preference guidance), `test/codemode-surfaces.test.ts`, `test/codemode-mobile.test.ts`, and mobile `__tests__/codemode-activity.test.tsx`; the mobile App tests cover parent, receipt-only and unlinked surface placement.
+
 ### Trusted custom extensions
 
 Use only for separately authorized extension work. Custom code runs unrestricted as the backend account; this is not a marketplace or regular-Pi plugin loader.

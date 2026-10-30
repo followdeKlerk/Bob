@@ -24,7 +24,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import {CodingTools} from "@bob-local/coding";
+import {createCodingWithCodemode} from './codemode.js';
 import {createResources,createCorePromptReader} from "@bob-local/resources";
 import { State } from "./state.js";
 import {acquireOwner} from "./ownership.js";
@@ -51,13 +51,27 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   const releaseOwner=acquireOwner(state.dir);
   let disposeCustom=()=>{};
   let closeMemory=async()=>{};
+  let closeCodemode=async()=>{};
+  let closeWeb=async()=>{};
+  let disposeInteractive=()=>{};
   let openedHarness:import('@earendil-works/pi-durable').Harness|undefined;
+  let closing:Promise<void>|undefined;
+  const close=()=>closing??=(async()=>{
+    const errors:unknown[]=[];
+    // Join native invocations before destroying the VM host. Attempt every cleanup,
+    // even on startup failure or when another resource's close throws.
+    for(const dispose of [disposeInteractive,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
+      try {await dispose();} catch(error){errors.push(error);}
+    }
+    if(errors.length)throw new AggregateError(errors,'Runtime cleanup failed');
+  })();
   try {
     const baseModels = testModels ?? createBackendModels(state);
     const registry = createRegistry();
     const memory=backendMemory(state);
-    const web=createWebTools(state.get<string>("browserExecutable")??"/usr/bin/chromium");
-    const interactive = createInteractive(state, testMcpTransport);
+    const web=createWebTools(state.get<string>("browserExecutable")??"/usr/bin/chromium");closeWeb=()=>web.close();
+    const interactive = createInteractive(state, testMcpTransport);disposeInteractive=()=>interactive.dispose();
+    const coding=await createCodingWithCodemode();closeCodemode=coding.close;
     let libraryId: ConversationId;
     const corePrompt=createCorePromptReader(join(state.dir,'core-prompt.md'));
     const delegation=createDelegation(state,baseModels,registry,()=>libraryId,()=>modules,corePrompt);
@@ -88,7 +102,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     // Host-composed custom extension: existing resources selections gain the tool,
     // without changing persisted module identities or any existing task definition.
     const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[]]});
-    const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:CodingTools,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
+    const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:coding.extension,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
     // An explicit owner-managed config provisions this newly bundled module once.
     if(memory.config.enabled&&!state.get<boolean>('hindsightProvisioned')){
       const selected=state.get<{installed:string[];defaults:string[]}>('modules');
@@ -138,17 +152,10 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       models,
       registry,
       modules,
-      async close() {
-        interactive.dispose();
-        await closeMemory();
-        try { await harness.close(ctx); } finally { try { await web.close(); } finally { disposeCustom();releaseOwner(); } }
-      },
+      close,
     };
   } catch (e) {
-    await closeMemory();
-    await openedHarness?.close(ctx);
-    disposeCustom();
-    releaseOwner();
+    await close().catch(()=>{}); // Preserve the startup error, after all cleanup was attempted.
     throw e;
   }
 }
