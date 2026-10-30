@@ -1163,7 +1163,7 @@ function Main() {
       />}
 
       </View>
-      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Agents','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight}/>}
+      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Agents','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight} activeAgentCount={activeAgents.length}/>}
     </SafeAreaView>
   );
 }

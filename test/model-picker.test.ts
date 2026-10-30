@@ -18,14 +18,17 @@ test('model picker exposes real effort capabilities and persists only the select
   const a=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'openai',modelId:'gpt-6-luna'},instructions:'Keep these instructions',thinkingLevel:'low'}},ctx);
   const b=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'openai',modelId:'gpt-6-luna'},thinkingLevel:'medium'}},ctx);id=a.id;
   const models=await read('/models'),astra=models.find((m:any)=>m.modelId==='gpt-6-astra');assert.ok(astra);assert.ok(astra.thinkingLevels.includes('high'));assert.ok(!astra.thinkingLevels.includes('off'));assert.equal(astra.available,false,'No configured credential in fixture');
+  const terra=models.find((m:any)=>m.modelId==='gpt-6.1-terra');assert.ok(terra);assert.ok(terra.thinkingLevels.includes('high'));assert.ok(terra.thinkingLevels.includes('off'));assert.equal(terra.available,false);
   assert.equal((await put(a.id,{model:{provider:'openai',modelId:'gpt-6-astra'},thinkingLevel:'high'})).status,200);
   let selected=await read(`/chats/${a.id}/configure`);assert.equal(selected.model.modelId,'gpt-6-astra');assert.equal(selected.thinkingLevel,'high');assert.equal(selected.instructions,'Keep these instructions');
   assert.equal((await read(`/chats/${b.id}/configure`)).thinkingLevel,'medium');
   assert.equal((await put(a.id,{thinkingLevel:'off'})).status,400);assert.equal((await read(`/chats/${a.id}/configure`)).thinkingLevel,'high');
   assert.equal((await put(a.id,{thinkingLevel:'bogus'})).status,400);
   assert.equal((await put(a.id,{model:{provider:'openai',modelId:'not-a-real-model'}})).status,400);
+  assert.equal((await put(a.id,{model:{provider:'openai',modelId:'gpt-6.1-terra'},thinkingLevel:'high'})).status,200);
+  selected=await read(`/chats/${a.id}/configure`);assert.equal(selected.model.modelId,'gpt-6.1-terra');assert.equal(selected.thinkingLevel,'high');assert.equal(selected.instructions,'Keep these instructions');
  }finally{await app.close();}
- const reopened=await openRuntime(s);try{const chat=(await reopened.harness.conversation(id! as any,ctx))!;assert.equal((await chat.agent(ctx)).thinkingLevel,'high');assert.equal((await chat.agent(ctx)).model?.modelId,'gpt-6-astra');}finally{await reopened.close();s.close();}
+ const reopened=await openRuntime(s);try{const chat=(await reopened.harness.conversation(id! as any,ctx))!;assert.equal((await chat.agent(ctx)).thinkingLevel,'high');assert.equal((await chat.agent(ctx)).model?.modelId,'gpt-6.1-terra');}finally{await reopened.close();s.close();}
 });
 
 test('Bob prompt receives actual configured model and thinking level through native sections',async()=>{

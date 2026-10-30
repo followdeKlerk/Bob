@@ -15,7 +15,7 @@ import {conversationOperation} from "./conversation-network.js";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModels, type Models } from "@earendil-works/pi-ai/models";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import {bobOpenAIProvider} from "./openai-provider.js";
 import {anthropicProvider} from "@earendil-works/pi-ai/providers/anthropic";
 import {
   Harness,
@@ -44,7 +44,7 @@ export function createBackendModels(state:State){
     env:async name=>name==='OPENAI_API_KEY'?state.get<string>('openaiKey'):name==='ANTHROPIC_API_KEY'?state.get<string>('anthropicKey'):undefined,
     fileExists:async()=>false,
   }});
-  models.setProvider(openaiProvider());models.setProvider(anthropicProvider());
+  models.setProvider(bobOpenAIProvider());models.setProvider(anthropicProvider());
   return models;
 }
 export async function openRuntime(state: State, testModels?: Models, testMcpTransport?: Parameters<typeof createInteractive>[1], options:{resume?:boolean}={}) {

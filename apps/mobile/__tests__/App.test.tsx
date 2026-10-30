@@ -326,6 +326,10 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
  const publish=async(status:string)=>act(async()=>{snapshots.get(`${backend.endpoint}/v1/chats/7/events`)!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'app.subagents':{agents:{'Audit helper':{conversationId:8,status},'Second helper':{conversationId:9,status:'idle'}}}},work:[]}})});});
  await publish('working');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'})).toHaveLength(0);
+ expect(tree.root.findByProps({testID:'active-agent-badge'})).toBeDefined();
+ expect(tree.root.findAll(n=>n.props.accessibilityRole==='tab'&&n.props.accessibilityLabel==='Agents')[0].props.accessibilityValue.text).toBe('1 active agent');
+ await publish('stopping');expect(tree.root.findByProps({testID:'active-agent-badge'})).toBeDefined();
+ await publish('working');
  const unknown=tree.root.findByProps({testID:'history-entry-2'}),projected=tree.root.findByProps({testID:'history-entry-3'});
  expect(unknown.findByProps({accessibilityLabel:'Input · source not identified'}).props.accessibilityState.expanded).toBe(false);
  expect(projected.findByProps({accessibilityLabel:'Agent report · Audit helper'}).props.accessibilityState.expanded).toBe(false);
@@ -345,6 +349,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  expect(tree.root.findByProps({testID:'child-history-list'}).props.data.some((e:any)=>e.id===10)).toBe(true);
  const firstStreamClose=closes.get(`${backend.endpoint}/v1/chats/8/events`);
  await publish('idle');
+ expect(tree.root.findAllByProps({testID:'active-agent-badge'})).toHaveLength(0);
  expect(firstStreamClose).toHaveBeenCalled();
  expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
  expect(tree.root.findAllByProps({accessibilityLabel:'View agent Audit helper'})).toHaveLength(0);

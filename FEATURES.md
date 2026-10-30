@@ -8,9 +8,9 @@ The six bottom tabs are **Notes · Workstations · Chat · Agents · Sessions ·
 
 Sessions includes search, New chat, pin, rename, Archive and recoverable Trash. Owned helper conversations appear in Agents rather than the regular Sessions list. A row spinner shows unfinished foreground work while Sessions is visible.
 
-Open **Model & thinking** from the composer's **+** menu to change the current conversation's model and effort. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
+Open **Model & thinking** from the composer's **+** menu to change the current conversation's model and effort. GPT-6.1 Terra is supported through the existing OpenAI API-key or ChatGPT subscription authentication. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
 
-**Agents** provides a full-height, view-only transcript. Its selector shows working/stopping helpers; **History** switches to inactive helpers while keeping their records. Switching conversations or returning to Agents resets the view to active work. Viewing or leaving a transcript does not start or stop an agent.
+**Agents** provides a full-height, view-only transcript. A monochrome count badge on its tab shows working/stopping helpers in the current conversation and disappears at zero. Its selector shows working/stopping helpers; **History** switches to inactive helpers while keeping their records. Switching conversations or returning to Agents resets the view to active work. Viewing or leaving a transcript does not start or stop an agent.
 
 **Settings** groups provider connections, permissions, diagnostics, updates and Advanced modules. Expand **Instructions & folder** to load this conversation's settings. The two fields save independently, preserve unsaved edits, and show save/error feedback. Static settings remain accessible while conversation settings load.
 
