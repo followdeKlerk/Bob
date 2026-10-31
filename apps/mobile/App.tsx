@@ -1,3 +1,5 @@
+import {recoverBackgroundOutbox,notificationReplyBarriers} from './recover-background-outbox';
+import {SchedulesScreen,ScheduleReceipt,ScheduleAlert} from './components/schedules-screen';
 import {Text,TextInput} from './components/app-text';
 import {FileAttachment} from './components/file-attachment';
 import {emptyConversationMessage} from './empty-conversation';
@@ -16,7 +18,7 @@ import {surfaceAnchors} from './surface-placement';
 import {InlineSurface} from './components/inline-surface';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {SettingsGroup,SettingsRow,sectionStyles} from './components/section-ui';
-import {Bell,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
+import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
@@ -178,15 +180,42 @@ function Main() {
   const [backgroundReady,setBackgroundReady]=useState<string[]>([]);
   useEffect(()=>{if(!backgroundOutbox)return;let current=true;setBackgroundReady([]);for(const b of backends)void backgroundOutbox.prepare(b.backendId).then(()=>{if(!current)return;if(backgroundOutbox.ready(b.backendId))setBackgroundReady(ids=>[...ids,b.backendId]);else if(selectedBackend.current===b.backendId)setStatus('Pair again: device credential missing');}).catch(()=>{if(current&&selectedBackend.current===b.backendId)setStatus('Pair again: device credential unavailable');});return()=>{current=false;};},[backgroundOutbox,backends]);
   const sendReady=!backgroundOutbox||backgroundReady.includes(backend?.backendId??'');
-  useEffect(()=>{if(!backgroundOutbox)return;void(async()=>{await outbox.ready;for(const item of await backgroundOutbox.recover())if(!outbox.items.some(local=>local.id===item.id))await outbox.add(item);})().catch(()=>setOutboxError('Unable to recover background message queue'));},[backgroundOutbox,outbox]);
+  useEffect(()=>{
+    if(!backgroundOutbox)return;let current=true,running=false,again=false;
+    const recover=async()=>{if(!current)return;if(running){again=true;return;}running=true;
+      try{do{again=false;await recoverBackgroundOutbox(outbox,backgroundOutbox,()=>current);}while(current&&again);}
+      catch{if(current)setOutboxError('Unable to recover background message queue');}
+      finally{running=false;}
+    };
+    void recover();
+    const state=AppState.addEventListener('change',value=>{if(value==='active')void recover();});
+    const focus=Platform.OS==='android'?AppState.addEventListener('focus',()=>{void recover();}):undefined;
+    const changes=DeviceEventEmitter.addListener('BobOutboxChanged',()=>{void recover();});
+    return()=>{current=false;state.remove();focus?.remove();changes.remove();};
+  },[backgroundOutbox,outbox]);
   useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
+  useEffect(()=>{
+    const native=NativeModules.BobOutbox;if(!native?.setNotificationReplyBarriers)return;
+    let current=true,ready=false;
+    const sync=()=>{if(!current||!ready)return;for(const value of backends){
+      // Invoke in the outbox publication callback, before its asynchronous JS persistence.
+      void native.setNotificationReplyBarriers(value.backendId,notificationReplyBarriers(outbox.items,value.backendId))
+        .catch(()=>{if(current)setOutboxError('Notification replies are waiting for foreground queue recovery');});
+    }};
+    const unsubscribe=outbox.subscribe(sync);
+    void outbox.ready.then(()=>{if(current){ready=true;sync();}}).catch(()=>{});
+    return()=>{current=false;unsubscribe();};
+  },[outbox,backends]);
   const [bottomBarHeight,setBottomBarHeight]=useState(60);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
   const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-composerHeight-16-(keyboardInset<=0?bottomBarHeight:0)));
   const [draftAttachments,setDraftAttachments]=useState<Record<string,DraftAttachment[]>>({});
-  useUpdateNotifications(backends);
+  useUpdateNotifications(backends,async backendId=>{
+    await outbox.ready;
+    if(NativeModules.BobOutbox?.setNotificationReplyBarriers)await NativeModules.BobOutbox.setNotificationReplyBarriers(backendId,notificationReplyBarriers(outbox.items,backendId));
+  });
   const build=useBuildStatus(backend);
   const phoneLocation=usePhoneLocation(backend);
   const selectedBackend = useRef('');
@@ -524,7 +553,7 @@ function Main() {
   const [delivery]=useState(()=>new OutboxDelivery(outbox,{
     ...(backgroundOutbox?{background:(item:OutgoingMessage)=>{
       const preceding=outbox.items.slice(0,outbox.items.findIndex(value=>value.id===item.id));
-      if(preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve(undefined);
+      if(!item.notificationReply&&preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve(undefined);
       return backgroundOutbox.deliver(item);
     }}:{}),
     backends:()=>transport.current.backends,
@@ -641,7 +670,7 @@ function Main() {
   async function openSection(name: string) {
     const selected = backend?.backendId;
     const current = scope;
-    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name!=='Settings'&&name!=='Notes');
+    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name!=='Settings'&&name!=='Notes'&&name!=='Schedules');
     setScreen(name);setDrawer(false);
     try{
     if(name==='Modules') {
@@ -800,11 +829,13 @@ function Main() {
           const artifact=(item.kind==='bob.artifact'||item.kind==='bob.file')&&Attachment.safeParse(item.data).success;
           const fallback=()=>textOf(item.data)||'Stored event has no displayable text.';
           const originalText=item.kind==='bob.user'&&item.data&&typeof item.data==='object'&&'text' in item.data&&typeof item.data.text==='string'?item.data.text:undefined;
-          const body=originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent speakable={m.role==='assistant'} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
+          const scheduleReceipt=item.kind==='bob.schedule-receipt',scheduleAlert=item.kind==='bob.schedule-alert';
+          const scheduleId=scheduleReceipt?(item.data as {id?:string}|undefined)?.id:undefined;
+          const body=scheduleReceipt?<ScheduleReceipt job={scheduleId?v?.docs['bob.schedules']?.[scheduleId]:undefined} onOpen={()=>run(()=>openSection('Schedules'))}/>:scheduleAlert?<ScheduleAlert data={item.data} onOpen={()=>run(()=>openSection('Schedules'))}/>:originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent speakable={m.role==='assistant'} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -894,7 +925,8 @@ function Main() {
       />}
       {<AgentsScreen visible={screen==='Agents'} agents={visibleAgents} selected={displayedChild} onSelect={setChild} history={agentHistory} historyCount={inactiveAgents.length} onHistoryChange={value=>{setChild(undefined);setAgentHistory(value);}} status={childStatus} hasConversation={!!backend&&!!chat}>{displayedChild&&transcript(childView,true)}</AgentsScreen>}
       {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
-      {screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
+      {backend&&<SchedulesScreen key={'schedules:'+backend.backendId} visible={screen==='Schedules'} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);setScreen('Chat');}} onOpenChat={id=>{setChat(id);setScreen('Chat');}}/>}
+      {screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <ScrollView testID="section-overlay" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:24,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
           <Text accessibilityRole="header" style={sectionStyles.title}>{screen}</Text>
           {!!sectionError&&<View style={{gap:8}}><Text style={styles.caption}>{sectionError}</Text><Button label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
@@ -1043,7 +1075,7 @@ function Main() {
                   const enabled=!notifyEnabled;NativeModules.BobNotifications.setReplyNotifications?.(enabled);await AsyncStorage.setItem('notification-opt-in',String(enabled));setNotifyEnabled(enabled);
                 })}/>
                 <SettingsRow title="Notification settings" label="Android notification settings" icon={Bell} onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
-                <Disclosure label="About notifications"><Text style={styles.caption}>Finished replies, questions and ready-to-install updates—not tool progress. Reply previews are silent by default. Android schedules background checks and may delay delivery; force-stop pauses them. Automatic location has its own visible service notification.</Text></Disclosure>
+                <Disclosure label="About notifications"><Text style={styles.caption}>Replies, questions and schedule alerts are grouped by conversation; install-ready updates stay separate. Manual Reply queues a text message without opening the chat; structured questions open in chat. No generated reply suggestions. Reply previews are silent by default. Android schedules background checks and may delay delivery; force-stop pauses them. Automatic location has its own visible service notification.</Text></Disclosure>
               </SettingsGroup>
               <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
@@ -1057,6 +1089,9 @@ function Main() {
                   <SettingsRow title="Location permissions" label="Android location settings" icon={MapPin} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('location');})}/>
                   <SettingsRow title="App & battery" label="Android app and battery settings" icon={SlidersHorizontal} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('app');})}/>
                 </Disclosure>
+              </SettingsGroup>
+              <SettingsGroup title="Schedules">
+                <SettingsRow title="Schedules" label="Reminders & recurring checks" icon={Clock3} disabled={!backend} onPress={()=>run(()=>openSection('Schedules'))}/>
               </SettingsGroup>
               <SettingsGroup title="App">
                 <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setUpdatesTarget(backend);navigate('Chat');}}/>
@@ -1140,6 +1175,7 @@ function Main() {
       {(screen==='Sessions'||screen==='Workstations')&&<SideDrawer key={screen+':'+(backend?.backendId??'')} embedded mode={screen==='Workstations'?'workstations':'sessions'} workspaceLabel={backend?.name} visible onClose={()=>setScreen('Chat')} disabled={!backend}
         onNew={()=>run(async()=>{await newChat();setDrawer(false);setScreen('Chat');})}
         onSettings={()=>run(()=>openSection('Settings'))}
+        onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}}
         navigation={[]}
         workspaces={backends.map(b=>({id:b.backendId,label:backends.filter(item=>item.name===b.name).length>1?`${b.name} · ${b.backendId.slice(0,8)}`:b.name,selected:b.backendId===backend?.backendId,onPress:()=>{
           if(b.backendId!==backend?.backendId){setChats([]);setChatCursor(undefined);setBackend(b);setChat(undefined);}

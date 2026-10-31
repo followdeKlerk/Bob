@@ -1,9 +1,9 @@
-import {useEffect} from 'react';
+import {useEffect,useRef} from 'react';
 import {AppState,NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 type Backend={backendId:string;endpoint:string;name:string};
-export async function enableUpdateNotifications(backends:Backend[],askPermission=true){
+export async function enableUpdateNotifications(backends:Backend[],askPermission=true,onRegistered?:(backendId:string)=>Promise<void>){
  if(Platform.OS!=='android'||!backends.length||AppState.currentState!=='active')return false;
  if(Number(Platform.Version)>=33){
   const permission=PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
@@ -15,12 +15,13 @@ export async function enableUpdateNotifications(backends:Backend[],askPermission
  let watching=false;
  for(const backend of backends){
   const credential=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});
-  if(credential){await NativeModules.BobNotifications.watchUpdates(backend.endpoint,backend.backendId,credential.password,backend.name);watching=true;}
+  if(credential){await NativeModules.BobNotifications.watchUpdates(backend.endpoint,backend.backendId,credential.password,backend.name);await onRegistered?.(backend.backendId);watching=true;}
  }
  return watching;
 }
 /** Keep update-ready monitoring independent of individual chat requests and any open build card. */
-export function useUpdateNotifications(backends:Backend[]){
+export function useUpdateNotifications(backends:Backend[],onRegistered?:(backendId:string)=>Promise<void>){
+ const registered=useRef(onRegistered);registered.current=onRegistered;
  useEffect(()=>{
   let stopped=false,running=false;
   async function sync(){
@@ -29,7 +30,7 @@ export function useUpdateNotifications(backends:Backend[]){
    try{
     const asked=await AsyncStorage.getItem('update-notification-permission-asked');
     if(!asked)await AsyncStorage.setItem('update-notification-permission-asked','true');
-    if(!stopped)await enableUpdateNotifications(backends,!asked);
+    if(!stopped)await enableUpdateNotifications(backends,!asked,async id=>{if(!stopped)await registered.current?.(id);});
    }catch{/* Android notification settings can restore permission; the next resume registers monitoring again. */}
    finally{running=false;}
   }

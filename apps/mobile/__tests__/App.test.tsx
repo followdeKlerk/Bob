@@ -119,7 +119,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
-   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Conversation','Notifications','Voice','Location','App','Advanced']);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Conversation','Notifications','Voice','Location','Schedules','App','Advanced']);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
    expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'})).toHaveLength(0);
    const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
@@ -134,7 +134,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    const notifications=tree.root.findAll(node=>String(node.props.accessibilityLabel).startsWith('Last reply notifications:')&&typeof node.props.onPress==='function')[0];
    expect(notifications.props.disabled).toBe(false);
    act(()=>press('About notifications'));
-   expect(tree.root.findAll(node=>typeof node.props.children==='string'&&node.props.children.includes('Finished replies, questions')).length).toBeGreaterThan(0);
+   expect(tree.root.findAll(node=>typeof node.props.children==='string'&&node.props.children.includes('Replies, questions and schedule alerts')).length).toBeGreaterThan(0);
    const pendingCalls=fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/configure')).length;
    act(()=>tree.root.findByType(BottomTabs).props.onSelect('Settings'));
    expect(fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/configure'))).toHaveLength(pendingCalls);
@@ -152,6 +152,13 @@ test.each([true,false])('menus and background/foreground preserve the native lis
   expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('auto');expect(tree.root.findAllByProps({testID:'section-overlay'})).toHaveLength(0);
   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
  }
+ // The schedules overlay must also retain the same native chat list and scroll state.
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+ await act(async()=>tree.root.findByType(SideDrawer).props.onSchedules());
+ expect(tree.root.findByProps({testID:'schedules-screen'})).toBeDefined();
+ expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');
+ expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+ act(()=>tree.root.findByType(BottomTabs).props.onSelect('Chat'));
  // Machine browsing is a distinct destination and selecting the current machine opens its sessions.
  act(()=>tree.root.findByType(BottomTabs).props.onSelect('Workstations'));
  expect(tree.root.findByType(SideDrawer).props.mode).toBe('workstations');

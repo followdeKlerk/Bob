@@ -40,6 +40,7 @@ export class OutboxDelivery {
     // A timeout is not evidence of rejection. Always recover a receipt before
     // attempting the exact same request identity again.
     const background=this.port.background?await this.port.background(item):undefined;
+    if(item.notificationReply&&!background)throw Error('Native notification reply receipt unavailable; reconcile this same request in Bob');
     if(background?.state==='rejected'){
      await this.box.update(item.id,{rejected:true,uncertain:background.uncertain===true,lastError:background.error??'Message could not be sent',retryAt:undefined});blocked.add(item.scope);continue;
     }

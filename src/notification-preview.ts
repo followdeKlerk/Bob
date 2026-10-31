@@ -18,3 +18,9 @@ export function notificationReply(entry:EntryRecord|undefined,conversationId:num
  }
  return text.trim()?{id:entry.id,text:text.trim()}:null;
 }
+
+/** Safe display metadata only; native conversation history remains the source of truth. */
+export function notificationConversationTitle(title:unknown,id:number){
+ const text=typeof title==='string'?title.replace(/[\p{Cc}\p{Cf}]/gu,' ').replace(/\s+/g,' ').trim().slice(0,160):'';
+ return text||`Conversation ${id}`;
+}

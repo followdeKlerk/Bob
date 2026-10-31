@@ -2,7 +2,7 @@ import type {Message} from '../../src/contracts';
 import {readOutbox,writeOutbox} from './outbox-storage';
 import type {DraftAttachment} from './components/attachment-thumbnail';
 export type OutgoingMessage={
-  id:string; scope:string; foregroundOnly?:boolean; backend:{backendId:string;endpoint:string;name:string}; chat:number;
+  id:string; scope:string; foregroundOnly?:boolean; notificationReply?:boolean; backend:{backendId:string;endpoint:string;name:string}; chat:number;
   localId:number; afterEntryId?:number; createdAt?:number; message:ReturnType<typeof Message.parse>; files:DraftAttachment[]; admitted?:boolean; entry?:number; rejected?:boolean; uncertain?:boolean; attempts?:number; retryAt?:number; retryAfterAt?:number; lastError?:string;
 };
 /** Local presentation is synchronous; storage and transport are deliberately separate. */

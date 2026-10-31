@@ -12,6 +12,8 @@ internal object BobOutboxPolicy {
     private val uuid = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
     fun identity(value: String): String = value.also { require(uuid.matches(it)) }
     fun chat(value: Double): Long = value.also { require(it.isFinite() && it > 0 && it % 1.0 == 0.0 && it <= 9007199254740991.0) }.toLong()
+    fun notificationBlocked(isNotificationReply: Boolean, snapshotValid: Boolean, chatBlocked: Boolean) =
+        isNotificationReply && (!snapshotValid || chatBlocked)
     fun retryable(status: Int) = status == 408 || status == 425 || status == 429 || status in 500..599
     fun exhausted(attempts: Int, startedAt: Long, now: Long) = attempts >= MAX_ATTEMPTS || now - startedAt >= MAX_AGE_MS
     fun mayPost(hasAdmission: Boolean, responseHasAdmission: Boolean, responseAdmissionIsNull: Boolean) =

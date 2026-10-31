@@ -6,6 +6,8 @@ import androidx.work.*
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.*
 import com.facebook.react.uimanager.ViewManager
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import java.lang.ref.WeakReference
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -13,6 +15,21 @@ import java.util.concurrent.TimeUnit
 
 internal object BobOutboxRuntime {
     val io = Executors.newSingleThreadExecutor()
+    @Volatile private var react = WeakReference<ReactApplicationContext>(null)
+    @Synchronized fun bind(context: ReactApplicationContext) { react = WeakReference(context) }
+    @Synchronized fun unbind(context: ReactApplicationContext) { if (react.get() === context) react.clear() }
+    fun changed() {
+        val context = react.get() ?: return
+        if (!context.hasActiveReactInstance()) return
+        try {
+            context.runOnJSQueueThread {
+                try {
+                    if (context.hasActiveReactInstance()) context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                        .emit("BobOutboxChanged", null) // No content, credentials, endpoint or pairing fingerprint.
+                } catch (_: Exception) { /* Resume recovery is the fallback. */ }
+            }
+        } catch (_: Exception) { /* Never start React to announce native work. */ }
+    }
     private val locks = Array(64) { Any() }
     private val chatLocks = Array(64) { Any() }
     fun lock(id: String) = locks[(id.hashCode() and Int.MAX_VALUE) % locks.size]
@@ -36,27 +53,9 @@ internal object BobOutboxRuntime {
             synchronized(lock(id)) { BobOutboxStore.read(context, id)?.let { if (needsWork(it)) schedule(context, id) } }
         } catch (_: Exception) { /* Surface unreadable data via list/status; never log secrets. */ }
     }
-    fun status(value: JSONObject): String = JSONObject().put("state", value.getString("state")).apply {
-        value.optJSONObject("admission")?.let { put("admission", it) }
-        if (value.has("error")) put("error", value.getString("error"))
-        if (value.has("retryable")) put("retryable", value.getBoolean("retryable"))
-        if (value.optBoolean("uncertain")) put("uncertain", true)
-    }.toString()
-}
-
-/** Promise resolution is a disk + WorkManager write barrier, not server admission. */
-class BobOutbox(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
-    override fun getName() = "BobOutbox"
-    override fun initialize() { super.initialize(); BobOutboxRuntime.io.execute { BobOutboxRuntime.recover(context) } }
-    private fun task(promise: Promise, action: () -> Any?) {
-        BobOutboxRuntime.io.execute {
-            try { promise.resolve(action()) }
-            catch (error: OutboxInputError) { promise.reject(error.code, error.message) }
-            catch (_: Exception) { promise.reject("outbox_storage", "Native outbox unavailable; reconcile this request identity before retrying") }
-        }
-    }
-    @ReactMethod fun enqueue(endpoint: String, backendId: String, credential: String, chat: Double, requestId: String,
-                             messageJson: String, filesJson: String, itemJson: String, retry: Boolean, promise: Promise) = task(promise) {
+    /** Shared native persistence + scheduling barrier. Call on io, never the main thread. */
+    fun enqueue(context: Context, endpoint: String, backendId: String, credential: String, chat: Double, requestId: String,
+                messageJson: String, filesJson: String, itemJson: String, retry: Boolean, notificationPairing: Pair<String, String>? = null): String {
         val origin: String
         val chatId: Long
         val message: JSONObject
@@ -80,7 +79,7 @@ class BobOutbox(private val context: ReactApplicationContext) : ReactContextBase
             require(canonical(item.getJSONObject("message")) == canonical(message))
         } catch (error: OutboxInputError) { throw error }
         catch (_: Exception) { throw OutboxInputError("outbox_invalid", "Invalid native outbox request") }
-        synchronized(BobOutboxRuntime.lock(requestId)) {
+        return synchronized(BobOutboxRuntime.lock(requestId)) {
             var value = BobOutboxStore.read(context, requestId)
             if (value != null) {
                 // Credentials identify the paired device whose request-id namespace the
@@ -97,18 +96,65 @@ class BobOutbox(private val context: ReactApplicationContext) : ReactContextBase
                     BobOutboxStore.write(context, value)
                 }
             } else synchronized(BobOutboxStore) {
+                if (JSONObject(itemJson).optBoolean("notificationReply") && notificationPairing == null) {
+                    throw OutboxInputError("outbox_reply_receipt", "Native reply receipt unavailable; reconcile this request before retrying")
+                }
                 val records = BobOutboxStore.all(context)
                 if (records.size >= BobOutboxPolicy.MAX_RECORDS) throw OutboxInputError("outbox_full", "Native outbox is full; retain existing receipts until reflected in the transcript")
                 value = JSONObject().put("requestId", requestId).put("backendId", backendId).put("endpoint", origin)
                     .put("credential", credential).put("chat", chatId).put("messageJson", messageJson).put("itemJson", itemJson)
                     .put("state", "pending").put("attempts", 0).put("startedAt", System.currentTimeMillis())
                     .put("order", (records.maxOfOrNull { it.getLong("order") } ?: 0L) + 1L)
+                if (notificationPairing != null) value!!.put("notificationReply", true)
+                    .put("replyEpoch", notificationPairing.first).put("replyFingerprint", notificationPairing.second)
                 BobOutboxStore.write(context, value!!)
             }
             val saved = value!!
+            if (notificationPairing != null) changed()
             if (BobOutboxRuntime.needsWork(saved)) BobOutboxRuntime.schedule(context, requestId)
             BobOutboxRuntime.status(saved)
         }
+    }
+    fun status(value: JSONObject): String = JSONObject().put("state", value.getString("state")).apply {
+        value.optJSONObject("admission")?.let { put("admission", it) }
+        if (value.has("error")) put("error", value.getString("error"))
+        if (value.has("retryable")) put("retryable", value.getBoolean("retryable"))
+        if (value.optBoolean("uncertain")) put("uncertain", true)
+    }.toString()
+}
+
+/** Promise resolution is a disk + WorkManager write barrier, not server admission. */
+class BobOutbox(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+    override fun getName() = "BobOutbox"
+    override fun initialize() {
+        super.initialize(); BobOutboxRuntime.bind(context)
+        BobOutboxRuntime.io.execute { BobOutboxRuntime.recover(context) }
+    }
+    override fun invalidate() { BobOutboxRuntime.unbind(context); super.invalidate() }
+    private fun task(promise: Promise, action: () -> Any?) {
+        BobOutboxRuntime.io.execute {
+            try { promise.resolve(action()) }
+            catch (error: OutboxInputError) { promise.reject(error.code, error.message) }
+            catch (_: Exception) { promise.reject("outbox_storage", "Native outbox unavailable; reconcile this request identity before retrying") }
+        }
+    }
+    @ReactMethod fun enqueue(endpoint: String, backendId: String, credential: String, chat: Double, requestId: String,
+                             messageJson: String, filesJson: String, itemJson: String, retry: Boolean, promise: Promise) = task(promise) {
+        BobOutboxRuntime.enqueue(context, endpoint, backendId, credential, chat, requestId, messageJson, filesJson, itemJson, retry)
+    }
+    /** Complete per-backend snapshot. Missing/malformed snapshots fail closed. */
+    @ReactMethod fun setNotificationReplyBarriers(backendId: String, chats: ReadableArray, promise: Promise) = task(promise) {
+        BobOutboxPolicy.identity(backendId)
+        try {
+            require(chats.size() <= 10000)
+            val ids = (0 until chats.size()).map { BobOutboxPolicy.chat(chats.getDouble(it)) }
+            NotificationReplyBarriers.replace(context, backendId, ids)
+        } catch (_: Exception) {
+            NotificationReplyBarriers.invalidate(context, backendId)
+            throw OutboxInputError("outbox_barriers", "Unable to persist notification reply barriers; background replies remain blocked")
+        }
+        BobOutboxRuntime.recover(context)
+        true
     }
     @ReactMethod fun status(requestId: String, promise: Promise) = task(promise) {
         BobOutboxPolicy.identity(requestId)
@@ -122,6 +168,7 @@ class BobOutbox(private val context: ReactApplicationContext) : ReactContextBase
         synchronized(BobOutboxRuntime.lock(requestId)) {
             WorkManager.getInstance(context).cancelUniqueWork(BobOutboxRuntime.workName(requestId)).result.get()
             BobOutboxStore.remove(context, requestId)
+            context.getSystemService(android.app.NotificationManager::class.java).cancel("reply-status:$requestId", 0)
             true
         }
     }

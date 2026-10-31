@@ -112,3 +112,12 @@ test('an exhausted uncertain Android POST is not falsely labelled Not sent',asyn
  const box=new MessageOutbox();await box.ready;await box.add(item());const io={...port(),background:jest.fn(async()=>({state:'rejected' as const,uncertain:true,error:'Delivery not confirmed'}))};
  await new OutboxDelivery(box,io).drain();expect(outgoingLabel(box.items[0])).toBe('Delivery unconfirmed');expect(io.request).not.toHaveBeenCalled();
 });
+
+test('notification-origin sends cannot fall back to foreground HTTP when native handoff is unavailable',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add({...item('native-reply'),notificationReply:true});const io=port();
+ await new OutboxDelivery(box,io).drain();expect(io.request).not.toHaveBeenCalled();expect(box.items[0]).toMatchObject({id:'native-reply',lastError:expect.stringContaining('Native notification reply receipt unavailable')});expect(box.items[0].admitted).toBeUndefined();
+});
+test('undefined background result cannot bypass native reply pairing and foreground attachment barriers',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add({...item('native-reply'),notificationReply:true});const io={...port(),background:jest.fn(async()=>undefined)};
+ await new OutboxDelivery(box,io).drain();expect(io.background).toHaveBeenCalledTimes(1);expect(io.request).not.toHaveBeenCalled();expect(io.upload).not.toHaveBeenCalled();
+});

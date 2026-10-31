@@ -1,3 +1,4 @@
+import {Schedules,schedulesView,scheduleAlerts,scheduleHealth} from './schedules.js';
 import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
@@ -47,7 +48,7 @@ import {
   Model,
 } from "./contracts.js";
 import {updateStatus,queueUpdate,withMaintenance,downloadUpdate} from './maintenance-port.js';
-import {notificationReply} from './notification-preview.js';
+import {notificationReply,notificationConversationTitle} from './notification-preview.js';
 import {HttpError} from "./errors.js";
 function validateDirectory(cwd: string | undefined) {
   if (cwd === undefined) return;
@@ -112,7 +113,7 @@ export async function serve(
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -175,6 +176,12 @@ export async function serve(
           }
           return send(res,200,await syncNote(runtime.library,state.id,String(state.authenticate(token)!.id),await body(req,1000000)));
         }finally{activeNotes--;}
+      }
+      if(path==='/v1/schedules'&&req.method==='GET')return send(res,200,await schedulesView(h));
+      if(path==='/v1/schedules/alerts'&&req.method==='GET')return send(res,200,await scheduleAlerts(h,z.coerce.number().int().nonnegative().safe().parse(url.searchParams.get('since')??0)));
+      if(path==='/v1/schedules'&&req.method==='POST'){
+        const p=z.object({requestId:z.string().uuid(),conversationId:z.number().int().positive().safe().optional(),operation:z.unknown()}).strict().parse(await body(req));
+        return send(res,200,await runtime.scheduling.mutate(p.operation,`device:${state.authenticate(token)!.id}:${p.requestId}`,p.conversationId));
       }
       if(path==='/v1/updates'&&req.method==='GET')return send(res,200,updateStatus(state));
       if(path==='/v1/updates'&&req.method==='POST'){
@@ -511,7 +518,8 @@ export async function serve(
           );
           const question=(await h.snapshot(Questions,id,ctx))?.pending;
           const answer=found?.type==='input'&&found.status==='done'?await h.commit(tx=>tx.entry(found.answer),ctx):undefined;
-          return send(res, 200, { admission: found ?? null, question:question?{id:question.id,text:question.text.slice(0,1000)}:null, reply:notificationReply(answer,id) });
+          const title=notificationConversationTitle((await h.snapshot(ChatMeta,id,ctx))?.title,id);
+          return send(res, 200, { conversationTitle:title, admission: found ?? null, question:question?{id:question.id,text:question.text.slice(0,1000)}:null, reply:notificationReply(answer,id) });
         }
         if (action === "stop" && req.method === "POST") {
           const p = Stop.parse(await body(req));

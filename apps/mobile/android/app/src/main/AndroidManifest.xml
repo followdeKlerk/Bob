@@ -39,6 +39,7 @@
       <activity android:name=".BobPreviewActivity" android:exported="false" />
       <activity android:name=".BobCaptureActivity" android:exported="false" android:screenOrientation="portrait" />
       <activity android:name=".BobInteractiveActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
+      <receiver android:name=".BobNotificationReplyReceiver" android:exported="false" />
       <service android:name=".BobLocationService" android:exported="false" android:foregroundServiceType="location" />
 
       <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">

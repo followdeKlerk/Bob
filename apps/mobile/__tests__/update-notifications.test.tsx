@@ -30,3 +30,13 @@ test('background app does not attempt an Android foreground-service launch',asyn
  Object.defineProperty(AppState,'currentState',{configurable:true,value:'background'});
  expect(await enableUpdateNotifications([backend])).toBe(false);expect(NativeModules.BobNotifications.watchUpdates).not.toHaveBeenCalled();
 });
+
+test('successful pairing registration republishes the foreground barrier snapshot afterwards',async()=>{
+ const registered=jest.fn(async()=>{});expect(await enableUpdateNotifications([backend],true,registered)).toBe(true);
+ expect(registered).toHaveBeenCalledWith(backend.backendId);
+ expect((NativeModules.BobNotifications.watchUpdates as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(registered.mock.invocationCallOrder[0]);
+});
+test('a failed pairing registration never publishes a misleading ready snapshot',async()=>{
+ NativeModules.BobNotifications.watchUpdates.mockRejectedValue(Error('revoked'));const registered=jest.fn(async()=>{});
+ await expect(enableUpdateNotifications([backend],true,registered)).rejects.toThrow('revoked');expect(registered).not.toHaveBeenCalled();
+});

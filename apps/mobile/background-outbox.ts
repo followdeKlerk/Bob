@@ -2,6 +2,7 @@ import type {OutgoingMessage} from './message-outbox';
 export type BackgroundReceipt={state:'pending'|'admitted'|'rejected';admission?:{status:string;entry?:number};error?:string;uncertain?:boolean};
 export type BackgroundPort={
  enqueue(endpoint:string,backendId:string,credential:string,chat:number,requestId:string,message:string,files:string,item:string,retry:boolean):Promise<unknown>;
+ setNotificationReplyBarriers?(backendId:string,chats:number[]):Promise<unknown>;
  status(requestId:string):Promise<string|null>;
  list():Promise<string[]>;
  remove(requestId:string):Promise<unknown>;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {notificationReply} from '../src/notification-preview.js';
+import {notificationReply,notificationConversationTitle} from '../src/notification-preview.js';
 const entry=(model:unknown)=>({id:42,conversationId:7,kind:'pi.assistant',model}) as any;
 test('notification previews include only the settled assistant text, not tools or hidden reasoning',()=>{
  assert.deepEqual(notificationReply(entry([{role:'assistant',content:[{type:'thinking',thinking:'private reasoning'},{type:'toolCall',name:'bash',arguments:{command:'secret token'}},{type:'text',text:'Here is the final reply.'}]},{role:'toolResult',content:[{type:'text',text:'private tool output'}]}]),7),{id:42,text:'Here is the final reply.'});
@@ -12,4 +12,11 @@ test('notification reply previews are bounded, including multi-block and very la
  const reply=notificationReply(entry([{role:'assistant',content:[{type:'text',text:'First block'},{type:'text',text:'x'.repeat(2200000)}]}]),7)!;
  assert.equal(reply.text.length,4000);assert.ok(reply.text.startsWith('First block\n'));assert.ok(Buffer.byteLength(JSON.stringify(reply))<20000);
  assert.deepEqual(notificationReply(entry([{role:'assistant',content:'Plain text reply'}]),7),{id:42,text:'Plain text reply'});
+});
+
+test('conversation labels are bounded display metadata, not model inference or full transcript reads',()=>{
+ assert.equal(notificationConversationTitle(undefined,42),'Conversation 42');
+ assert.equal(notificationConversationTitle(' \n \t ',42),'Conversation 42');
+ assert.equal(notificationConversationTitle('Job\nfollow-ups',42),'Job follow-ups');
+ assert.equal(notificationConversationTitle('x'.repeat(200),42).length,160);
 });

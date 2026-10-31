@@ -41,9 +41,9 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
     init {
         NotificationRuntime.appVisible = context.lifecycleState == LifecycleState.RESUMED
         context.addLifecycleEventListener(object : LifecycleEventListener {
-            override fun onHostResume() { NotificationRuntime.appVisible = true }
-            override fun onHostPause() { NotificationRuntime.appVisible = false }
-            override fun onHostDestroy() { NotificationRuntime.appVisible = false }
+            override fun onHostResume() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = true; ConversationNotifications.clear(context, NotificationRuntime.visibleBackend, NotificationRuntime.visibleChat) } }
+            override fun onHostPause() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false } }
+            override fun onHostDestroy() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false } }
         })
         // Remove only the obsolete generic monitor; the separate location FGS is untouched.
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -56,6 +56,8 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
         UUID.fromString(identity); require(token.matches(Regex("[A-Za-z0-9_-]{32,128}")))
         if (Build.VERSION.SDK_INT >= 33) require(context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) { "Notification permission required" }
         synchronized(NotificationWatchStore) {
+            val prior = NotificationWatchStore.read(context, identity)
+            if (prior != null && ConversationNotificationPolicy.changedPairing(prior.optString("endpoint"), prior.optString("token"), origin, token)) { BobNotificationReply.revoke(context, identity); ConversationNotifications.clearBackend(context, identity) }
             NotificationWatchStore.update(context, identity) { value ->
                 value.put("endpoint", origin).put("token", token).put("revision", UUID.randomUUID().toString()); mutate(value)
             }
@@ -87,10 +89,11 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
     }
     @ReactMethod fun setReplyNotifications(enabled: Boolean) { context.getSharedPreferences("bob-notification-preferences", Context.MODE_PRIVATE).edit().putBoolean("replies", enabled).apply() }
     @ReactMethod fun setAppContext(identity: String, chat: Double) {
+        synchronized(NotificationWatchStore) {
         NotificationRuntime.visibleBackend = identity; NotificationRuntime.visibleChat = if (chat > 0 && chat % 1.0 == 0.0) chat.toLong() else 0
         if (NotificationRuntime.appVisible && chat > 0) {
-            val manager = context.getSystemService(NotificationManager::class.java)
-            manager.cancel(("reply:$identity:${chat.toLong()}").hashCode()); manager.cancel(("question:$identity:${chat.toLong()}").hashCode())
+            ConversationNotifications.clear(context, identity, chat.toLong())
+        }
         }
     }
     @ReactMethod fun stop(promise: Promise) {
@@ -101,7 +104,7 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
                     if (value.optBoolean("updates")) {
                         NotificationWatchStore.update(context, identity) { it.put("work", JSONObject()).put("revision", UUID.randomUUID().toString()) }
                         scheduleNotificationCheck(context, identity)
-                    } else { NotificationWatchStore.remove(context, identity); WorkManager.getInstance(context).cancelUniqueWork("bob-notifications:$identity"); WorkManager.getInstance(context).cancelUniqueWork("bob-update-check:$identity") }
+                    } else { if (BobNotificationReply.hasPendingActions(value)) NotificationWatchStore.update(context, identity) { it.put("work", JSONObject()).put("revision", UUID.randomUUID().toString()) } else NotificationWatchStore.remove(context, identity); WorkManager.getInstance(context).cancelUniqueWork("bob-notifications:$identity"); WorkManager.getInstance(context).cancelUniqueWork("bob-update-check:$identity") }
                 }
             }
             promise.resolve(true)
@@ -121,7 +124,7 @@ class BobNotificationWorker(context: Context, parameters: WorkerParameters) : Wo
         val notifications = applicationContext.getSystemService(NotificationManager::class.java)
         if (!notifications.areNotificationsEnabled() || (Build.VERSION.SDK_INT >= 33 && applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)) {
             NotificationWatchStore.ifCurrent(applicationContext, identity, revision) {
-                NotificationWatchStore.remove(applicationContext, identity)
+                BobNotificationReply.revoke(applicationContext, identity); ConversationNotifications.clearBackend(applicationContext, identity); NotificationWatchStore.remove(applicationContext, identity)
                 WorkManager.getInstance(applicationContext).cancelUniqueWork("bob-update-check:$identity")
             }
             return Result.success()
@@ -132,14 +135,16 @@ class BobNotificationWorker(context: Context, parameters: WorkerParameters) : Wo
             val checks = NotificationChecks(applicationContext, current)
             activeBuild = checks.check(identity, config)
         } catch (_: SecurityException) {
-            NotificationWatchStore.ifCurrent(applicationContext, identity, revision) { NotificationWatchStore.remove(applicationContext, identity); WorkManager.getInstance(applicationContext).cancelUniqueWork("bob-update-check:$identity") }
+            NotificationWatchStore.ifCurrent(applicationContext, identity, revision) { BobNotificationReply.revoke(applicationContext, identity); ConversationNotifications.clearBackend(applicationContext, identity); NotificationWatchStore.remove(applicationContext, identity); WorkManager.getInstance(applicationContext).cancelUniqueWork("bob-update-check:$identity") }
             return Result.success()
         } catch (_: Exception) { /* Offline checks are silent; retain their encrypted, bounded metadata. */ }
         var retry = false
         if (!isStopped) NotificationWatchStore.ifCurrent(applicationContext, identity, revision) {
             val latest = NotificationWatchStore.read(applicationContext, identity) ?: return@ifCurrent
             retry = NotificationSchedulePolicy.needsRetry((latest.optJSONObject("work")?.length() ?: 0) > 0, activeBuild)
-            if (!retry && !latest.optBoolean("updates")) NotificationWatchStore.remove(applicationContext, identity)
+            NotificationCompletionPolicy.cleanup(retry, latest.optBoolean("updates"), BobNotificationReply.hasPendingActions(latest)) {
+                NotificationWatchStore.remove(applicationContext, identity)
+            }
         }
         // Retry only unfinished work, not an ever-growing chain of idle checks.
         // Periodic update polling is a single OS-owned row with a 15-minute minimum interval.
@@ -152,6 +157,7 @@ private class NotificationChecks(private val context: Context, private val curre
         if (Build.VERSION.SDK_INT < 26) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("bob-updates", "Updates ready to install", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel("bob-schedules", "Scheduled reminders and check results", NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel("bob-attention", "Questions needing your answer", NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel("bob-completions-quiet", "Last replies (silent by default)", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null); enableVibration(false) })
     }
@@ -162,29 +168,45 @@ private class NotificationChecks(private val context: Context, private val curre
         if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(value.channelId)?.importance == NotificationManager.IMPORTANCE_NONE) return false
         return try { manager.notify(id, value); true } catch (_: SecurityException) { false }
     }
-    private fun noticeOnce(prefs: SharedPreferences, bucket: String, receipt: String, id: Int, value: Notification) {
+    private fun noticeOnce(prefs: SharedPreferences, bucket: String, receipt: String, id: Int, value: Notification): Boolean {
         synchronized(NotificationWatchStore) {
             val seen = prefs.getStringSet(bucket, emptySet())!!.toMutableSet()
-            if (!seen.contains(receipt) && publish(id, value)) {
-                seen.add(receipt); prefs.edit().putStringSet(bucket, seen.toList().takeLast(256).toSet()).apply()
+            if (seen.contains(receipt)) return true
+            if (publish(id, value)) {
+                seen.add(receipt); prefs.edit().putStringSet(bucket, seen.toList().takeLast(256).toSet()).commit()
+                return true
             }
         }
+        return false
     }
-    private fun notification(title: String, text: String, identity: String, chat: Long = 0, updates: Boolean = false, attention: Boolean = false): Notification {
+    private fun conversationOnce(prefs: SharedPreferences, bucket: String, receipt: String, identity: String, chat: Long, text: String, title: String?, channel: String, reply: Boolean, at: Long = System.currentTimeMillis(), questionPending: Boolean? = null): Boolean {
+        synchronized(NotificationWatchStore) {
+            val seen = prefs.getStringSet(bucket, emptySet())!!.toMutableSet()
+            if (seen.contains(receipt)) return true
+            when (ConversationNotifications.post(context, identity, chat, ConversationNotice("$bucket:$receipt", text, at), title, channel, reply, current, questionPending)) {
+                ConversationPostResult.RETRY -> return false
+                ConversationPostResult.VIEWED -> return true
+                ConversationPostResult.POSTED -> Unit
+            }
+            seen.add(receipt)
+            return prefs.edit().putStringSet(bucket, seen.toList().takeLast(256).toSet()).commit()
+        }
+    }
+    private fun notification(title: String, text: String, identity: String, chat: Long = 0, updates: Boolean = false, attention: Boolean = false, scheduled: Boolean = false): Notification {
         val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         intent.data = android.net.Uri.parse(if (updates) "bob://updates/$identity" else "bob://work/$identity/$chat")
         val open = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val channel = if (attention) "bob-attention" else if (updates) "bob-updates" else "bob-completions-quiet"
+        val channel = if (scheduled) "bob-schedules" else if (attention) "bob-attention" else if (updates) "bob-updates" else "bob-completions-quiet"
         return (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, channel) else Notification.Builder(context))
             .setSmallIcon(R.drawable.ic_stat_bob).setLargeIcon(BitmapFactory.decodeResource(context.resources, R.drawable.bob_notification_logo))
             .setContentTitle(title).setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open)
             .setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build()
     }
-    private fun question(prefs: SharedPreferences, identity: String, chat: Long, value: JSONObject?) {
-        val id = value?.optString("id") ?: return
-        if (id.isBlank() || NotificationRuntime.viewing(identity, chat)) return
+    private fun question(prefs: SharedPreferences, identity: String, chat: Long, value: JSONObject?, title: String?): Boolean {
+        val id = value?.optString("id") ?: return true
+        if (id.isBlank() || NotificationRuntime.viewing(identity, chat)) return true
         val text = value.optString("text").take(1000).ifBlank { "Tap to answer Bob’s question." }
-        noticeOnce(prefs, "questions", "$identity:$chat:$id", ("question:$identity:$chat").hashCode(), notification("Bob has a question", text, identity, chat, attention = true))
+        return conversationOnce(prefs, "questions", "$identity:$chat:$id", identity, chat, text, title, "bob-attention", reply = false, questionPending = true)
     }
     private fun get(config: JSONObject, suffix: String): JSONObject {
         val connection = URI(config.getString("endpoint") + suffix).toURL().openConnection() as HttpURLConnection
@@ -201,6 +223,32 @@ private class NotificationChecks(private val context: Context, private val curre
             return JSONObject(String(bytes, Charsets.UTF_8))
         } finally { connection.disconnect() }
     }
+    private fun checkSchedules(identity: String, value: JSONObject) {
+        val prefs = context.getSharedPreferences("bob-schedule-notification-receipts", Context.MODE_PRIVATE)
+        val cursor = prefs.getLong("cursor:$identity", 0)
+        val response = get(value, "/v1/schedules/alerts?since=$cursor")
+        val alerts = response.optJSONArray("alerts") ?: return
+        var next = cursor
+        for (i in 0 until alerts.length()) {
+            if (!current()) return
+            val item = alerts.getJSONObject(i)
+            val sequence = item.getLong("sequence"); val chat = item.getLong("conversationId")
+            require(sequence > next && chat > 0)
+            val delivered = NotificationRuntime.viewing(identity, chat) || conversationOnce(prefs, "alerts", "$identity:$sequence", identity, chat,
+                item.optString("title", "Scheduled reminder").take(160) + "\n" + item.optString("text").take(4000), item.optString("conversationTitle").takeIf { it.isNotBlank() }, "bob-schedules", reply = true, at = item.optLong("at", System.currentTimeMillis()), questionPending = item.opt("questionPending") as? Boolean)
+            // Disabled channel or revoked permission is not delivery. Leave it retryable.
+            if (!delivered) return
+            next = sequence
+            synchronized(NotificationWatchStore) {
+                if (current()) prefs.edit().putLong("cursor:$identity", next).commit()
+            }
+        }
+        // A bounded server feed may have aged out old events. No new alerts to publish.
+        val latest = response.optLong("sequence", next)
+        if (latest >= next && current()) synchronized(NotificationWatchStore) {
+            if (current()) prefs.edit().putLong("cursor:$identity", latest).commit()
+        }
+    }
     fun check(identity: String, value: JSONObject): Boolean {
         channels(); value.put("identity", identity)
         val prefs = context.getSharedPreferences("bob-notification-receipts", Context.MODE_PRIVATE)
@@ -213,22 +261,30 @@ private class NotificationChecks(private val context: Context, private val curre
                 val operation = get(value, "/v1/chats/$chat/operations/$request")
                 val status = operation.optJSONObject("admission")?.optString("status")
                 val pending = operation.optJSONObject("question")
+                val title = operation.optString("conversationTitle").takeIf { it.isNotBlank() }
                 if (!current()) return false
                 if (status == "done" || status == "unanswered") {
-                    if (!pending?.optString("id").isNullOrEmpty()) question(prefs, identity, chat, pending)
+                    if (!pending?.optString("id").isNullOrEmpty()) { if (!question(prefs, identity, chat, pending, title)) continue }
                     else if (status == "done" && context.getSharedPreferences("bob-notification-preferences", Context.MODE_PRIVATE).getBoolean("replies", true) && !NotificationRuntime.viewing(identity, chat)) {
                         val reply = operation.optJSONObject("reply")
                         val text = reply?.optString("text")?.take(4000)?.takeIf { it.isNotBlank() } ?: "Tap to read my latest reply."
                         val receipt = "$identity:$chat:" + (reply?.optLong("id", 0)?.takeIf { it > 0 }?.toString() ?: request)
-                        noticeOnce(prefs, "replies", receipt, ("reply:$identity:$chat").hashCode(), notification("Bob replied", text, identity, chat))
+                        if (!conversationOnce(prefs, "replies", receipt, identity, chat, text, title, "bob-completions-quiet", reply = true, questionPending = if(pending != null) true else if(operation.has("question") && operation.isNull("question")) false else null)) continue
                     }
                     NotificationWatchStore.ifCurrent(context, identity, value.getString("revision")) {
                         val completed = prefs.getStringSet("settled", emptySet())!!.toMutableSet(); completed.add(key)
                         prefs.edit().putStringSet("settled", completed.toList().takeLast(256).toSet()).apply()
                         NotificationWatchStore.update(context, identity) { it.optJSONObject("work")?.remove(key) }
                     }
-                } else question(prefs, identity, chat, pending)
+                } else question(prefs, identity, chat, pending, title)
             } catch (e: SecurityException) { throw e } catch (_: Exception) { /* Retain unfinished checks. */ }
+        }
+        // Reuse the existing encrypted per-backend watch and OS periodic work.
+        // An old backend may not have this additive endpoint yet; update checks still work.
+        if (value.optBoolean("updates") && current()) {
+            try { checkSchedules(identity, value) }
+            catch (e: SecurityException) { throw e }
+            catch (_: Exception) { /* No cursor advance on failed reads; retry on the next OS check. */ }
         }
         if (!value.optBoolean("updates") || !current()) return false
         val status = get(value, "/v1/updates")

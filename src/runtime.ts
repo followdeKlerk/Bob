@@ -1,3 +1,5 @@
+import {createEmailRead} from './email-read.js';
+import {createSchedules} from './schedules.js';
 import {withDelegationPeerPolicy} from './peer-policy.js';
 import {createDelegation} from './delegation.js';
 import {recoverDelegationCommands} from './delegation-command.js';
@@ -98,10 +100,12 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       ?conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},action,{...request,destinationBackendId:state.id})
       :requestPeer(state,id,action,request,signal)}));
     const custom=await loadCustomModules(state);disposeCustom=custom.dispose;
+    const scheduling=createSchedules(()=>harness);
+    const email=createEmailRead(()=>harness);
     const diagnostics=createDiagnosticExtension(state,async(id,context)=>(await harness.conversation(id as ConversationId,context))??undefined);
     // Host-composed custom extension: existing resources selections gain the tool,
     // without changing persisted module identities or any existing task definition.
-    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[]]});
+    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[],...scheduling.extension.tools??[],...email.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[],...scheduling.extension.sections??[],...email.sections??[]],tasks:[...resources.tasks??[],...scheduling.extension.tasks??[]]});
     const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:coding.extension,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
     // An explicit owner-managed config provisions this newly bundled module once.
     if(memory.config.enabled&&!state.get<boolean>('hindsightProvisioned')){
@@ -143,9 +147,10 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     if(options.resume!==false&&registry.snapshot().extension(memory.extension.name)){
       const attached=await memory.attach(harness,storage,state.id,{selectExisting:true});closeMemory=attached.close;
     }
-    if(options.resume!==false)harness.resume();
+    if(options.resume!==false){await scheduling.recover();harness.resume();}
     return {
       harness,
+      scheduling,
       library,
       interactive,
       delegation,

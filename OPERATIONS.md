@@ -55,6 +55,12 @@ Configure credentials in Bob itself. Replacing a provider API key supersedes its
 
 `rollback` selects the previous compatible backend code while keeping current data; Android downgrades are separate. Compatibility fences reject storage/task changes that require migration. Review and authorize a migration rather than weaken the fence. Finish edits before building: source changes invalidate a candidate.
 
+### Scheduled work
+
+Schedules use additive native session/conversation documents (`bob.schedules`, `bob.schedule-worker`) and `bob.schedule-driver` v1 in the resources extension. No second scheduler, shadow database or OS cron service is introduced. Existing document/task definitions and control schema are unchanged. The standard Durable backup includes schedules and their recovery checkpoints.
+
+Keep resources installed while schedules exist. Before reverting to a release without these definitions, cancel/settle schedule work first; never restore an older database to roll code back. A missing/blocked driver is not proof that a schedule is running. On startup Bob reconciles obsolete/paused/cancelled drivers and requests their abort before resuming normal scheduling. Healthy active drivers resume their saved phase/deadline. Scheduling endpoints require ordinary paired-device authentication and backend identity. Android delivery is best-effort polling, not server-confirmed notification delivery.
+
 ### Backup and disaster recovery
 
 `backup <new-directory>` / `export <new-directory>` require a stopped runtime and exclusive ownership. The checksummed export includes Durable history/documents/tasks, control configuration, credentials/grants, uploaded artifacts and custom-module packages. Treat it as a private full-state backup.
@@ -146,3 +152,17 @@ The app’s slash-command picker lists the commands available on the selected ba
 Start with **Settings → Copy app diagnostics** on the phone. The report includes bounded memory/workload samples and sanitized crash/exit history. Match each event to its app version, distinguish backgrounding from process death, and examine memory trends rather than a single high reading. Capture may be incomplete during memory exhaustion.
 
 Include the backend, conversation and request IDs when reporting a problem. Before repeating an action with an uncertain outcome, check whether it already completed.
+
+### Read-only scheduled GMX email
+
+The resources module exposes `email_read` through the existing authenticated Himalaya account `gmx` at `/home/ndk/.local/bin/himalaya`. No credentials/configuration are returned. Commands are fixed read-only argument vectors without a shell; reads omit `--seen`. Missing executable/account/network, invalid responses, size limits and timeouts are failures, not empty results. Attachments are not saved or exposed; HTML is reduced to text, never rendered or fetched. Redaction is best effort: mail bodies/authentication headers remain untrusted evidence and remaining secrets must not be repeated.
+
+Schedules must explicitly opt in with `emailAccess:true`; `emailMailboxes` is the enforced folder allowlist (default Inbox, Spam, Archive). Existing schedules remain email-disabled without edits. Every authorized folder must have a fully paginated search before a non-failure result. `bob.email-reads` stores bounded per-conversation metadata and read evidence; `bob.email-delivered` stores up to 10,000 source keys per schedule. The latter is updated in the alert transaction, not at scan time or phone delivery. Failed/partial searches and unreadable/truncated relevant bodies fail closed. Native documents are additive; existing schedule documents accept absent email fields, requiring no database restoration or destructive migration.
+
+### Conversation notifications and direct reply
+
+Android builds conversation-style notices from the existing operation-status and schedule-alert endpoints. Bob adds bounded `conversationTitle` response metadata and current schedule-target `questionPending` state via supported document snapshots; no Pi Durable source, document schema, database layout or scheduler changes are required. Notification tag identity includes both backend and conversation. A bounded encrypted phone preview cache is presentation-only, not transcript/read/delivery/question-state authority. Pending or unknown question state omits Reply; a notification-origin worker also checks the existing operation response before posting. Normal polling completion never revokes a pairing or cancels the notice just delivered. Context changes and publication share a lock; viewed suppression settles rather than retrying. Install notices remain separate.
+
+Incomplete retained input keeps the same recoverable request identity beyond the normal empty-action expiry, but never survives revocation as authorization to a new pairing. A later notification offers retry of that retained input rather than replacing it. Old accepted-send watches cannot overwrite a newer pairing. Background reply statuses share the context/publication lock and do not reappear for viewed chats or replaced pairings. Direct failed-input feedback uses a separate notification identity from asynchronous delivery, preserving its unqueued meaning and text when the earlier send later changes status. It remains visible so new text on a consumed action is explicitly reported as not queued, never silently treated as sent.
+
+Native RemoteInput replies reuse the encrypted outbox and existing authenticated message/operation APIs with stable request identities. They do not start an activity or React Native to send, bypass question-option validation, or bypass Bob’s existing delegation policy. The app recovers native sends on startup/resume and native change events. OS acceptance of a notification and persistence of a send are not human-view or server-delivery receipts. No push service, new universal event feed or generic foreground service is introduced. Device checks should include a locked phone/unlock, app process recreation, offline/reconnect, pairing rotation, concurrent incoming notices, large text and disabled notification channels.

@@ -44,6 +44,7 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
     private fun deliver(value: JSONObject): Result {
         if (isStopped) return Result.success()
         if (value.getString("state") == "pending") {
+            notificationGate(value)?.let { return it }
             val blocked = BobOutboxStore.all(applicationContext).any {
                 it.getString("backendId") == value.getString("backendId") && it.getLong("chat") == value.getLong("chat") &&
                     BobOutboxPolicy.blocks(it.getString("state"), it.getLong("order"), value.getLong("order"))
@@ -70,6 +71,10 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
             if (admission != null) validateAdmission(admission)
             else if (BobOutboxPolicy.mayPost(value.has("admission"), operation.has("admission"), operation.isNull("admission"))) {
                 if (isStopped) return Result.success()
+                notificationGate(value)?.let { return it }
+                if (value.optBoolean("notificationReply") && (!operation.has("question") || !operation.isNull("question"))) {
+                    return stop(value, "A question needs your answer or its state is unknown. Open Bob before retrying this reply.", false)
+                }
                 // Persist uncertainty BEFORE the mutation: process death after a server
                 // commit still leaves the next worker obligated to GET this same UUID.
                 value.put("uncertain", true)
@@ -83,6 +88,7 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
                 value.put("state", "admitted").put("admission", admission).put("uncertain", false)
                 value.remove("error"); value.remove("retryable"); value.remove("notBefore")
                 BobOutboxStore.write(applicationContext, value) // Receipt precedes notifications.
+                BobNotificationReply.reportOutbox(applicationContext, value)
                 if (!value.optBoolean("watchAttempted")) watch(value)
                 if (admission.has("entry")) return Result.success()
             }
@@ -106,7 +112,20 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
             return stop(value, "Background retry limit reached; reconcile or retry this same request", true)
         }
         BobOutboxStore.write(applicationContext, value)
+        BobNotificationReply.reportOutbox(applicationContext, value)
         return if (isStopped) Result.success() else Result.retry()
+    }
+    private fun notificationGate(value: JSONObject): Result? {
+        if (!value.optBoolean("notificationReply")) return null
+        if (!BobNotificationReply.pairingCurrent(applicationContext, value)) {
+            return stop(value, "Reply pairing changed or was revoked; open Bob to reconcile before retrying", false)
+        }
+        if (NotificationReplyBarriers.blocked(applicationContext, value.getString("backendId"), value.getLong("chat"))) {
+            value.put("error", "Waiting for earlier foreground sends or attachment queue reconciliation")
+            BobOutboxStore.write(applicationContext, value)
+            return Result.retry() // No transport and no network-attempt budget consumed.
+        }
+        return null
     }
     private fun stop(value: JSONObject, message: String, retryable: Boolean): Result {
         // 'rejected' means native automation stopped, NOT proof that an uncertain POST
@@ -115,6 +134,7 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
         else value.put("state", "rejected")
         value.put("error", message).put("retryable", retryable)
         BobOutboxStore.write(applicationContext, value)
+        BobNotificationReply.reportOutbox(applicationContext, value)
         return Result.success() // Terminal failure must not block later chat sends.
     }
     private fun validateAdmission(value: JSONObject) {
@@ -161,6 +181,10 @@ class BobOutboxWorker(context: Context, parameters: WorkerParameters) : Worker(c
                 val identity = value.getString("backendId"); val chat = value.getLong("chat"); val request = value.getString("requestId")
                 val key = "$identity:$chat:$request"
                 synchronized(NotificationWatchStore) {
+                    val existing = NotificationWatchStore.read(context, identity)
+                    // An old accepted send keeps its original receipt identity, but must
+                    // never revert the phone's newer pairing to watch that old receipt.
+                    if (existing != null && ConversationNotificationPolicy.changedPairing(existing.optString("endpoint"), existing.optString("token"), value.getString("endpoint"), value.getString("credential"))) return@synchronized
                     if (!context.getSharedPreferences("bob-notification-receipts", Context.MODE_PRIVATE).getStringSet("settled", emptySet())!!.contains(key)) {
                         NotificationWatchStore.update(context, identity) { config ->
                             val work = config.optJSONObject("work") ?: JSONObject()

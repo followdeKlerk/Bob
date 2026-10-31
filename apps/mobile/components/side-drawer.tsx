@@ -2,7 +2,7 @@ import {Text,TextInput} from './app-text';
 import React,{memo,useEffect,useMemo,useState} from 'react';
 import {ActivityIndicator,Alert,BackHandler,FlatList,Image,Keyboard,Modal,Pressable,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Archive,ArchiveRestore,ChevronDown,ChevronRight,Check,Edit3,Pin,PinOff,QrCode,Search,Server,Settings,SquarePen,Trash2,Undo2,X,type LucideIcon} from 'lucide-react-native';
+import {Clock3,Archive,ArchiveRestore,ChevronDown,ChevronRight,Check,Edit3,Pin,PinOff,QrCode,Search,Server,Settings,SquarePen,Trash2,Undo2,X,type LucideIcon} from 'lucide-react-native';
 import {EdgeFade} from './edge-fade';
 import {ActionIcon} from './message-actions';
 import {colors} from '../theme';
@@ -10,11 +10,11 @@ import {sectionStyles,RoundAction} from './section-ui';
 import {useKeyboardInset} from '../keyboard-inset';
 export type SessionAction='rename'|'pin'|'unpin'|'archive'|'unarchive'|'delete'|'restore';
 type Row={id:string;label:string;selected?:boolean;disabled?:boolean;onPress:()=>void;pinned?:boolean;archived?:boolean;trashed?:boolean;working?:boolean};
-type Props={embedded?:boolean;mode?:'sessions'|'workstations';workspaceLabel?:string;visible:boolean;onClose:()=>void;navigation:(Row&{icon:LucideIcon})[];workspaces:Row[];conversations:Row[];onNew:()=>void;onSettings:()=>void;disabled:boolean;loadMore?:()=>void;pairing:React.ReactNode;onSessionAction:(id:string,action:SessionAction,title?:string)=>Promise<void>};
+type Props={embedded?:boolean;mode?:'sessions'|'workstations';workspaceLabel?:string;visible:boolean;onClose:()=>void;navigation:(Row&{icon:LucideIcon})[];workspaces:Row[];conversations:Row[];onSchedules?:()=>void;onNew:()=>void;onSettings:()=>void;disabled:boolean;loadMore?:()=>void;pairing:React.ReactNode;onSessionAction:(id:string,action:SessionAction,title?:string)=>Promise<void>};
 const MenuRow=memo(function MenuRow({label,icon:Icon,selected,disabled,onPress,onLongPress,pinned,working,card=false,text=label}:Omit<Row,'id'>&{icon?:LucideIcon;card?:boolean;text?:string;onLongPress?:(y:number)=>void}){
  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={onLongPress?'Long press for session controls':undefined} accessibilityState={{selected:!!selected,disabled:!!disabled,...(working!==undefined?{busy:working}:{})}} disabled={disabled} onPress={()=>{Keyboard.dismiss();onPress();}} onLongPress={onLongPress?event=>{Keyboard.dismiss();onLongPress(event.nativeEvent.pageY);}:undefined} delayLongPress={400} style={[s.row,card&&s.cardRow,selected&&{backgroundColor:card?colors.selectedSurface:colors.surface},card&&selected&&{borderColor:colors.selectedBorder},disabled&&{opacity:0.4}]}>{Icon&&<View style={card?s.rowIcon:undefined}><Icon size={card?20:22} color={selected?colors.accent:colors.muted}/></View>}<Text numberOfLines={card?2:1} style={s.rowText}>{text}</Text>{pinned&&<Pin size={14} color={colors.accent}/>}{working&&<ActivityIndicator size="small" color={colors.accent} accessible={false} importantForAccessibility="no-hide-descendants" style={s.working}/>}{card&&(selected?<Check size={18} color={colors.accent}/>:<ChevronRight size={16} color={colors.muted}/>)}</Pressable>;
 });
-export function SideDrawer({visible,onClose,navigation,workspaces,conversations,onNew,onSettings,disabled,loadMore,pairing,onSessionAction,embedded=false,mode,workspaceLabel}:Props){
+export function SideDrawer({onSchedules,visible,onClose,navigation,workspaces,conversations,onNew,onSettings,disabled,loadMore,pairing,onSessionAction,embedded=false,mode,workspaceLabel}:Props){
  const keyboard=useKeyboardInset(),insets=useSafeAreaInsets();
  const [headerHeight,setHeaderHeight]=useState(72),[footerHeight,setFooterHeight]=useState(80);
  const bottomInset=embedded||keyboard>0?0:insets.bottom;
@@ -64,6 +64,7 @@ export function SideDrawer({visible,onClose,navigation,workspaces,conversations,
    <View testID="drawer-header" pointerEvents="box-none" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setHeaderHeight(height);}} style={[s.headerOverlay,{top:embedded?0:insets.top}]}>
     <View pointerEvents="box-none" style={[s.heading,embedded&&{paddingTop:20,paddingBottom:12,gap:10}]}>
      <View pointerEvents="none" style={{flex:1}}><>{embedded?<><Text accessibilityRole="header" style={sectionStyles.title}>{mode==='workstations'?'Workstations':'Sessions'}</Text>{mode==='sessions'&&!!workspaceLabel&&<Text numberOfLines={1} style={sectionStyles.subtitle}>{workspaceLabel}</Text>}</>:<Image accessibilityLabel="Bob logo" accessible source={require('../assets/bob-wordmark.png')} resizeMode="contain" style={s.brand}/>}</></View>
+     {embedded&&mode==='sessions'&&onSchedules&&<RoundAction label="Schedules" icon={Clock3} disabled={disabled} onPress={onSchedules}/>}
      {embedded&&mode==='sessions'&&<RoundAction label="New conversation" icon={SquarePen} disabled={disabled} primary onPress={()=>{Keyboard.dismiss();onNew();}}/>}
      {mode!=='workstations'&&(embedded?<RoundAction icon={searching?X:Search} label={searching?'Close conversation search':'Search conversations'} onPress={()=>{setSearching(value=>!value);setQuery('');Keyboard.dismiss();}}/>:<View style={s.control}><ActionIcon icon={searching?X:Search} label={searching?'Close conversation search':'Search conversations'} onPress={()=>{setSearching(value=>!value);setQuery('');Keyboard.dismiss();}}/></View>)}
     </View>
