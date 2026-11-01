@@ -44,6 +44,7 @@ import {PeerAdmission} from './components/peer-admission';
 import {AttachmentPicker} from './components/attachment-picker';
 import {PlusMenu} from './components/plus-menu';
 import {AttachmentThumbnail,type DraftAttachment} from './components/attachment-thumbnail';
+import {DrawingEditor} from './components/drawing-editor';
 import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
@@ -131,6 +132,7 @@ function Main() {
   const sectionRequest=useRef(0);
   const [actionsMore,setActionsMore]=useState(false);
   const [attachmentPicker,setAttachmentPicker]=useState<{scope:string;tab:'gallery'|'files';limit:number}>();
+  const [drawingEditor,setDrawingEditor]=useState(false);
   const keyboardInset = useKeyboardInset();
   const [composerHeight,setComposerHeight]=useState(84);
   const [backends, setBackends] = useState<Backend[]>([]),
@@ -584,6 +586,18 @@ function Main() {
     const listener=AppState.addEventListener('change',state=>{if(state==='active')void drainLatest.current(true);});
     return()=>{clearInterval(timer);listener.remove();};
   },[backends]);
+  async function addDrawing(dataUri:string){
+    const current=scope,b=backend;if(!current||!b)return;
+    const transfer=TransferLimits.parse(await request('transfer-limits','GET',undefined,b));
+    if(identity.current!==current)return;
+    const id=uuid(),name=`drawing-${id}.png`;
+    try{
+      const staged=await NativeModules.BobFiles.stageDataUri(id,dataUri,name,transfer.uploadLimit) as DraftAttachment;
+      if(scope!==current){await NativeModules.BobFiles.removeAttachment(id).catch(()=>{});return;}
+      setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),{...staged,drawingData:dataUri}]}));
+      setDrawingEditor(false);
+    }catch(error){Alert.alert('Could not add drawing',String((error as Error).message??error));}
+  }
   async function openAttachments(tab:'gallery'|'files'|'camera') {
     const b=backend,current=scope;if(!b||!chat||pending)return;
     setActions(false);Keyboard.dismiss();
@@ -902,7 +916,7 @@ function Main() {
 
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
               {attachments.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
-                {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={{uri:file.uri}} disabled={!!pending} onRemove={()=>{
+                {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={file.drawingData?{uri:file.drawingData}:{uri:file.uri}} onOpen={file.drawingData?()=>{setDrawingEditor(true);}:undefined} disabled={!!pending} onRemove={()=>{
                   const current=scope;
                   setDraftAttachments(previous=>({...previous,[current]:(previous[current]??[]).filter(item=>item.id!==file.id)}));
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
@@ -916,6 +930,7 @@ function Main() {
             </Animated.View>
           </Animated.View>
       </>
+      <DrawingEditor visible={drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={data=>void addDrawing(data)}/>
       {backend&&chat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&<SkillPicker key={scope} scope={scope} query={slashQuery}
         loadLibrary={()=>request('library','GET',undefined,backend)}
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
@@ -1146,7 +1161,7 @@ function Main() {
       <Modal visible={actions} transparent animationType="none" onRequestClose={()=>setActions(false)}>
         <View style={styles.actionOverlay}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
-          {!actionsMore?<PlusMenu bottom={Math.max(insets.bottom+12,keyboardInset+composerHeight+8)} maxHeight={Math.max(140,windowSize.height-Math.max(insets.bottom+12,keyboardInset+composerHeight+8)-insets.top-20)} disabled={!chat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>:<SafeAreaView edges={['bottom']} style={styles.actionSheet}>
+          {!actionsMore?<PlusMenu bottom={Math.max(insets.bottom+12,keyboardInset+composerHeight+8)} maxHeight={Math.max(140,windowSize.height-Math.max(insets.bottom+12,keyboardInset+composerHeight+8)-insets.top-20)} disabled={!chat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>:<SafeAreaView edges={['bottom']} style={styles.actionSheet}>
             <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={styles.title}>More actions</Text><IconButton icon={X} label="Close actions" onPress={()=>setActions(false)}/></View>
             <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text accessibilityLiveRegion="polite" style={styles.caption}>{backend?.name??'Workspace'} · {busy?'Working':status}</Text>
@@ -1233,7 +1248,7 @@ const styles = StyleSheet.create({
   bubble:{paddingVertical:0,marginBottom:0},
   userBubble:{backgroundColor:colors.surface,paddingHorizontal:16,paddingVertical:12,borderRadius:20,marginLeft:48,alignSelf:'flex-end',maxWidth:'88%'},
   kind:{color:colors.muted,fontSize:11,marginBottom:8},
-  message:{color:colors.body,fontSize:17,lineHeight:28},
+  message:{color:colors.body,fontSize:15,lineHeight:25},
   empty:{padding:30,flex:1,justifyContent:'center',gap:20},
   hero:{fontSize:29,color:colors.foreground,fontWeight:'500'},
   composer:{paddingHorizontal:12,paddingTop:8,paddingBottom:12,backgroundColor:'transparent'},

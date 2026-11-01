@@ -80,10 +80,12 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const models=delegation.models;
     const resources = createResources(()=>libraryId,async(source,input,context)=>{
       if(input.mode==='search')return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
-      if(input.conversationId===undefined&&!input.cursor&&!input.query){const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'conversations',{...input,destinationBackendId:state.id,originConversationId:source});return {...result,readOnly:true};}
+      if(input.mode==='page'&&input.conversationId===undefined)throw Error('Specify conversationId for page mode.');
+      const {mode: _mode,...request}=input;
+      if(input.conversationId===undefined&&!input.cursor&&!input.query){const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'conversations',{...request,destinationBackendId:state.id,originConversationId:source});return {...result,readOnly:true};}
       if(input.conversationId===undefined&&!input.cursor&&input.query)return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
       if(input.conversationId===undefined)throw Error('Specify conversationId for page mode. Use search mode to discover matching conversations first.');
-      const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'history',{...input,destinationBackendId:state.id,originConversationId:source});
+      const result=await conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},'history',{...request,destinationBackendId:state.id,originConversationId:source});
       return {...result,readOnly:true};
     },maintenancePort(state),async(input,taskId,source,context)=>{
       const library=await harness.conversation(libraryId,context);if(!library)throw Error('Notes library is unavailable');

@@ -5,6 +5,7 @@ import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {ChatMeta} from './documents.js';
 import type {State} from './state.js';
 import {encodeCursor,decodeCursor} from './pagination.js';
+import {historyPage} from './history-page.js';
 
 export const ConversationRequest=z.object({destinationBackendId:z.string().uuid(),conversationId:z.number().int().positive().safe().optional(),originConversationId:z.number().int().positive().safe().optional(),limit:z.number().int().min(1).max(100).optional(),cursor:z.string().max(4096).optional(),query:z.string().max(200).optional(),requestId:z.string().uuid().optional(),text:z.string().min(1).max(200000).optional()}).strict();
 export type ConversationAuthority={originBackendId:string;name:string;allConversations?:boolean;read:number[];message:number[]};
@@ -31,8 +32,15 @@ export async function conversationOperation(state:State,runtime:ConversationRunt
  if(action==='history'?!readable:!writable)throw Error('Conversation scope denied');
  const chat=await h.conversation(id,ctx);if(!chat)throw Error('Conversation not found');
  if(action==='history'){
-  const scope=`network:${authority.originBackendId}:${p.originConversationId??''}:history:${id}`,page=await chat.entries({order:'descending'},p.limit??100,decodeCursor(state,scope,p.cursor),ctx);
-  return {backendId:state.id,conversationId:id,coverage:'stored-entries',items:page.items,next:encodeCursor(state,scope,page.next)};
+  const query=(p.query??'').trim().toLocaleLowerCase();
+  const scope=`network:${authority.originBackendId}:${p.originConversationId??''}:history:${id}`+(query?`:query:${query}`:'');
+  const cursor=decodeCursor(state,scope,p.cursor),page=await chat.entries({order:'descending'},p.limit??100,cursor,ctx);
+  const bounded=historyPage(page.items,query);
+  // Ask Durable for its own continuation at the last consumed record. Pin the
+  // upper bound so concurrent appends cannot shift this second scan's boundary.
+  const next=bounded.consumed<page.items.length
+   ?(await chat.entries({order:'descending',maxEntryId:page.items[0].id},bounded.consumed,cursor,ctx)).next:page.next;
+  return {backendId:state.id,conversationId:id,coverage:'stored-entries',items:bounded.items,next:encodeCursor(state,scope,next)};
  }
  if(!p.requestId)throw Error('Operation requestId required');
  // Namespace by both source backend and source conversation: two conversations cannot reconcile or collide on each other's sends.

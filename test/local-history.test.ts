@@ -24,12 +24,16 @@ test('native local history: automatic sibling access, reset paging, reserved lib
    assert.ok(result);return result;
   };
   assert.ok(!((await call(source,{conversationId:destination.id})).isError));
+  assert.ok(!((await call(source,{mode:'page',conversationId:destination.id})).isError));
+  assert.match(JSON.stringify(await call(source,{mode:'page'})),/Specify conversationId/);
+  assert.match(JSON.stringify(await call(source,{mode:'page',query:'fixture'})),/Specify conversationId/);
+  assert.equal((await call(source,{mode:'search',query:'fixture'})).isError,false);
   assert.match(JSON.stringify(await call(source,{conversationId:runtime.library.id})),/Reserved/);
   assert.equal((await grant(source.id,[runtime.library.id])).status,410);
   assert.equal((await grant(source.id,[destination.id])).status,410);
   const listing=JSON.parse((await call(source,{})).content[0].text);assert.deepEqual(new Set(listing.items.map((i:any)=>i.id)),new Set([source.id,otherSource.id,destination.id]));assert.equal(listing.readOnly,true);
   const first=JSON.parse((await call(source,{conversationId:destination.id})).content[0].text);assert.equal(first.items.length,100);assert.ok(first.next);assert.equal(first.readOnly,true);
-  const second=JSON.parse((await call(source,{conversationId:destination.id,cursor:first.next})).content[0].text);
+  const second=JSON.parse((await call(source,{mode:'page',conversationId:destination.id,cursor:first.next})).content[0].text);
   assert.equal([...first.items,...second.items].filter(e=>e.kind==='fixture.history').length,105);assert.equal(second.next,undefined);
   assert.equal((await grant(otherSource.id,[destination.id])).status,410);
   assert.match(JSON.stringify(await call(otherSource,{conversationId:destination.id,cursor:first.next})),/wrong-scope/);

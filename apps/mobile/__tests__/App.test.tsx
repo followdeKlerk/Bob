@@ -206,6 +206,7 @@ test('cold launch, session switches, and reopening from cache start with the new
  const check=(id:number)=>{const list=findList();expect(list.props.inverted).toBe(true);expect(list.props.initialScrollIndex).toBe(0);expect(list.props.data[0].id).toBe(id*1000+150);expect(list.props.data.at(-1).id).toBe(id*1000+1);return list;};
  const first=check(7);expect(tree.root.findAllByProps({testID:'history-entry-7150'}).length).toBeGreaterThan(0);
  const userBubble=tree.root.findByProps({testID:'history-entry-7150'}).findAll(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.surface&&style?.borderRadius===20;})[0];const padding=StyleSheet.flatten(userBubble.props.style);expect(padding.paddingVertical).toBe(12);expect(padding.paddingHorizontal).toBe(16);
+ const sent=tree.root.findByProps({testID:'history-entry-7150'}).find(node=>node.props.selectable===true&&typeof node.props.children==='string');expect(StyleSheet.flatten(sent.props.style)).toMatchObject({fontSize:15,lineHeight:25});
 expect(tree.root.findAllByProps({testID:'history-entry-7001'})).toHaveLength(0);
  act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
  const waiting=findList();expect(waiting).not.toBe(first);expect(waiting.props.inverted).toBe(true);expect(waiting.props.data).toHaveLength(0);expect(finishSecond).toBeDefined();

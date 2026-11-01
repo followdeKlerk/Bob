@@ -4,7 +4,7 @@ import {NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import {AttachmentPicker,requestGalleryAccess} from '../components/attachment-picker';
 import {PlusMenu} from '../components/plus-menu';
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
-jest.mock('lucide-react-native',()=>({ArrowLeft:()=>null,Check:()=>null,ChevronRight:()=>null,FileText:()=>null,Folder:()=>null,FolderOpen:()=>null,Image:()=>null,Search:()=>null,Upload:()=>null,X:()=>null,Camera:()=>null,Paperclip:()=>null,SlidersHorizontal:()=>null,Ellipsis:()=>null}));
+jest.mock('lucide-react-native',()=>({ArrowLeft:()=>null,Check:()=>null,ChevronRight:()=>null,FileText:()=>null,Folder:()=>null,FolderOpen:()=>null,Image:()=>null,Search:()=>null,Upload:()=>null,X:()=>null,Camera:()=>null,Paperclip:()=>null,PenTool:()=>null,SlidersHorizontal:()=>null,Ellipsis:()=>null}));
 const file={uri:'content://folder/report',name:'report.pdf',mime:'application/pdf',size:200,directory:false};
 const staged={id:'staged',uri:'file:///draft',name:'report.pdf',mime:'application/pdf'};
 const find=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
@@ -42,9 +42,10 @@ test('a failed multi-select staging removes partial copies without admitting att
  await act(async()=>tree.unmount());
 });
 test('compact menu exposes common actions and moves advanced actions behind More',async()=>{
- const gallery=jest.fn(),more=jest.fn();let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<PlusMenu bottom={90} maxHeight={400} disabled={false} onCamera={()=>{}} onGallery={gallery} onFiles={()=>{}} onModel={()=>{}} onMore={more}/>);});
- for(const label of ['Camera','Gallery','Files','Model & thinking','More'])expect(find(tree,label)).toBeDefined();
+ const gallery=jest.fn(),more=jest.fn(),drawing=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<PlusMenu bottom={90} maxHeight={400} disabled={false} onCamera={()=>{}} onGallery={gallery} onFiles={()=>{}} onDrawing={drawing} onModel={()=>{}} onMore={more}/>);});
+ for(const label of ['Camera','Gallery','Files','Drawing','Model & thinking','More'])expect(find(tree,label)).toBeDefined();
+ await act(async()=>find(tree,'Drawing').props.onPress());expect(drawing).toHaveBeenCalledTimes(1);
  await act(async()=>find(tree,'Gallery').props.onPress());expect(gallery).toHaveBeenCalledTimes(1);
  await act(async()=>find(tree,'More').props.onPress());expect(more).toHaveBeenCalledTimes(1);
  expect(find(tree,'Updates')).toBeUndefined();await act(async()=>tree.unmount());

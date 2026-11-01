@@ -303,6 +303,20 @@ class BobFiles(private val context: ReactApplicationContext) : ReactContextBaseJ
             activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE) }, 2704)
         } catch (e: Exception) { selection = null; promise.reject("picker", e) }
     }
+    @ReactMethod fun stageDataUri(id: String, dataUri: String, name: String, limit: Double, promise: Promise) {
+        Thread {
+            try {
+                require(Regex("^[A-Za-z0-9._-]{1,120}$").matches(name)) { "Invalid drawing name" }
+                val prefix = "data:image/png;base64,"
+                require(dataUri.startsWith(prefix) && dataUri.length <= (limit.toLong() * 4 / 3 + 128)) { "Invalid or oversized drawing" }
+                val bytes = android.util.Base64.decode(dataUri.removePrefix(prefix), android.util.Base64.DEFAULT)
+                require(bytes.isNotEmpty() && bytes.size <= limit.toLong()) { "Drawing exceeds attachment size limit" }
+                val file = File(context.filesDir, "bob-drafts/$id").apply { parentFile?.mkdirs(); writeBytes(bytes) }
+                staged[id] = Triple(file, name, "image/png")
+                promise.resolve(Arguments.createMap().apply { putString("id", id); putString("uri", Uri.fromFile(file).toString()); putString("name", name); putString("mime", "image/png") })
+            } catch (e: Exception) { promise.reject("attachment", e.message ?: "Cannot stage drawing") }
+        }.start()
+    }
     @ReactMethod fun removeAttachment(id: String, promise: Promise) {
         try {
             val files = AttachmentTransportPolicy.draftCandidates(context.filesDir, context.cacheDir, id)

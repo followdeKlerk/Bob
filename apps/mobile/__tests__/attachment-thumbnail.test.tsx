@@ -4,7 +4,7 @@ import {Image,Text} from 'react-native';
 import {AttachmentThumbnail,SentAttachmentThumbnail} from '../components/attachment-thumbnail';
 import * as Keychain from 'react-native-keychain';
 jest.mock('react-native-keychain',()=>({getGenericPassword:jest.fn()}));
-jest.mock('lucide-react-native',()=>({FileText:()=>null,X:()=>null}));
+jest.mock('lucide-react-native',()=>({FileText:()=>null,X:()=>null,Info:()=>null,Download:()=>null}));
 
 test('draft image is a compact preview with an accessible remove button, not metadata or action buttons',async()=>{
  const remove=jest.fn();let tree!:Renderer.ReactTestRenderer;
@@ -23,6 +23,12 @@ test('sent images use paired backend authentication and do not offer draft remov
  expect(tree.root.findAll(item=>item.props.accessibilityLabel?.startsWith('Remove')).length>0).toBe(false);
  await act(async()=>tree.root.findAll(item=>item.props.accessibilityLabel==='Open Screenshot.jpg'&&typeof item.props.onPress==='function')[0].props.onPress());expect(open).toHaveBeenCalledTimes(1);
  await act(async()=>tree.unmount());
+});
+test('chat-style hidden filename suppresses labels in non-image and failed-image fallbacks but draft default stays named',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<AttachmentThumbnail name="very-long-confidential-name.pdf" mime="application/pdf" hideFilename onOpen={()=>{}}/>);});
+ expect(tree.root.findAllByType(Text)).toHaveLength(0);expect(tree.root.findAll(item=>item.props.accessibilityLabel==='Open attachment'&&typeof item.props.onPress==='function')).toHaveLength(1);
+ await act(async()=>tree.update(<AttachmentThumbnail name="very-long-confidential-name.jpg" mime="image/jpeg" source={{uri:'file:///missing'}} hideFilename onOpen={()=>{}}/>));
+ await act(async()=>tree.root.findByType(Image).props.onError());expect(tree.root.findAllByType(Text)).toHaveLength(0);await act(async()=>tree.unmount());
 });
 test('unreadable images and non-image files retain a compact readable fallback',async()=>{
  let tree!:Renderer.ReactTestRenderer;
