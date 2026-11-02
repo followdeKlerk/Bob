@@ -13,13 +13,16 @@ import Animated from 'react-native-reanimated';
 import {Button as KitButton} from './components/ui/button';
 import {Text as KitText} from './components/ui/text';
 import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, X} from 'lucide-react-native';
-import {colors} from './theme';
+import {colors,menuChrome,menuRadii} from './theme';
+import {FLUID_TAB_HEIGHT} from './fluid-tabs';
+import {ConversationSettingsDrafts} from './conversation-settings-draft';
+import {menuDestination} from './menu-navigation';
 import {surfaceAnchors} from './surface-placement';
 import {InlineSurface} from './components/inline-surface';
 import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
-import {SettingsGroup,SettingsRow,sectionStyles} from './components/section-ui';
-import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
+import {SettingsGroup,SettingsRow,SectionHeading,RoundAction} from './components/section-ui';
+import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks,Users,Settings as SettingsIcon} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
@@ -177,6 +180,8 @@ function Main() {
     [providerName,setProviderName]=useState('openai'),
     [notifyEnabled, setNotifyEnabled] = useState(true),
     [pending, setPending] = useState<string>();
+  const [settingsDrafts]=useState(()=>new ConversationSettingsDrafts());
+  const sectionTrail=useRef<string[]>([]);
   const [outbox]=useState(()=>new MessageOutbox());
   const [backgroundOutbox]=useState(()=>NativeModules.BobOutbox?new BackgroundOutbox(NativeModules.BobOutbox as BackgroundPort,async id=>{const value=await Keychain.getGenericPassword({service:`bob.${id}`});return value?value.password:undefined;}):undefined);
   const [outgoing,setOutgoing]=useState(outbox.items),[outboxError,setOutboxError]=useState<string>();
@@ -209,7 +214,7 @@ function Main() {
     void outbox.ready.then(()=>{if(current){ready=true;sync();}}).catch(()=>{});
     return()=>{current=false;unsubscribe();};
   },[outbox,backends]);
-  const [bottomBarHeight,setBottomBarHeight]=useState(60);
+  const [bottomBarHeight,setBottomBarHeight]=useState(FLUID_TAB_HEIGHT);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
@@ -237,9 +242,9 @@ function Main() {
   const latestDraft=useRef(draft);latestDraft.current=draft;
   const [modelPickerTarget,setModelPickerTarget]=useState<{backend:Backend;chat:number;scope:string}>();
   const [modelChoice,setModelChoice]=useState<ModelChoice>({});
-  useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);},[scope]);
+  useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
   useEffect(()=>{if(!actions)setActionsMore(false);},[actions]);
-  useEffect(()=>{if(updatesTarget){setBackend(updatesTarget);setScreen('Chat');setDrawer(false);}},[updatesTarget]);
+  useEffect(()=>{if(updatesTarget){setBackend(updatesTarget);showChat();setDrawer(false);}},[updatesTarget]);
   useEffect(()=>{NativeModules.BobNotifications.setReplyNotifications?.(notifyEnabled);},[notifyEnabled]);
   useEffect(()=>{NativeModules.BobNotifications.setAppContext?.(backend?.backendId??'',screen==='Chat'&&!drawer?chat??0:0);},[backend?.backendId,chat,screen,drawer]);
   const pendingOperations=useRef(new Map<string,string>());
@@ -253,7 +258,7 @@ function Main() {
     if(actions){setActions(false);return true;}
     if(drawer){setDrawer(false);return true;}
     if(Keyboard.isVisible())return false;
-    if(screen!=='Chat'){sectionRequest.current++;setSectionLoading(false);setScreen('Chat');return true;}
+    if(screen!=='Chat'){backSection();return true;}
     return false;
   });
   async function sessionAction(id:string,action:SessionAction,title?:string){
@@ -361,7 +366,7 @@ function Main() {
         const b=paired.find(item=>item.backendId===notice.backendId);if(!b)return;
         Keyboard.dismiss();
         if(notice.screen==='updates'){setUpdatesTarget(b);return;}
-        setBackend(b);setChat(notice.conversationId);setScreen('Chat');setDrawer(false);
+        setBackend(b);setChat(notice.conversationId);showChat();setDrawer(false);
       })().catch(()=>setStatus('Notification destination unavailable; open its conversation manually'));
     });
     return()=>listener.remove();
@@ -527,7 +532,7 @@ function Main() {
     const r = await request('chats', 'POST', { title: 'New conversation' },b);
     if(selectedBackend.current!==b.backendId)return;
     setChat(r.id);
-    setScreen('Chat');
+    showChat();
     setDrawer(false);
     const result=await request('chats','GET',undefined,b);
     if(selectedBackend.current!==b.backendId)return;
@@ -589,16 +594,14 @@ function Main() {
     return()=>{clearInterval(timer);listener.remove();};
   },[backends]);
   async function addDrawing(dataUri:string){
-    const current=scope,b=backend;if(!current||!b)return;
+    const current=scope,b=backend;if(!current||!b)throw Error('Open a conversation before adding a drawing.');
     const transfer=TransferLimits.parse(await request('transfer-limits','GET',undefined,b));
-    if(identity.current!==current)return;
+    if(identity.current!==current)throw Error('Conversation changed. Drawing was not attached.');
     const id=uuid(),name=`drawing-${id}.png`;
-    try{
-      const staged=await NativeModules.BobFiles.stageDataUri(id,dataUri,name,transfer.uploadLimit) as DraftAttachment;
-      if(scope!==current){await NativeModules.BobFiles.removeAttachment(id).catch(()=>{});return;}
-      setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),{...staged,drawingData:dataUri}]}));
-      setDrawingEditor(false);
-    }catch(error){Alert.alert('Could not add drawing',String((error as Error).message??error));}
+    const staged=await NativeModules.BobFiles.stageDataUri(id,dataUri,name,transfer.uploadLimit) as DraftAttachment;
+    if(identity.current!==current){await NativeModules.BobFiles.removeAttachment(id).catch(()=>{});throw Error('Conversation changed. Drawing was not attached.');}
+    setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),{...staged,drawingData:dataUri}]}));
+    setDrawingEditor(false);
   }
   async function openAttachments(tab:'gallery'|'files'|'camera') {
     const b=backend,current=scope;if(!b||!chat||pending)return;
@@ -670,10 +673,11 @@ function Main() {
     if(identity.current!==target.scope)return;
     setModelChoice({model:observed.model,thinkingLevel:observed.thinkingLevel});setModelPickerTarget(undefined);
   }
+  function showChat(){sectionTrail.current=[];sectionRequest.current++;setSectionLoading(false);setScreen('Chat');}
   function navigate(tab:BottomDestination){
     if(screen===tab)return;
-    Keyboard.dismiss();setActions(false);setDrawer(false);
-    if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab));return;}
+    Keyboard.dismiss();setActions(false);setDrawer(false);sectionTrail.current=[];
+    if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab,false));return;}
     sectionRequest.current++;setSectionLoading(false);setScreen(tab);
   }
   const sessionWorking=useSessionWorking(backend,screen==='Sessions',signal=>request('status','GET',undefined,backend,signal));
@@ -683,7 +687,13 @@ function Main() {
     void request('chats','GET',undefined,b).then(result=>{if(cancelled||selectedBackend.current!==b.backendId)return;setChats(result.items);setChatCursor(result.next);void AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(result.items)).catch(()=>{});}).catch(()=>{});
     return()=>{cancelled=true;};
   },[screen,backend?.backendId]);
-  async function openSection(name: string) {
+  function backSection(){
+    Keyboard.dismiss();
+    const parent=sectionTrail.current.pop()??(screen==='Modules'?'Settings':'Chat');
+    run(()=>openSection(parent,false));
+  }
+  async function openSection(name: string,remember=true) {
+    if(remember&&name!==screen)sectionTrail.current.push(screen);
     const selected = backend?.backendId;
     const current = scope;
     const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name!=='Settings'&&name!=='Notes'&&name!=='Schedules');
@@ -713,21 +723,25 @@ function Main() {
     const configured=await request(`chats/${id}/configure`,'GET',undefined,b);
     if(identity.current!==current||sectionRequest.current!==ticket)throw Error('Conversation changed. Reopen settings.');
     if(typeof configured?.cwd!=='string'||!(configured.instructions===null||typeof configured.instructions==='string'))throw Error('Could not load conversation settings. Try again.');
-    setChatInstructions(configured.instructions??'');setUsesDefaultInstructions(configured.instructions===null);setWorkingDirectory(configured.cwd);
+    const draft=settingsDrafts.view(current,configured);
+    setChatInstructions(draft.instructions??'');setUsesDefaultInstructions(configured.instructions===null);setWorkingDirectory(draft.cwd);
     return {instructions:configured.instructions,cwd:configured.cwd};
   }
   async function saveConversationSettings(change:ConversationChange):Promise<SavedConversationSettings>{
     const b=backend,id=chat,current=scope,ticket=sectionRequest.current;
     if(!b||!id||identity.current!==current)throw Error('Conversation changed. Reopen settings.');
+    const submittedDraft=settingsDrafts.capture(current);
     await request(`chats/${id}/configure`,'PUT',change,b);
     const observed=await request(`chats/${id}/configure`,'GET',undefined,b);
     if(typeof observed?.cwd!=='string'||!(observed.instructions===null||typeof observed.instructions==='string'))throw Error('Save could not be confirmed. Reopen settings to check before retrying.');
     if(('instructions' in change&&(observed.instructions??null)!==change.instructions)||('cwd' in change&&observed.cwd!==change.cwd))throw Error('Save could not be confirmed. Reopen settings to check before retrying.');
+    settingsDrafts.acknowledge(current,'instructions' in change?'instructions':'cwd',submittedDraft);
     if(identity.current!==current)throw Error('Conversation changed. Reopen settings to check the save.');
     if(sectionRequest.current!==ticket)return {instructions:observed.instructions,cwd:observed.cwd};
     // Saving one field must not erase an unsaved edit in the other field.
-    if('instructions' in change){setChatInstructions(observed.instructions??'');setUsesDefaultInstructions(observed.instructions==null);}
-    if('cwd' in change)setWorkingDirectory(observed.cwd);
+    const draft=settingsDrafts.view(current,observed);
+    if('instructions' in change){setChatInstructions(draft.instructions??'');setUsesDefaultInstructions(observed.instructions==null);}
+    if('cwd' in change)setWorkingDirectory(draft.cwd);
     return {instructions:observed.instructions??null,cwd:observed.cwd??''};
   }
   async function changeMcp(method:'PUT'|'DELETE',value:unknown) {
@@ -931,7 +945,7 @@ function Main() {
             </Animated.View>
           </Animated.View>
       </>
-      <DrawingEditor visible={drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={data=>void addDrawing(data)}/>
+      <DrawingEditor visible={drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={addDrawing}/>
       {backend&&chat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&<SkillPicker key={scope} scope={scope} query={slashQuery}
         loadLibrary={()=>request('library','GET',undefined,backend)}
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
@@ -941,10 +955,10 @@ function Main() {
       />}
       {<AgentsScreen visible={screen==='Agents'} agents={visibleAgents} selected={displayedChild} onSelect={setChild} history={agentHistory} historyCount={inactiveAgents.length} onHistoryChange={value=>{setChild(undefined);setAgentHistory(value);}} status={childStatus} hasConversation={!!backend&&!!chat}>{displayedChild&&transcript(childView,true)}</AgentsScreen>}
       {backend&&<NotesScreen key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
-      {backend&&<SchedulesScreen key={'schedules:'+backend.backendId} visible={screen==='Schedules'} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);setScreen('Chat');}} onOpenChat={id=>{setChat(id);setScreen('Chat');}}/>}
+      {backend&&<SchedulesScreen key={'schedules:'+backend.backendId} visible={screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
       {screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
-        <ScrollView testID="section-overlay" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:24,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
-          <Text accessibilityRole="header" style={sectionStyles.title}>{screen}</Text>
+        <ScrollView testID="section-overlay" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:0,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
+          <View style={{marginHorizontal:-20}}><SectionHeading title={screen} onBack={screen!=='Settings'?backSection:undefined}/></View>
           {!!sectionError&&<View style={{gap:8}}><Text style={styles.caption}>{sectionError}</Text><Button label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
           {screen === 'Todos' && <View>
             {(view?.docs['bob.todos']?.items ?? []).map((item: any, index: number) => <View key={index}>
@@ -989,7 +1003,7 @@ function Main() {
               })} />
               {Object.entries(library?.templates ?? {}).map(([name, text]) => (
                 <View key={name}>
-                  <Button label={`Use template ${name}`} onPress={() => { setDraft(String(text)); setScreen('Chat'); }} />
+                  <Button label={`Use template ${name}`} onPress={() => { setDraft(String(text)); showChat(); }} />
                   <Button label={`Edit template ${name}`} onPress={() => { setTemplateName(name); setTemplateText(String(text)); }} />
                   <Button label={`Delete template ${name}`} onPress={() => run(async () => { const templates = { ...library.templates }; delete templates[name]; await request('library', 'PUT', { instructions: library.instructions, templates }); setLibrary(await request('library')); })} />
                 </View>
@@ -1081,10 +1095,13 @@ function Main() {
           {screen === 'Settings' && (
             <>
               {networkErrors.map((error,index)=><Text key={index} accessibilityLiveRegion="polite" style={styles.caption}>{error}</Text>)}
-              <SettingsGroup title="Conversation">
-                {chat&&<ConversationSettings key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={setChatInstructions} onFolderChange={setWorkingDirectory} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
+              <SettingsGroup title="This conversation">
+                <Text style={[styles.caption,{paddingVertical:8}]}>{chats.find(item=>item.id===chat)?.meta?.title??'No conversation selected'} · {backend?.name??'No workstation'}</Text>
+                <SettingsRow title="Model & thinking" icon={SlidersHorizontal} disabled={!chat} onPress={()=>run(openModelPicker)}/>
+                {chat&&<ConversationSettings key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={value=>{settingsDrafts.edit(scope,'instructions',value);setChatInstructions(value);}} onFolderChange={value=>{settingsDrafts.edit(scope,'cwd',value);setWorkingDirectory(value);}} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
                 {!chat&&<Text style={[styles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
               </SettingsGroup>
+              <Text style={styles.caption}>The following notification, voice and location settings apply to this phone.</Text>
               <SettingsGroup title="Notifications">
                 <SettingsRow title="Reply notifications" label={notifyEnabled?'Last reply notifications: on':'Last reply notifications: off'} checked={notifyEnabled} icon={Bell} onPress={()=>run(async()=>{
                   if(!notifyEnabled&&Number(Platform.Version)>=33){const permission=await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);if(permission!==PermissionsAndroid.RESULTS.GRANTED)throw Error('Notification permission was not granted');}
@@ -1115,12 +1132,15 @@ function Main() {
                 <Disclosure label="About diagnostics"><Text style={styles.caption}>If Bob closes unexpectedly, reopen it and copy this report. It includes bounded crash types and code positions, not exception messages or chat content. Workload samples are recorded about every 10 seconds while open. Reports stay on this phone until you share them.</Text></Disclosure>
               </SettingsGroup>
               <SettingsGroup title="Advanced">
+              <Text style={[styles.caption,{paddingVertical:8}]}>Workstation: {backend?.name??'Not connected'}. Modules apply only to this conversation; provider connections apply to this workstation.</Text>
                 <SettingsRow title="Advanced modules" icon={Blocks} disabled={!chat} onPress={()=>run(()=>openSection('Modules'))}/>
               <Disclosure label="Provider connection">
               <Text style={styles.caption}>
                 Credentials are sent only to the selected paired backend, never
                 as chat messages.
               </Text>
+              <View style={styles.row}>{['openai','anthropic'].map(p=><Button key={p} label={p===providerName?`${p} ✓`:p} onPress={()=>setProviderName(p)}/>)}</View>
+              <Text style={styles.fieldLabel}>API key</Text>
               <TextInput
                 secureTextEntry
                 style={styles.input}
@@ -1130,6 +1150,7 @@ function Main() {
                 placeholder={`${providerName} API key`}
                 placeholderTextColor={colors.muted}
               />
+              <Text style={styles.fieldLabel}>Model ID</Text>
               <TextInput
                 style={styles.input}
                 accessibilityLabel="Model ID"
@@ -1151,37 +1172,44 @@ function Main() {
                   })
                 }
               />
-              <View style={styles.row}>{['openai','anthropic'].map(p=><Button key={p} label={p===providerName?`${p} ✓`:p} onPress={()=>setProviderName(p)}/>)}</View>
               </Disclosure>
               </SettingsGroup>
             </>
           )}
-          {screen!=='Settings'&&<Button label="Back to settings" onPress={()=>run(()=>openSection('Settings'))}/> }
         </ScrollView>
       )}
       <Modal visible={actions} transparent animationType="none" onRequestClose={()=>setActions(false)}>
         <View style={styles.actionOverlay}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
           {!actionsMore?<PlusMenu bottom={Math.max(insets.bottom+12,keyboardInset+composerHeight+8)} maxHeight={Math.max(140,windowSize.height-Math.max(insets.bottom+12,keyboardInset+composerHeight+8)-insets.top-20)} disabled={!chat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>:<SafeAreaView edges={['bottom']} style={styles.actionSheet}>
-            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={styles.title}>More actions</Text><IconButton icon={X} label="Close actions" onPress={()=>setActions(false)}/></View>
+            <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"><RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/></SectionHeading></View>
             <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Text accessibilityLiveRegion="polite" style={styles.caption}>{backend?.name??'Workspace'} · {busy?'Working':status}</Text>
-              <Disclosure label="Conversation history">
-                <Button label={parentHistory.page?.next?'Load earlier messages':'Load / refresh stored history'} disabled={!chat||!parentHistory.ready||parentHistory.loading} onPress={()=>{setActions(false);run(parentHistory.load);}}/>
-                <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
-                {parentHistory.page&&<Text style={styles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
-              </Disclosure>
-              {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
-                <Text style={styles.caption}>Older surfaces without a link in the loaded history.</Text>
-                {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
-              </Disclosure>}
-              {busy&&<Button label="Steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
-              <Button label="Send on next" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
-              <Button label="Build & install" disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
-              <Button label="Conversation settings" disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Settings'));}}/>
-              {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
-              {agents.length>0&&<Button label="Agent history" onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
-              {(busy||activeAgents.length>0)&&<Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>}
+              <Text accessibilityLiveRegion="polite" style={[styles.caption,{marginBottom:12}]}>{backend?.name??'Workstation'} · {busy?'Working':status}</Text>
+              <SettingsGroup title="Messages">
+                {busy&&<Button label="Send now to steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
+                <Button label="Send after this reply" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
+              </SettingsGroup>
+              <SettingsGroup title="Conversation">
+                <SettingsRow title="Conversation settings" icon={SettingsIcon} disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Settings'));}}/>
+                <Disclosure label="Conversation history">
+                  <Button label={parentHistory.page?.next?'Load earlier messages':'Load / refresh stored history'} disabled={!chat||!parentHistory.ready||parentHistory.loading} onPress={()=>{setActions(false);run(parentHistory.load);}}/>
+                  <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
+                  {parentHistory.page&&<Text style={styles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
+                </Disclosure>
+                {agents.length>0&&<SettingsRow title="Agent history" icon={Users} onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
+                {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
+                  <Text style={styles.caption}>Older surfaces without a link in the loaded history.</Text>
+                  {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
+                </Disclosure>}
+              </SettingsGroup>
+              <SettingsGroup title="App maintenance">
+                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
+              </SettingsGroup>
+              {(busy||activeAgents.length>0)&&<SettingsGroup title="Stop running work">
+                <Text style={[styles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
+                {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
+                <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
+              </SettingsGroup>}
             </ScrollView>
           </SafeAreaView>}
         </View>
@@ -1192,17 +1220,17 @@ function Main() {
       }}/>}
       {sectionLoading&&screen!=='Chat'&&screen!=='Settings'&&screen!=='Notes'&&<View testID="section-loading-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background+'DD',alignItems:'center',justifyContent:'center',zIndex:40,gap:12}]}><ActivityIndicator color={colors.accent}/><Text style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>}
             <ModelPicker loading={modelLoading} visible={!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>setModelPickerTarget(undefined)} onApply={applyModelChoice}/>
-      {(screen==='Sessions'||screen==='Workstations')&&<SideDrawer key={screen+':'+(backend?.backendId??'')} embedded mode={screen==='Workstations'?'workstations':'sessions'} workspaceLabel={backend?.name} visible onClose={()=>setScreen('Chat')} disabled={!backend}
-        onNew={()=>run(async()=>{await newChat();setDrawer(false);setScreen('Chat');})}
+      {(screen==='Sessions'||screen==='Workstations')&&<SideDrawer key={screen+':'+(backend?.backendId??'')} embedded mode={screen==='Workstations'?'workstations':'sessions'} workspaceLabel={backend?.name} visible onClose={()=>showChat()} disabled={!backend}
+        onNew={()=>run(async()=>{await newChat();setDrawer(false);showChat();})}
         onSettings={()=>run(()=>openSection('Settings'))}
         onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}}
         navigation={[]}
         workspaces={backends.map(b=>({id:b.backendId,label:backends.filter(item=>item.name===b.name).length>1?`${b.name} · ${b.backendId.slice(0,8)}`:b.name,selected:b.backendId===backend?.backendId,onPress:()=>{
           if(b.backendId!==backend?.backendId){setChats([]);setChatCursor(undefined);setBackend(b);setChat(undefined);}
-          setScreen('Sessions');setDrawer(false);
+          navigate('Sessions');setDrawer(false);
         }}))}
         onSessionAction={sessionAction}
-        conversations={chats.filter(c=>!c.owner).map(c=>({id:String(c.id),label:c.meta?.title||'Conversation',selected:c.id===chat,working:sessionWorking.has(c.id),pinned:c.meta?.pinned,archived:c.meta?.archived,trashed:c.meta?.trashed,onPress:()=>{setChat(c.id);setScreen('Chat');setDrawer(false);}}))}
+        conversations={chats.filter(c=>!c.owner).map(c=>({id:String(c.id),label:c.meta?.title||'Conversation',selected:c.id===chat,working:sessionWorking.has(c.id),pinned:c.meta?.pinned,archived:c.meta?.archived,trashed:c.meta?.trashed,onPress:()=>{setChat(c.id);showChat();setDrawer(false);}}))}
         loadMore={chatCursor?()=>run(async()=>{
           const b=backend;if(!b)return;
           const page=await request('chats?cursor='+encodeURIComponent(chatCursor),'GET',undefined,b);
@@ -1219,7 +1247,7 @@ function Main() {
       />}
 
       </View>
-      {keyboardInset<=0&&<BottomTabs selected={['Notes','Workstations','Chat','Agents','Sessions'].includes(screen)?screen:'Settings'} onSelect={navigate} onHeight={setBottomBarHeight} activeAgentCount={activeAgents.length}/>}
+      {keyboardInset<=0&&<BottomTabs selected={menuDestination(screen,sectionTrail.current)} onSelect={navigate} onHeight={setBottomBarHeight} activeAgentCount={activeAgents.length}/>}
     </SafeAreaView>
   );
 }
@@ -1245,13 +1273,14 @@ const styles = StyleSheet.create({
   title:{color:colors.foreground,fontSize:22,fontWeight:'600'},
   chatTitle:{color:colors.muted,fontSize:13,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
   caption:{color:colors.muted,fontSize:12,lineHeight:20},
+  fieldLabel:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600',marginTop:10},
   memoryStatus:{color:colors.muted,fontSize:13,lineHeight:21,paddingVertical:2},
   status:{color:colors.muted,paddingHorizontal:24,paddingVertical:8,fontSize:13,lineHeight:21},
-  button:{minHeight:48,height:'auto',paddingHorizontal:16,paddingVertical:12,borderRadius:14,marginVertical:4},
+  button:{...menuChrome.control,minHeight:48,height:'auto',paddingHorizontal:16,paddingVertical:12,marginVertical:4},
   buttonText:{color:colors.foreground,fontSize:14,textAlign:'center',flexShrink:1},
   messages:{paddingHorizontal:24,paddingTop:16,paddingBottom:80,gap:CHAT_CONTENT_GAP},
   bubble:{paddingVertical:0,marginBottom:0},
-  userBubble:{backgroundColor:colors.surface,paddingHorizontal:16,paddingVertical:12,borderRadius:20,marginLeft:48,alignSelf:'flex-end',maxWidth:'88%'},
+  userBubble:{...menuChrome.card,backgroundColor:colors.surface,paddingHorizontal:16,paddingVertical:12,borderRadius:20,marginLeft:48,alignSelf:'flex-end',maxWidth:'88%'},
   kind:{color:colors.muted,fontSize:11,marginBottom:8},
   message:{color:colors.body,fontSize:15,lineHeight:25},
   empty:{padding:30,flex:1,justifyContent:'center',gap:20},
@@ -1260,10 +1289,10 @@ const styles = StyleSheet.create({
   composerCompact:{paddingHorizontal:32,paddingBottom:28},
   composerCapsule:{padding:8,borderRadius:26,borderWidth:1,borderColor:colors.border,backgroundColor:colors.composer,gap:4},
   composerCapsuleCompact:{padding:0,gap:0},
-  input:{color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
+  input:{...menuChrome.input,color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
   row:{flexDirection:'row',gap:8,flexWrap:'wrap'},
   overlay:{flex:1,backgroundColor:'#00000088',padding:18,justifyContent:'center'},
-  sheet:{height:'80%',width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:24,padding:20},
+  sheet:{height:'80%',width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:menuRadii.card,padding:20},
   actionOverlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
-  actionSheet:{maxHeight:'75%',backgroundColor:colors.background,borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,gap:16},
+  actionSheet:{maxHeight:'75%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,padding:20,gap:16},
 });

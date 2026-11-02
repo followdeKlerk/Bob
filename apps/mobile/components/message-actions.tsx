@@ -8,7 +8,7 @@ export function ActionRow({children}:{children:React.ReactNode}) {
  return <View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:2,marginTop:4}}>{children}</View>;
 }
 export function ActionIcon({icon:Icon,label,onPress,expanded,selected=false,disabled=false}:{icon:LucideIcon;label:string;onPress:()=>void;expanded?:boolean;selected?:boolean;disabled?:boolean}) {
- return <Button variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{expanded,selected,disabled}} onPress={onPress} disabled={disabled} onLongPress={()=>ToastAndroid.show(label,ToastAndroid.SHORT)} style={{width:44,height:44,padding:0,borderRadius:12,opacity:disabled?0.4:1}}><Icon size={19} strokeWidth={1.8} color={selected?colors.accent:colors.muted}/></Button>;
+ return <Button variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{expanded,selected,disabled}} onPress={onPress} disabled={disabled} onLongPress={()=>ToastAndroid.show(label,ToastAndroid.SHORT)} style={{width:48,height:48,padding:0,borderRadius:12,opacity:disabled?0.4:1}}><Icon size={19} strokeWidth={1.8} color={selected?colors.accent:colors.muted}/></Button>;
 }
 export function CopyAction({text,label='Copy reply'}:{text:string;label?:string}) {
  const [copied,setCopied]=useState(false);

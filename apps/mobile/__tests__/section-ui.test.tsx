@@ -36,11 +36,25 @@ test('only an active settings operation gets a miniature spinner and busy state'
  await act(async()=>tree.unmount());
 });
 
-test('compact icon chrome stays smaller without reducing the touch target',async()=>{
+test('legacy compact flag cannot introduce inconsistent header control geometry',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<RoundAction label="Create note" icon={Plus} primary compact onPress={()=>{}}/>);});
  const button=tree.root.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function')[0];
  expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48});
- expect(button.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.width===34&&style?.height===34;})).toBe(true);
+ expect(button.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.width===48&&style?.height===48&&style?.borderRadius===14&&style?.borderWidth===1;})).toBe(true);
+ await act(async()=>tree.unmount());
+});
+
+test('menu cards and controls use the shared outline/shape and headers keep return separate from right actions',async()=>{
+ const {menuChrome}=require('../theme');let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Schedules" subtitle="This workstation" onBack={()=>{}}><RoundAction label="Refresh" icon={Plus} onPress={()=>{}}/><RoundAction label="Create" icon={Plus} primary onPress={()=>{}}/></SectionHeading><SettingsGroup title="Group"><Text>Information</Text></SettingsGroup></View>);});
+ const actions=tree.root.findByProps({testID:'section-heading-actions'});
+ expect(StyleSheet.flatten(actions.props.style)).toMatchObject({justifyContent:'flex-end',gap:8,marginLeft:'auto'});
+ expect(actions.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function').map(node=>node.props.accessibilityLabel)).toEqual(['Refresh','Create']);
+ expect(actions.findAllByProps({accessibilityLabel:'Back to previous menu'})).toHaveLength(0);
+ const group=tree.root.findByType(SettingsGroup);
+ expect(group.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===menuChrome.card.borderRadius&&style?.borderColor===menuChrome.card.borderColor&&style?.borderWidth===1;})).toBe(true);
+ const refresh=actions.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function')[0];
+ expect(refresh.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===menuChrome.control.borderRadius&&style?.borderColor===menuChrome.control.borderColor&&style?.borderWidth===1;})).toBe(true);
  await act(async()=>tree.unmount());
 });

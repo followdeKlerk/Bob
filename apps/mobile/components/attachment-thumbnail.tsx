@@ -3,7 +3,7 @@ import React,{useEffect,useState} from 'react';
 import {Image,Pressable,StyleSheet,View,type ImageSourcePropType} from 'react-native';
 import {Download,FileText,Info,X} from 'lucide-react-native';
 import * as Keychain from 'react-native-keychain';
-import {colors} from '../theme';
+import {colors,menuChrome} from '../theme';
 
 export type DraftAttachment={id:string;uri:string;name:string;mime:string;drawingData?:string};
 export function AttachmentThumbnail({name,mime,source,onOpen,onRemove,onDetails,hideFilename=false,disabled=false}:{name:string;mime:string;source?:ImageSourcePropType;onOpen?:()=>void;onRemove?:()=>void;onDetails?:()=>void;hideFilename?:boolean;disabled?:boolean}) {
@@ -34,8 +34,8 @@ export function SentAttachmentThumbnail({backend,artifact,onOpen,onDetails,onSav
 const styles=StyleSheet.create({
  tile:{width:96,minHeight:136,position:'relative',alignItems:'center'},
  sentRow:{flexDirection:'row',alignItems:'flex-end',gap:6},
- save:{width:44,height:44,borderRadius:22,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,marginBottom:28},
- preview:{width:96,height:112,borderRadius:16,overflow:'hidden',backgroundColor:colors.surface},
+ save:{...menuChrome.control,width:48,height:48,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,marginBottom:28},
+ preview:{...menuChrome.card,width:96,height:112,overflow:'hidden',backgroundColor:colors.surface},
  details:{width:36,height:24,alignItems:'center',justifyContent:'center',marginTop:0},
  image:{width:'100%',height:'100%'},
  fallback:{flex:1,alignItems:'center',justifyContent:'center',padding:8,gap:6},

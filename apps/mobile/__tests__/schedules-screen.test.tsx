@@ -1,6 +1,8 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,StyleSheet} from 'react-native';
+import {AppState,StyleSheet,View} from 'react-native';
+import {SectionHeading,RoundAction} from '../components/section-ui';
+import {colors} from '../theme';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert,scheduleFrequency,type ScheduleJob} from '../components/schedules-screen';
 jest.mock('uuid',()=>({v4:()=> '11111111-1111-4111-8111-111111111111'}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -59,4 +61,27 @@ test('hide/reopen cancels the old read and starts a fresh scoped read without wa
  await act(async()=>tree.update(<SchedulesScreen visible={false} {...props}/>));expect(firstSignal?.aborted).toBe(true);
  await act(async()=>tree.update(<SchedulesScreen visible {...props}/>));expect(request).toHaveBeenCalledTimes(2);expect(text(tree)).toContain(job.title);
  await act(async()=>tree.unmount());
+});
+
+
+test('schedule heading has return left and Refresh/Create right; cards and controls share menu chrome',async()=>{
+ const back=jest.fn(),compose=jest.fn(),request=jest.fn(async()=>({jobs:[job]}));let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<SchedulesScreen visible request={request} onBack={back} onCompose={compose} onOpenChat={()=>{}}/>);});
+ try{
+  const heading=tree.root.findByType(SectionHeading);
+  expect(heading.props).toMatchObject({title:'Schedules',subtitle:'This workstation',onBack:back});
+  expect(heading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules','Create a schedule in chat']);
+  const actions=heading.findByProps({testID:'section-heading-actions'});
+  expect(actions.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Refresh schedules','Create a schedule in chat']);
+  expect(actions.findAllByType(RoundAction)[1].props.primary).toBe(true);
+  act(()=>press(tree,'Back to previous menu'));expect(back).toHaveBeenCalledTimes(1);
+  await act(async()=>press(tree,'Refresh schedules'));expect(request).toHaveBeenCalledTimes(2);
+  act(()=>press(tree,'Create a schedule in chat'));expect(compose).toHaveBeenCalledWith('Create a schedule: ');
+  const pause=tree.root.findAll(node=>node.props.accessibilityLabel==='Pause'&&typeof node.props.onPress==='function')[0];
+  expect(StyleSheet.flatten(pause.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===20&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  await act(async()=>tree.update(<ScheduleReceipt job={job} onOpen={()=>{}}/>));
+  const receipt=tree.root.findAll(node=>node.props.accessibilityLabel==='View schedule Check release notes'&&typeof node.props.onPress==='function')[0];
+  expect(StyleSheet.flatten(receipt.props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
+ }finally{await act(async()=>tree.unmount());}
 });

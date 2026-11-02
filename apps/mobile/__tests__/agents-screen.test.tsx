@@ -1,7 +1,10 @@
+jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {View,StyleSheet} from 'react-native';
 import {AgentsScreen} from '../components/agents-screen';
+import {SectionHeading} from '../components/section-ui';
+import {colors} from '../theme';
 const text=(tree:Renderer.ReactTestRenderer)=>tree.root.findAll(n=>typeof n.props.children==='string').map(n=>n.props.children).join(' ');
 test.each([true,false])('empty agent viewer explains conversation availability: %s',async hasConversation=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<AgentsScreen agents={[]} onSelect={()=>{}} status="" hasConversation={hasConversation}>{null}</AgentsScreen>);});
@@ -31,4 +34,19 @@ test('minimal history switch and empty states distinguish active and inactive vi
  await act(async()=>tree.update(<AgentsScreen {...props} history>{null}</AgentsScreen>));
  expect(text(tree)).toContain('No inactive agents.');expect(control.props.accessibilityState.checked).toBe(true);
  act(()=>control.props.onPress());expect(toggle).toHaveBeenLastCalledWith(false);await act(async()=>tree.unmount());
+});
+
+
+test('agent viewer shares heading alignment and outlined controls without outlining transcript rows',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<AgentsScreen agents={[["Worker",{conversationId:8}]]} selected={8} onSelect={()=>{}} status="Connected" hasConversation historyCount={1} onHistoryChange={()=>{}}><View testID="plain-transcript"/></AgentsScreen>);});
+ try{
+  const heading=tree.root.findByType(SectionHeading);
+  expect(heading.props).toMatchObject({title:'Agents',subtitle:'This conversation · view only'});
+  const history=heading.findByProps({accessibilityLabel:'Agent history'});
+  expect(StyleSheet.flatten(history.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border,minHeight:48});
+  const agent=tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function')[0];
+  expect(StyleSheet.flatten(agent.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+  expect(tree.root.findByProps({testID:'plain-transcript'}).props.style).toBeUndefined();
+ }finally{await act(async()=>tree.unmount());}
 });

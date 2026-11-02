@@ -4,6 +4,8 @@ import Renderer,{act} from 'react-test-renderer';
 import {Alert,Modal,FlatList,Text,View,StyleSheet,useWindowDimensions} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NotesScreen} from '../components/notes-screen';
+import {SectionHeading,RoundAction} from '../components/section-ui';
+import {colors} from '../theme';
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -25,7 +27,7 @@ test('real Notes UI creates a category and formatted checklist offline, saves on
   act(()=>tree.root.findByProps({accessibilityLabel:'Note body'}).props.onSelectionChange({nativeEvent:{selection:{start:0,end:4}}}));
   act(()=>press(tree,'Bold'));expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.value).toBe('**Milk**');
   act(()=>input(tree,'Note body','## Shopping\n- [ ] Milk\n\n**Remember this**'));
-  act(()=>press(tree,'Assign category Work'));act(()=>press(tree,'Note color blue'));act(()=>press(tree,'Preview note'));
+  act(()=>press(tree,'Assign category Work'));act(()=>press(tree,'Note shade: Dark gray'));act(()=>press(tree,'Preview note'));
   const task=tree.root.findAll(node=>node.props.accessibilityLabel==='Milk'&&node.props.accessibilityRole==='checkbox')[0];
   expect(task.props.accessibilityState.checked).toBe(false);act(()=>task.props.onPress());
   await act(async()=>{const save=()=>press(tree,'Save note');save();save();});
@@ -77,7 +79,7 @@ test('Notes has no top back button or idle sync boilerplate; large text uses one
  }finally{await act(async()=>tree.unmount());dimensions.mockReturnValue({width:361,height:754,scale:1,fontScale:1});}
 });
 
- test('Notes hides transient syncing text while retaining compact actions and error feedback',async()=>{
+ test('Notes hides transient syncing text while retaining consistent actions and error feedback',async()=>{
  let finish!:(value:any)=>void;
  const snapshot={backendId:backend,version:0,notes:[],categories:[]};
  const request=jest.fn().mockResolvedValueOnce(snapshot).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockRejectedValueOnce(Error('Sync unavailable'));
@@ -86,7 +88,7 @@ test('Notes has no top back button or idle sync boilerplate; large text uses one
  try{
   const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Categories'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(button.props.style).minHeight).toBe(48);
-  expect(button.findAllByType(View).some(node=>StyleSheet.flatten(node.props.style)?.minHeight===32)).toBe(true);
+  expect(button.findAllByType(View).some(node=>StyleSheet.flatten(node.props.style)?.minHeight===48)).toBe(true);
   await act(async()=>press(tree,'Sync notes'));
   expect(tree.root.findAll(node=>node.type===Text&&String(node.props.children).includes('Syncing'))).toHaveLength(0);
   await act(async()=>finish(snapshot));
@@ -139,4 +141,32 @@ test('failed local autosave keeps the editor open and retains text for retry',as
   expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
   expect(tree.root.findAllByProps({accessibilityLabel:'Open note Untitled'}).length).toBeGreaterThan(0);
  }finally{(AsyncStorage.setItem as jest.Mock).mockReset();(AsyncStorage.setItem as jest.Mock).mockImplementation(original);await act(async()=>tree.unmount());alert.mockRestore();}
+});
+
+
+test('Notes keeps Sync before primary Create in the shared header and uses semantic card/control/input chrome',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+ try{
+  const heading=tree.root.findByType(SectionHeading);
+  expect(heading.props.title).toBe('Notes');
+  expect(heading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Categories','Sync notes','Create note']);
+  expect(heading.findAllByType(RoundAction)[2].props.primary).toBe(true);
+  expect(tree.root.findByType(FlatList).findAll(node=>node.props.accessibilityLabel==='Sync notes')).toHaveLength(0);
+  const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Categories'&&typeof node.props.onPress==='function')[0];
+  expect(button.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flexDirection==='row'&&style.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  act(()=>press(tree,'Categories'));act(()=>input(tree,'Category name','Style check'));
+  await act(async()=>press(tree,'Create category'));act(()=>press(tree,'Close categories'));
+  const all=tree.root.findByProps({accessibilityLabel:'All categories'});
+  expect(StyleSheet.flatten(all.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+  act(()=>press(tree,'Create note'));
+  expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  const save=tree.root.findAll(node=>node.props.accessibilityLabel==='Save note'&&typeof node.props.onPress==='function')[0];
+  expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.accent&&style.borderColor===colors.accent&&style.borderWidth===1;})).toBe(true);
+  const shade=tree.root.findByProps({accessibilityLabel:'Note shade: Standard gray'});
+  expect(StyleSheet.flatten(shade.props.style)).toMatchObject({borderRadius:24,borderWidth:2,borderColor:colors.accent,backgroundColor:colors.surface});
+  act(()=>input(tree,'Note title','Outlined card'));await act(async()=>press(tree,'Save note'));
+  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.overflow==='hidden'&&style.borderRadius===20&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+ }finally{await act(async()=>tree.unmount());}
 });

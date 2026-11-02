@@ -12,6 +12,7 @@ import {InlineSurface} from '../components/inline-surface';
 import {BottomTabs} from '../components/bottom-tabs';
 import {SettingsGroup} from '../components/section-ui';
 import {SideDrawer} from '../components/side-drawer';
+import {DrawingEditor} from '../components/drawing-editor';
 import App from '../App';
 // Native platform boundaries only; exercise Main's real hooks and navigation tree.
 jest.mock('react-native-get-random-values',()=>({}));
@@ -119,9 +120,9 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
-   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Conversation','Notifications','Voice','Location','Schedules','App','Advanced']);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['This conversation','Notifications','Voice','Location','Schedules','App','Advanced']);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
-   expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'})).toHaveLength(0);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'}).length).toBeGreaterThan(0);
    const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
    const fetchMock=globalThis.fetch as jest.Mock,normalFetch=fetchMock.getMockImplementation()!;
    let releaseConfiguration!:()=>void;
@@ -145,6 +146,17 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.some(([url,options])=>String(url).includes('/chats/7/configure')&&options?.method==='PUT'&&JSON.parse(options.body).instructions==='Concise replies')).toBe(true);
    expect(conversationConfiguration.instructions).toBe('Concise replies');
    expect(tree.root.findAll(node=>node.props.children==='Instructions saved.').length).toBeGreaterThan(0);
+   // Leaving the settings subtree must not overwrite unsaved fields on reload.
+   act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('Retain unsaved instructions'));
+   act(()=>tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.onChangeText('/retained-draft'));
+   act(()=>tree.root.findByType(BottomTabs).props.onSelect('Chat'));
+   await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Settings'));
+   await act(async()=>press('Instructions & folder'));
+   expect(tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.value).toBe('Retain unsaved instructions');
+   expect(tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.value).toBe('/retained-draft');
+   await act(async()=>press('Save conversation override'));
+   expect(conversationConfiguration.instructions).toBe('Retain unsaved instructions');
+   expect(tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.value).toBe('/retained-draft');
    await act(async()=>press('Instructions & folder'));
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
   }
@@ -154,6 +166,10 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  }
  // The schedules overlay must also retain the same native chat list and scroll state.
  act(()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+ await act(async()=>tree.root.findByType(SideDrawer).props.onSchedules());
+ expect(tree.root.findByProps({testID:'schedules-screen'})).toBeDefined();
+ await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Back to previous menu'&&typeof node.props.onPress==='function')[0].props.onPress());
+ expect(tree.root.findByType(SideDrawer).props.mode).toBe('sessions');
  await act(async()=>tree.root.findByType(SideDrawer).props.onSchedules());
  expect(tree.root.findByProps({testID:'schedules-screen'})).toBeDefined();
  expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');
@@ -563,4 +579,66 @@ test.each([{capability:{inlineHeight:8192},height:8192},{capability:undefined,he
   const outgoing=await readOutbox() as Array<{message:{display?:{inline:unknown}}}>;expect(outgoing).toHaveLength(1);
   expect(outgoing[0].message.display?.inline).toEqual({width:313,height});
  }finally{await act(async()=>tree.unmount());}
+});
+
+test('delayed Use default verification never discards a newer reopened instructions edit with identical text',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ let configured:{instructions:string|null;cwd:string}={instructions:'Saved',cwd:'/backend'},hold=false,release:((response:Response)=>void)|undefined;
+ const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,init:any)=>{
+  const url=String(input);
+  if(url.endsWith('/configure')){
+   if(init?.method==='PUT'){configured={...configured,...JSON.parse(init.body)};hold=true;return response(configured);}
+   if(hold){hold=false;return new Promise<Response>(resolve=>{release=resolve;});}
+   return response({...configured});
+  }
+  return response(url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[]);
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
+  const reopen=async()=>{await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Chat'));await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Settings'));await act(async()=>press('Instructions & folder'));};
+  await reopen();act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('A'));
+  await act(async()=>press('Use backend default instructions'));expect(release).toBeDefined();expect(configured.instructions).toBeNull();
+  await reopen();
+  act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('B'));
+  act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('A'));
+  await act(async()=>release!(response({...configured})));
+  await reopen();expect(tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.value).toBe('A');
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('drawing attachment propagates transfer/staging failures and cleans up a file staged after a conversation switch',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
+ const stage=jest.fn(),remove=jest.fn(async()=>{});NativeModules.BobFiles={stageDataUri:stage,removeAttachment:remove};
+ let transferFailure=true;
+ const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input);
+  if(url.endsWith('/transfer-limits')){if(transferFailure)throw Error('Transfer unavailable');return response({uploadLimit:1024});}
+  return response(url.includes('/history')?{backendId:backend.backendId,conversationId:url.includes('/8/')?8:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[7,8].map(id=>({id,meta:{title:`Chat ${id}`}}))}:url.endsWith('/updates')?{enabled:false}:[]);
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  const add=tree.root.findByType(DrawingEditor).props.onAdd;
+  await expect(add('data:image/png;base64,png')).rejects.toThrow('Transfer unavailable');expect(stage).not.toHaveBeenCalled();
+  transferFailure=false;stage.mockRejectedValueOnce(Error('Storage full'));
+  await expect(add('data:image/png;base64,png')).rejects.toThrow('Storage full');
+  let finish!:(value:any)=>void;stage.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  let result!:Promise<unknown>;
+  await act(async()=>{result=add('data:image/png;base64,png').catch((error:Error)=>error);});expect(finish).toBeDefined();
+  await act(async()=>tree.root.findByType(BottomTabs).props.onSelect('Sessions'));
+  await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
+  await act(async()=>finish({id:'5aaee20e-e260-4403-80da-b97ce80664a1',name:'drawing.png',mime:'image/png',uri:'file:///draft'}));
+  expect(await result).toEqual(Error('Conversation changed. Drawing was not attached.'));
+  expect(remove).toHaveBeenCalledWith('5aaee20e-e260-4403-80da-b97ce80664a1');
+ }finally{if(tree)await act(async()=>tree.unmount());}
 });

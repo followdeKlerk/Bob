@@ -3,7 +3,7 @@ import {Text} from './app-text';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight,SquareTerminal} from 'lucide-react-native';
-import {colors} from '../theme';
+import {colors,menuChrome} from '../theme';
 import {CopyAction} from './message-actions';
 import {toolPresentation,toolResultPreview,toolText} from '../tool-presentation';
 import type {LinkedResult} from '../tool-results';
@@ -45,7 +45,7 @@ function Content({name,content,result,quiet=false}:{name:string;content:string;r
  </View>;
 }
 const styles=StyleSheet.create({
- card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},
+ card:{...menuChrome.card,overflow:'hidden'},
  header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},
  label:{color:colors.muted,fontSize:11,lineHeight:18,flexShrink:1},
  summary:{color:colors.body,fontSize:13,lineHeight:21,flexShrink:1},

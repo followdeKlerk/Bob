@@ -79,8 +79,8 @@ test('no app-owned white literals bypass the theme; drawing paper stays white',(
  for(const path of ['App.tsx','theme.ts','tailwind.config.js',...files('components'),...files('android/app/src/main/java/com/bobmobile'),...files('android/app/src/main/res/values')]){
   let text=source(path);
   if(path==='components/drawing-editor.tsx'){
-   // These are document content, not app chrome: eraser, exported PNG and paper.
-   for(const paper of ["erasing?'#ffffff'",'fill="#ffffff"',"canvas:{alignSelf:'center',backgroundColor:'#ffffff'"])text=text.replace(paper,'DRAWING_PAPER');
+   // White belongs only to document content: eraser and exported paper, never canvas chrome.
+   for(const paper of ["erasing?'#ffffff'",'fill="#ffffff"'])text=text.replace(paper,'DRAWING_PAPER');
   }
   const whites=[...text.matchAll(/(?:#|0xff)([0-9a-f]{6})\b/gi)].filter(([,hex])=>{
    const rgb=[0,2,4].map(i=>parseInt(hex.slice(i,i+2),16));

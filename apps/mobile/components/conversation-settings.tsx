@@ -3,7 +3,7 @@ import {Text,TextInput} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight,FileText} from 'lucide-react-native';
-import {colors} from '../theme';
+import {colors,menuChrome} from '../theme';
 export type ConversationChange={instructions:string|null}|{cwd:string};
 export type SavedConversationSettings={instructions:string|null;cwd:string};
 type Props={instructions:string;folder:string;inherited:boolean;onInstructionsChange:(text:string)=>void;onFolderChange:(text:string)=>void;onLoad:()=>Promise<SavedConversationSettings>;onSave:(change:ConversationChange)=>Promise<SavedConversationSettings>};
@@ -48,6 +48,7 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
   </Pressable>
   {open&&!!loadError&&<View style={s.body}><Text accessibilityLiveRegion="polite" style={[s.feedback,{color:colors.foreground}]}>{loadError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading instructions and folder" onPress={()=>void load()} style={[s.action,{alignSelf:'flex-start'}]}><Text style={s.actionText}>Retry</Text></Pressable></View>}
   {open&&loaded&&<View testID="conversation-settings-fields" style={s.body}>
+   {(instructions!==(saved.instructions??'')||folder!==saved.cwd)&&<Text style={s.hint}>Unsaved changes stay available while this app is open. Save to apply them.</Text>}
    <View style={s.labelRow}><Text accessibilityRole="header" style={s.label}>Instructions</Text><Text style={s.mode}>{mode}</Text></View>
    <TextInput accessibilityLabel="Conversation instructions" editable={!locked} placeholder="Add instructions for this conversation…" placeholderTextColor={colors.muted} selectionColor={colors.accent} multiline textAlignVertical="top" value={instructions} onChangeText={changeInstructions} style={[s.input,s.instructions]}/>
    <View style={s.actions}>
@@ -56,7 +57,7 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
    </View>
    {feedbackKind!=='folder'&&notice}
    <View style={s.folder}>
-    <Text accessibilityRole="header" style={s.label}>Folder</Text><Text style={s.hint}>Absolute path on the selected workstation.</Text>
+    <View style={s.labelRow}><Text accessibilityRole="header" style={s.label}>Folder</Text>{folder!==saved.cwd&&<Text style={s.mode}>Unsaved</Text>}</View><Text style={s.hint}>Absolute path on the selected workstation.</Text>
     <TextInput accessibilityLabel="Backend working directory" editable={!locked} placeholder="/path/to/project" placeholderTextColor={colors.muted} selectionColor={colors.accent} autoCapitalize="none" autoCorrect={false} spellCheck={false} value={folder} onChangeText={changeFolder} style={[s.input,s.path]}/>
     <View style={s.actions}>{action('Set conversation folder','Save folder','folder',!folder.trim()||saved.cwd===folder,true)}</View>
     {feedbackKind==='folder'&&notice}
@@ -65,8 +66,8 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
  </View>;
 }
 const s=StyleSheet.create({
- heading:{flexDirection:'row',alignItems:'center',gap:12,minHeight:62,paddingHorizontal:2,paddingVertical:10},icon:{width:34,height:34,borderRadius:11,backgroundColor:colors.iconSurface,alignItems:'center',justifyContent:'center'},headingText:{flex:1,color:colors.foreground,fontSize:15,lineHeight:23},
+ heading:{flexDirection:'row',alignItems:'center',gap:12,minHeight:62,paddingHorizontal:2,paddingVertical:10},icon:{...menuChrome.icon,width:34,height:34,alignItems:'center',justifyContent:'center'},headingText:{flex:1,color:colors.foreground,fontSize:15,lineHeight:23},
  body:{paddingHorizontal:2,paddingTop:10,paddingBottom:16,gap:12},labelRow:{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:14,fontWeight:'600'},mode:{color:colors.accent,fontSize:11,lineHeight:18},hint:{color:colors.muted,fontSize:12,lineHeight:20},
- input:{backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:14,paddingHorizontal:12,paddingVertical:12,color:colors.foreground,fontSize:15,lineHeight:24},instructions:{minHeight:132,maxHeight:260},path:{fontSize:13,fontFamily:APP_FONT_FAMILY},
- actions:{flexDirection:'row',flexWrap:'wrap',gap:8},action:{minHeight:48,minWidth:88,paddingVertical:12,paddingHorizontal:16,borderRadius:14,backgroundColor:colors.surface,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent},actionText:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600'},folder:{borderTopWidth:1,borderColor:colors.subtle,marginTop:8,paddingTop:20,gap:12},feedback:{color:colors.accent,fontSize:12,lineHeight:20},
+ input:{...menuChrome.input,paddingHorizontal:12,paddingVertical:12,color:colors.foreground,fontSize:15,lineHeight:24},instructions:{minHeight:132,maxHeight:260},path:{fontSize:13,fontFamily:APP_FONT_FAMILY},
+ actions:{flexDirection:'row',flexWrap:'wrap',gap:8},action:{...menuChrome.control,minHeight:48,minWidth:88,paddingVertical:12,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent,borderColor:colors.accent},actionText:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600'},folder:{borderTopWidth:1,borderColor:colors.subtle,marginTop:8,paddingTop:20,gap:12},feedback:{color:colors.accent,fontSize:12,lineHeight:20},
 });

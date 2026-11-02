@@ -2,10 +2,10 @@ jest.mock('react-native-reanimated',()=>({__esModule:true,default:{createAnimate
 jest.mock('react-native-svg',()=>{const create=require('react').createElement;const component=(name:string)=>(props:any)=>create(name,props,props.children);return{__esModule:true,default:component('Svg'),Path:component('Path'),Rect:component('Rect'),Circle:component('Circle'),Defs:component('Defs'),ClipPath:component('ClipPath'),G:component('G')};});
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AccessibilityInfo,AppState,StyleSheet,Text} from 'react-native';
+import {AccessibilityInfo,AppState,StyleSheet,Text,ToastAndroid} from 'react-native';
 import {cancelAnimation,withSpring,withTiming} from 'react-native-reanimated';
 import {BottomTabs} from '../components/bottom-tabs';
-test('warm beige navigation has six accessible icon-only destinations with Agents after Chat',async()=>{
+test('warm beige navigation retains six accessible icon slots without a space-consuming caption',async()=>{
  const select=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<BottomTabs selected="Chat" onSelect={select}/>);});
  const root=tree.root.findByProps({testID:'bottom-tabs'});
@@ -14,11 +14,13 @@ test('warm beige navigation has six accessible icon-only destinations with Agent
  expect(tabs.map(tab=>tab.props.accessibilityLabel)).toEqual(['Notes','Workstations','Chat','Agents','Sessions','Settings']);
  expect(tabs[2].props.accessibilityState.selected).toBe(true);
  expect(tree.root.findAllByType(Text)).toHaveLength(0);
+ expect(tree.root.findAllByProps({testID:'active-destination-caption'})).toHaveLength(0);
  act(()=>root.props.onLayout({nativeEvent:{layout:{width:313,height:60}}}));
  const shapes=tree.root.findAll(node=>node.props.animatedProps?.d).map(node=>node.props.animatedProps.d);
  expect(shapes.length).toBeGreaterThanOrEqual(1);expect(new Set(shapes).size).toBe(1);
  expect(shapes[0]).toContain('M0 0 H313');
- expect(StyleSheet.flatten(root.props.style).height).toBe(60);
+ expect(StyleSheet.flatten(root.props.style).height).toBeUndefined();
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'bottom-tabs-icons'}).props.style).height).toBe(52);
  // Equal flex slots at a narrow phone width still exceed 48px touch targets.
  expect(313/tabs.length).toBeCloseTo(52.1667,3);
  expect(313/tabs.length).toBeGreaterThanOrEqual(48);
@@ -67,9 +69,9 @@ test.each([240,313,361,760])('one native SVG root positions all six real glyphs 
  expect(tree.root.findAll(node=>node.type==='ClipPath' as any)).toHaveLength(0);
  for(let i=0;i<6;i++){
    const glyph=glyphs[i];
-   expect(glyph.props).toMatchObject({name:ids[i],x:width*(i+.5)/6-12,y:19,color:i===2?'#e8e0d2':'#111111'});
+   expect(glyph.props).toMatchObject({name:ids[i],x:width*(i+.5)/6-12,y:15,color:i===2?'#e8e0d2':'#111111'});
    const group=glyph.findAll(node=>node.type==='G' as any)[0];
-   expect(group.props.transform).toBe(`translate(${glyph.props.x} 19)`);
+   expect(group.props.transform).toBe(`translate(${glyph.props.x} 15)`);
    expect(group.props.stroke).toBe(i===2?'#e8e0d2':'#111111');
    const primitives=glyph.findAll(node=>['Path','Rect','Circle'].includes(node.type as string));
    expect(primitives.length).toBeGreaterThan(0);
@@ -111,5 +113,30 @@ test('large counts have a bounded visible label and retain the exact accessible 
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<BottomTabs selected="Chat" activeAgentCount={123} onSelect={()=>{}}/>);});
  expect(tree.root.findByProps({testID:'active-agent-badge'}).findByType(Text).props.children).toBe('99+');
  expect(tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&node.props.accessibilityLabel==='Agents')[0].props.accessibilityValue.text).toBe('123 active agents');
+ await act(async()=>tree.unmount());
+});
+
+
+test('long press identifies every icon without selecting a different destination',async()=>{
+ const toast=jest.spyOn(ToastAndroid,'show').mockImplementation(()=>{}),select=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<BottomTabs selected="Chat" onSelect={select}/>);});
+ const tabs=tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function');
+ for(const tab of tabs){
+  act(()=>tab.props.onLongPress());
+  expect(toast).toHaveBeenLastCalledWith(tab.props.accessibilityLabel,ToastAndroid.SHORT);
+ }
+ expect(select).not.toHaveBeenCalled();
+ expect(tree.root.findAllByProps({testID:'active-destination-caption'})).toHaveLength(0);
+ await act(async()=>tree.unmount());toast.mockRestore();
+});
+
+test('icon-only navigation reserves just 52dp and reports its measured height',async()=>{
+ const onHeight=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<BottomTabs selected="Workstations" onSelect={()=>{}} onHeight={onHeight}/>);});
+ const bar=tree.root.findByProps({testID:'bottom-tabs'});
+ act(()=>bar.props.onLayout({nativeEvent:{layout:{width:313,height:52}}}));
+ expect(onHeight).toHaveBeenLastCalledWith(52);
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'bottom-tabs-icons'}).props.style).height).toBe(52);
+ expect(tree.root.findAllByType(Text)).toHaveLength(0);
  await act(async()=>tree.unmount());
 });

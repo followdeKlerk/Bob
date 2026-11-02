@@ -4,15 +4,19 @@ A practical reference for using Bob and its tools. Start with the workflow you n
 
 ## App navigation
 
-The six bottom tabs are **Notes · Workstations · Chat · Agents · Sessions · Settings**. Workstations selects a paired machine; Sessions opens its conversations; Chat returns to the current conversation. The chat keeps its draft and reading position when switching tabs. The bottom bar hides while typing.
+The six bottom tabs are **Notes · Workstations · Chat · Agents · Sessions · Settings**. The compact 52dp bar is icon-only, without destination captions; long-press an icon for its label. Accessible names and 48dp minimum target heights are retained. Workstations selects a paired machine; Sessions opens its conversations; Chat returns to the current conversation. Nested menus return to their opening section and retain its bottom-tab selection. The chat keeps its draft and reading position when switching tabs. The bottom bar hides while typing.
 
-Sessions includes search, New chat, pin, rename, Archive and recoverable Trash. Owned helper conversations appear in Agents rather than the regular Sessions list. A row spinner shows unfinished foreground work while Sessions is visible.
+Sessions includes search of loaded conversations, New chat, pin, rename, Archive and recoverable Trash. Each session has a visible overflow button; long press remains available. Owned helper conversations appear in Agents rather than the regular Sessions list. A row spinner shows unfinished foreground work while Sessions is visible.
 
-Open **Model & thinking** from the composer's **+** menu to change the current conversation's model and effort. GPT-6.1 Terra is supported through the existing OpenAI API-key or ChatGPT subscription authentication. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
+Open **Model & thinking** from the composer's **+** menu or **Settings → This conversation** to change the current conversation's model and effort. The selected model and thinking controls remain outside the scrolling model catalogue, beside Apply; on short screens the selected-model controls can scroll independently. GPT-6.1 Terra is supported through the existing OpenAI API-key or ChatGPT subscription authentication. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
 
 **Agents** provides a full-height, view-only transcript. A monochrome count badge on its tab shows working/stopping helpers in the current conversation and disappears at zero. Its selector shows working/stopping helpers; **History** switches to inactive helpers while keeping their records. Switching conversations or returning to Agents resets the view to active work. Viewing or leaving a transcript does not start or stop an agent.
 
-**Settings** groups provider connections, permissions, diagnostics, updates and Advanced modules. Expand **Instructions & folder** to load this conversation's settings. The two fields save independently, preserve unsaved edits, and show save/error feedback. Static settings remain accessible while conversation settings load.
+**Settings** identifies the active conversation/workstation and distinguishes conversation settings from phone permissions and workstation configuration. Expand **Instructions & folder** to load this conversation's settings. The two fields save independently and show save/error feedback. Unsaved edits survive leaving and reopening Settings or switching conversations while the app stays open; they are scoped by workstation and conversation, not persisted across process termination. Static settings remain accessible while conversation settings load.
+
+**Chat actions → More** separates message actions, conversation navigation, app maintenance and stopping work. The attachment picker's Android Back goes up a nested folder before dismissing the picker; its X closes the whole picker. Drawing uses the shared neutral theme around white paper, asks before discarding unsaved strokes, and prevents repeated Add taps while exporting/attaching. Export or attachment failures keep the drawing available for an explicit retry.
+
+Menu headers use the same title/action alignment: utilities on the right, the primary/create action rightmost, and Back or editor Cancel on the left. Cards share 20dp corners and a 1dp outline; buttons and inputs share 14dp corners and the same outline treatment, with consistent selected and primary states. Switches, checkmarks, colour swatches and document content retain their functional shapes.
 
 Bob uses locally bundled **Nordwand Mono**, a monochrome palette and Android text scaling. Notes adapts to a single column at larger text sizes. System dialogs, keyboards, document content and third-party views use their own presentation; MCP apps can adopt the host font preference.
 
@@ -108,7 +112,7 @@ Use `hindsight_recall` for targeted retrieval and `hindsight_reflect` for synthe
 
 ## Conversation controls
 
-**Steer** redirects the current run at a supported boundary; **Send on next** queues after it. To replace consequential work, stop first and inspect actions already performed: stopping does not undo external effects.
+**Send now to steer Bob** redirects the current run at a supported boundary; **Send after this reply** queues after it. To replace consequential work, stop first and inspect actions already performed: stopping does not undo external effects.
 
 **Stop Bob** is root-only. **Stop Bob and subagents** includes background/owned work; it does not control independent peer conversations. Switching chats, collapsing an overlay or closing the phone UI is not cancellation.
 
