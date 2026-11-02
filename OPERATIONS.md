@@ -28,7 +28,8 @@ Use `node dist/cli.js --help` in the checkout or `bob --help` when installed. Al
 
 | Need | CLI path and prerequisite |
 | --- | --- |
-| Initialize an isolated backend | `bob --state <new-state> setup --cwd <existing-folder>`; no default model/credential is supplied |
+| Guided Linux setup | `bob setup --guided`; explicit terminal approvals, prerequisite/network/auth setup, standalone TLS user service and optional verified QR pairing; see [INSTALL.md](INSTALL.md#guided-installation). Running/managed backends are not reconfigured. |
+| Initialize an isolated backend (scripted) | `bob --state <new-state> setup --cwd <existing-folder>`; no default model/credential is supplied |
 | Provider API key | `provider --provider <openai-or-anthropic> --model <exact-id>` reads the key from **stdin**, not arguments/chat |
 | ChatGPT subscription login | `login --provider openai --model <exact-id>`; complete Bob's browser flow on the backend machine; loopback callback port 1455, five-minute limit |
 | Serve | `serve` defaults to loopback; remote `--host` must be a Tailscale IP with `--cert` and `--key` |
@@ -41,7 +42,7 @@ Doctor checks Node/platform, schema and identity, model/credential presence, wor
 
 Configure credentials in Bob itself. Replacing a provider API key supersedes its subscription credentials. Read secrets from stdin or the login flow, and keep them out of command arguments, prompts, logs and documentation. Store credential-bearing backups privately.
 
-`service-install` creates a backend-specific systemd **user** unit. Configure remote HTTPS certificates and any boot-before-login/linger setup separately with the owner. For an already-supervised backend, use the maintenance update path rather than these start/stop controls.
+`service-install` creates a backend-specific systemd **user** unit. Configure remote HTTPS certificates and any boot-before-login/linger setup separately with the owner. The guided `setup --guided` path instead writes an explicitly approved TLS-aware user unit, refuses conflicting existing units, and can request lingering separately. It stores listener/TLS-path metadata in `setup-connection.json`, never certificate key contents. Certificate renewal is manual; no renewal timer or maintenance supervisor is installed. For an already-supervised backend, use the maintenance update path rather than these start/stop controls.
 
 ## Updates and recovery
 

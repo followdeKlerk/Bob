@@ -41,8 +41,11 @@ function systemctl(s: State, verb: string) {
 }
 cli
   .command("setup")
+  .description("Initialize offline configuration, or use --guided for interactive Linux installation and pairing")
   .option("--cwd <path>", "Default working folder", process.cwd())
-  .action((o) => {
+  .option("--guided", "Inspect/reuse installations, configure HTTPS and user service, then offer QR pairing", false)
+  .action(async (o) => {
+    if(o.guided){const {setupOnTerminal}=await import('./setup-host.js');await setupOnTerminal(resolve(cli.opts().state));return;}
     const cwd=resolve(o.cwd);
     if(!existsSync(cwd)||!statSync(cwd).isDirectory())throw Error('Working directory must be an existing directory');
     const s = state();

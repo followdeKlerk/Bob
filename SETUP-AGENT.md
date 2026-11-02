@@ -7,11 +7,11 @@ Help me install Bob from https://github.com/followdeKlerk/Bob.
 
 Bob connects an Android app to AI agents on a Linux backend. Read INSTALL.md and the relevant parts of OPERATIONS.md before acting. Keep work scoped to this installation.
 
-1. Inspect my OS/architecture, Node version, available Android build tools, Tailscale/HTTPS connectivity, and whether Bob is already installed or running. Tell me what is missing. While the repository is private, I need GitHub access; stop if it is unavailable.
+1. Read the guided installer flow in INSTALL.md. Inspect my OS/architecture, Node version, Tailscale/HTTPS connectivity, and whether Bob is already installed or running. `bash install.sh --check` is a read-only bootstrap summary; `bob doctor` is read-only state diagnosis. Android tools are only relevant if I choose to build the APK. Tell me what is missing. While the repository is private, I need GitHub access; stop if it is unavailable.
 
 2. Ask me to choose the backend state directory, working folder, provider/model, and whether I will use an existing trusted APK or build Android myself. Use explicit absolute paths. Never reuse, overwrite or start a second owner of existing live state. If an existing managed Bob deployment is found, use its documented maintenance path instead of replacing it.
 
-3. Build the backend with the lockfile and run its checks. Configure a new isolated backend only after confirming those paths. Ask before installing system packages, changing network/service settings, spending money, or generating a signing identity. Do not silently upgrade pinned runtime dependencies or patch Bob to make installation work.
+3. Prefer the inspected `install.sh` bootstrap and `bob setup --guided` in my local terminal, letting me answer its explicit approvals; never pipe yes into it or bypass prompts. If using the manual route, build the backend with the lockfile and run its checks. Configure a new isolated backend only after confirming those paths. Ask before installing system packages, changing network/service settings, spending money, or generating a signing identity. Do not silently upgrade pinned runtime dependencies or patch Bob to make installation work.
 
 4. Keep API keys, authentication files, TLS keys, signing passwords and pairing invitations out of chat, logs and Git. Guide me through private local credential input or the supported interactive login; do not request that I paste a secret into the conversation. Do not copy credentials from other apps. Let me complete login and Android installation approvals myself.
 
@@ -19,5 +19,5 @@ Bob connects an Android app to AI agents on a Linux backend. Read INSTALL.md and
 
 6. For an Android source build, follow INSTALL.md, use my own private signing identity and preserve it for future updates. Never uninstall an existing app as a shortcut around signing problems. Do not run a development server as the production installation.
 
-7. Verify a real model reply, a harmless read-only workspace task and reconnection. Distinguish built, served, paired and verified. At the end, report versions, checkout/state locations, how this deployment is started/stopped, remaining manual steps and any unverified results. Treat the build and doctor results as preliminary checks; setup is ready after the end-to-end checks pass.
+7. The guided installer creates a standalone systemd user service, not the maintenance supervisor, and does not automate certificate renewal. Explain the renewal obligation and keep existing supervised backends on their current maintenance path. Verify a real model reply, a harmless read-only workspace task and reconnection. Distinguish built, served, paired and verified. At the end, report versions, checkout/state locations, how this deployment is started/stopped, remaining manual steps and any unverified results. Treat the build and doctor results as preliminary checks; setup is ready after the end-to-end checks pass.
 ```

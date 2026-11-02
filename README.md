@@ -8,7 +8,7 @@ An Android app for working with AI agents on your own Linux machines.
 
 I built Bob because I wanted to use my agents from my phone, not just from a terminal. Give an agent something to work on, see what it's doing, and pick the conversation up later. The work runs on your machine; you don't have to keep the chat open.
 
-I use it myself, and it keeps changing as I find things I need. It's still a hands-on setup: you build it from source, connect your own model provider and pair your phone. There's no hosted Bob service.
+I use it myself, and it keeps changing as I find things I need. A guided Linux installer can check your computer, install missing backend prerequisites with your permission, help configure your model and HTTPS connection, and offer a QR code to pair your phone. You still bring your own model account and Android app; there's no hosted Bob service.
 
 ## A task, from your phone
 
@@ -69,9 +69,35 @@ Running the backend yourself doesn't mean everything stays local: prompts and re
 
 ## Trying it
 
-You'll need an Android phone, a Linux x86_64 machine, a supported model provider and Tailscale with HTTPS set up between the devices. Model use may cost money. There's no one-click installer, and iOS isn't supported.
+You'll need an Android phone, a Linux x86_64 machine with a systemd user session, and your own supported model account. Model use may cost money. iOS isn't supported.
 
-The [installation guide](INSTALL.md) covers the build and pairing. If you'd rather have an agent help with setup, give it [this checklist](SETUP-AGENT.md).
+### Guided backend installation
+
+Download and inspect the bootstrap script, then run it as your normal user—not with `sudo`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fL \
+  https://raw.githubusercontent.com/followdeKlerk/Bob/main/install.sh \
+  -o bob-install.sh
+less bob-install.sh
+bash bob-install.sh --check
+bash bob-install.sh
+```
+
+You can also download [install.sh](install.sh) through your browser, or run `bash install.sh` from an existing checkout. Repository access is required; a private checkout needs your own GitHub access. Do not paste access tokens into commands or chat.
+
+The installer:
+- Checks existing tools and reuses compatible Node. If needed, it offers a private, checksum-verified Node runtime without replacing your system Node.
+- Asks before system package installation, downloads, dependency scripts, configuration and service changes. No unattended “yes to everything” mode.
+- Guides Bob-owned provider authentication, Tailscale login, HTTPS certificate provisioning, and a standalone background **user service**.
+- Preserves existing credentials and state. Running or supervisor-managed backends are not replaced or restarted; existing checkouts and launchers are not silently upgraded.
+- Verifies the intended backend over trusted HTTPS, then asks whether to display a short-lived, single-use pairing QR code.
+
+**The Android app is separate.** Use a trusted signed APK or build your own; ordinary backend installation does not install Java, the Android SDK or the NDK. Tailscale also needs to be installed and signed in on your phone. Account approvals, Android installation approval, and certificate renewal are not silently automated.
+
+After installation, rerun the guided flow with `bob setup --guided` (or `~/.local/bin/bob setup --guided` if that directory is not on your PATH). `bob doctor` remains a read-only local diagnostic. The wizard checks local HTTPS readiness; verify a real model reply and reconnection from the phone before treating setup as complete.
+
+See the [installation guide](INSTALL.md) for supported paths, certificate renewal, existing-installation safeguards and manual setup. The installer configures a standalone service, **not** the optional self-update supervisor. If you'd rather have an agent help, give it [this checklist](SETUP-AGENT.md).
 
 For the details: [features and limitations](FEATURES.md), or [operations](OPERATIONS.md) for the backend CLI, updates and backups.
 
