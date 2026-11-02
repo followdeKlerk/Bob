@@ -79,3 +79,74 @@ test('passive memory rows stay visible as scalable muted text without disclosure
   expect(tree.root.findAllByType(Text).some(node=>typeof node.props.children==='string'&&node.props.children.includes('INJECTED'))).toBe(false);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test.each([
+ ['save-processing','Hindsight — saving'],
+ ['save-completed','Hindsight — saved'],
+ ['save-failed','Hindsight — save failed'],
+ ['save-cancelled','Hindsight — save tracking stopped'],
+ ['save-warning','Hindsight — saved with warnings'],
+])('queued history projects %s in the same passive row without moving across messages',async(phase,label)=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));
+ await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
+ NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};
+ let snapshot:((event:{data:string})=>void)|undefined;
+ require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event:string,callback:typeof snapshot)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
+ const entries=[
+  {id:1,kind:'bob.memory-status',data:{phase:'recall',count:3}},
+  {id:2,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'receipt-2',text:'INJECTED queued text'}},
+  {id:3,kind:'pi.assistant',model:[{role:'assistant',content:'Reply between save receipts'}]},
+  {id:4,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'receipt-4'}},
+ ];
+ const fetch=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input);
+  const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}
+   :url.endsWith('/updates')?{enabled:false}
+   :url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}
+   :url.endsWith('/peers')?{inbound:[],outbound:[]}
+   :url.endsWith('/library')?{instructions:'',templates:{},skills:{}}
+   :url.endsWith('/configure')?{instructions:null,cwd:'/workspace'}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  const history=()=>tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  const row=tree.root.findByProps({testID:'history-entry-2'});
+  const key=history().props.keyExtractor(entries[1]);
+  expect(row.findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — save queued']);
+  expect(snapshot).toBeDefined();
+  // Seed the live snapshot cache, then exercise successive updates to the same ID.
+  await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[entries[1]],docs:{}}})}));
+  await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[{...entries[1],data:{...entries[1].data,phase:'save-processing'}}],docs:{}}})}));
+  expect(tree.root.findByProps({testID:'history-entry-2'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — saving']);
+  const projected={...entries[1],data:{...entries[1].data,phase,text:'INJECTED model instructions <toolCall>run me</toolCall>',error:'INJECTED private provider error',errors:['INJECTED warning'],model:{role:'assistant',content:'INJECTED supplied model'}}};
+  await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[projected],docs:{}}})}));
+  const updated=tree.root.findByProps({testID:'history-entry-2'});
+  expect(updated).toBe(row);
+  expect(history().props.data.map((entry:any)=>entry.id)).toEqual([4,3,2,1]);
+  expect(history().props.data.filter((entry:any)=>entry.id===2)).toHaveLength(1);
+  expect(history().props.keyExtractor(projected)).toBe(key);
+  const texts=updated.findAllByType(Text);
+  expect(texts.map(node=>node.props.children)).toEqual([label]);
+  const text=texts[0],style=StyleSheet.flatten(text.props.style);
+  expect(style).toMatchObject({color:colors.muted,fontSize:13});
+  for(const constraint of ['height','maxHeight','overflow','backgroundColor'])expect(style[constraint]).toBeUndefined();
+  expect(text.props.allowFontScaling).not.toBe(false);
+  expect(text.props.maxFontSizeMultiplier).toBeUndefined();
+  expect(text.props.numberOfLines).toBeUndefined();
+  expect(text.props.accessibilityLiveRegion).toBeUndefined();
+  expect(updated.findAllByType(Pressable)).toHaveLength(0);
+  expect(updated.findAllByType(ModelContent)).toHaveLength(0);
+  expect(updated.findAllByType(ToolContent)).toHaveLength(0);
+  expect(updated.findAll(node=>typeof node.props.onPress==='function'||node.props.accessibilityState?.expanded!==undefined)).toHaveLength(0);
+  expect(updated.findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end')).toHaveLength(0);
+  expect(tree.root.findByProps({testID:'history-entry-4'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — save queued']);
+  expect(tree.root.findByProps({testID:'history-entry-1'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — recalled 3 memories']);
+  expect(tree.root.findAllByType(Text).some(node=>typeof node.props.children==='string'&&node.props.children.includes('INJECTED'))).toBe(false);
+  expect(fetch.mock.calls.filter(([,options])=>options?.method&&options.method!=='GET')).toHaveLength(0);
+ }finally{await act(async()=>tree.unmount());}
+});

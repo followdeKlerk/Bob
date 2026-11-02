@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+  "files": {
+    "tools/threat_patterns.py": {
+      "sha256": "9e93a48960d55b7403c04bb30ca24ea178ba60dfc79e1a3938ce4e19a792fa02",
+      "gitBlob": "54c3a6dcea63592c1b46096e3f2e2cd0b99e0bfb"
+    },
+    "tools/memory_tool_store.py": {
+      "sha256": "3280e2294928815ab2dd52479c5616aee805e27819b901f9af40831a293728c6",
+      "gitBlob": "3666bf9fd564873f29e6ce76f1508fa9007b1418"
+    },
+    "tests/tools/test_threat_patterns.py": {
+      "sha256": "e93e8549864c8d829720c36e639fa6f2ff471ce016638e1ce8e2c8562bc44321",
+      "gitBlob": "74675e6ee5b0853a5d1a6133de610e3dcae1dc39"
+    },
+    "LICENSE": {
+      "sha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+      "gitBlob": "75410e73319c72cd3e991a501c5455eb78f38375"
+    }
+  }
+}

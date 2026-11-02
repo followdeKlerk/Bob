@@ -1,6 +1,6 @@
 (()=>{
-  const key=__BOB_INLINE_LAYOUT_KEY__,maxHeight=420;
-  let last,queued=false,forceNext=false;
+  const key=__BOB_INLINE_LAYOUT_KEY__,maxHeight=8192;
+  let last,queued=false,forceNext=false,stopped=false,animation,interval,mutations,resizes;
   function report(value,force){
     const signature=JSON.stringify(value);
     if(!force&&signature===last)return;
@@ -8,7 +8,7 @@
   }
   function check(force=false){
     const root=document.documentElement,body=document.body;
-    if(!root||!body)return;
+    if(stopped||!root||!body)return;
     const width=innerWidth,height=innerHeight;
     // A temporarily detached/unlaid-out row is not proof of overflow. The host
     // still has a bounded deadline before an unmeasured surface is promoted.
@@ -41,15 +41,21 @@
   }
   function schedule(force=false){
     forceNext=forceNext||force;
-    if(queued)return;queued=true;
-    requestAnimationFrame(()=>{queued=false;const send=forceNext;forceNext=false;check(send);});
+    if(stopped||queued)return;queued=true;
+    animation=requestAnimationFrame(()=>{queued=false;const send=forceNext;forceNext=false;check(send);});
   }
-  addEventListener('load',()=>{schedule(true);setInterval(check,300);});
+  addEventListener('load',()=>{if(!stopped){schedule(true);interval=setInterval(check,300);}});
   addEventListener('resize',()=>schedule(true));
   addEventListener('scroll',()=>schedule(true),true);
   addEventListener('bob:visual-data',()=>schedule(true));
   addEventListener('DOMContentLoaded',()=>{
-    new MutationObserver(()=>schedule()).observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});
-    new ResizeObserver(()=>schedule()).observe(document.body);
+    if(stopped)return;
+    mutations=new MutationObserver(()=>schedule());
+    mutations.observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});
+    resizes=new ResizeObserver(()=>schedule());resizes.observe(document.body);
   });
+  addEventListener('pagehide',()=>{
+    stopped=true;cancelAnimationFrame(animation);clearInterval(interval);
+    mutations?.disconnect();resizes?.disconnect();
+  },{once:true});
 })();

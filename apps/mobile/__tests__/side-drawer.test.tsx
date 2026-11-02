@@ -61,6 +61,7 @@ test('the header uses the actual bundled Bob wordmark image, not a replacement t
  expect(logo.type).toBe(Image);
  expect(logo.props.source).toBe(require('../assets/bob-wordmark.png'));
  expect(logo.props.resizeMode).toBe('contain');
+ expect(StyleSheet.flatten(logo.props.style).tintColor).toBe('#e8e0d2');
  expect(tree.root.findAll(node=>node.type===Text&&node.props.children==='Bob')).toHaveLength(0);
 });
 test('searching and switching tabs keep the same native scroll list and fade overlays',()=>{
@@ -81,7 +82,7 @@ test('New chat uses the charcoal theme with light text and remains available in 
 });
 
 test('drawer has a thin white right edge without changing its full-height scroll layout',()=>{
- expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style)).toMatchObject({borderRightWidth:1,borderRightColor:'#ffffff',height:'100%',overflow:'hidden'});
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style)).toMatchObject({borderRightWidth:1,borderRightColor:'#e8e0d2',height:'100%',overflow:'hidden'});
 });
 
 test('embedded Workstations is a full-width destination with pairing but no sessions',async()=>{

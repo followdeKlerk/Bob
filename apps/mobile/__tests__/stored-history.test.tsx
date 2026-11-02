@@ -88,3 +88,29 @@ test('history refresh and reconnection cannot bypass a server Retry-After instru
  try{await act(async()=>{tree=Renderer.create(<Harness request={request}/>);});await act(async()=>history.refresh());expect(request).toHaveBeenCalledTimes(1);await act(async()=>jest.advanceTimersByTime(59999));expect(request).toHaveBeenCalledTimes(1);await act(async()=>jest.advanceTimersByTime(1));expect(request).toHaveBeenCalledTimes(2);expect(history.error).toBeUndefined();}
  finally{await act(async()=>tree?.unmount());jest.useRealTimers();}
 });
+
+test('fresh receipt presentation replaces cached queued rows without changing IDs or other message objects',()=>{
+ const queued={id:2,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'input:2'}};
+ const original={...page(781,[1,3],'older'),items:[page(781,[1]).items[0],queued,page(781,[3]).items[0]]};
+ const completed={...queued,data:{...queued.data,phase:'save-completed'}};
+ const result=mergeLatestHistory(original,{...original,items:[completed,JSON.parse(JSON.stringify(original.items[2]))]});
+ expect(result.items.map(entry=>entry.id)).toEqual([1,2,3]);
+ expect(result.items[0]).toBe(original.items[0]);expect(result.items[2]).toBe(original.items[2]);
+ expect(result.items[1]).toBe(completed);expect(result.next).toBe('older');
+ expect(mergeLatestHistory(result,JSON.parse(JSON.stringify(result)))).toBe(result);
+ const retry={...completed,data:{...completed.data,phase:'save-queued'}};
+ expect(mergeLatestHistory(result,{...result,items:[retry]}).items[1]).toBe(retry);
+});
+
+test('opening with a cached queued receipt persists its authoritative terminal replacement',async()=>{
+ const queued={...page(),items:[{id:2,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'input:2'}}]};
+ (readHistoryCache as jest.Mock).mockResolvedValue(JSON.stringify(queued));
+ const completed={...queued,items:[{...queued.items[0],data:{...queued.items[0].data,phase:'save-completed'}}]};
+ let finish!:(value:unknown)=>void;const request=jest.fn(()=>new Promise(resolve=>{finish=resolve;}));let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<Harness request={request}/>);});
+ expect((history.page?.items[0].data as any).phase).toBe('save-queued');
+ await act(async()=>finish(completed));
+ expect((history.page?.items[0].data as any).phase).toBe('save-completed');
+ expect(writeHistoryCache).toHaveBeenCalledWith('history-pages:'+backend+':781',expect.stringContaining('save-completed'));
+ await act(async()=>tree.unmount());
+});

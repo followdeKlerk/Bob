@@ -30,8 +30,7 @@ internal object ConversationNotifications {
         try {
         if (identity.isBlank() || chat <= 0) return
         synchronized(NotificationWatchStore) {
-            manager(context).cancel(tag(identity, chat), 0)
-            manager(context).activeNotifications.filter { NotificationReplyPolicy.isReplyStatusTag(it.tag) && it.notification.extras?.getString("bob.notification.backend") == identity && it.notification.extras?.getLong("bob.notification.chat") == chat }.forEach { manager(context).cancel(it.tag, it.id) }
+            AttentionNotifications.migrate(context)
             // Clear notices posted before conversation-style notifications were introduced.
             for (kind in listOf("reply", "question", "schedule")) manager(context).cancel(("$kind:$identity:$chat").hashCode())
             val value = NotificationWatchStore.read(context, identity) ?: return
@@ -41,10 +40,9 @@ internal object ConversationNotifications {
     }
     fun clearBackend(context: Context, identity: String) {
         synchronized(NotificationWatchStore) {
-            manager(context).activeNotifications.filter { (it.tag?.startsWith("conversation:$identity:") == true) || (NotificationReplyPolicy.isReplyStatusTag(it.tag) && it.notification.extras?.getString("bob.notification.backend") == identity) }.forEach { manager(context).cancel(it.tag, it.id) }
             val value = NotificationWatchStore.read(context, identity)
             if (value != null) {
-                rows(history(value)).forEach { row -> manager(context).cancel(tag(identity, row.optLong("chat")), 0) }
+                AttentionNotifications.migrate(context)
                 NotificationWatchStore.update(context, identity) { it.remove(HISTORY) }
             }
         }

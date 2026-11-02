@@ -1,6 +1,7 @@
 import {AppBridge, PostMessageTransport} from '@modelcontextprotocol/ext-apps/app-bridge';
 import type {CallToolResult} from '@modelcontextprotocol/client';
 import type {McpUiStyles} from '@modelcontextprotocol/ext-apps';
+import {MAX_INLINE_HEIGHT} from '../mobile/inline-visual-policy';
 
 declare global {
   interface Window {
@@ -43,6 +44,13 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='',fontFac
   const layoutKey=crypto.randomUUID();
   let stopped=false,requestedHeight:number|undefined;
   let layoutTimeout:ReturnType<typeof setTimeout>|undefined;
+  // A fit acknowledgement may clear the deadline on every animation frame.
+  // Bound actual resize requests too, without charging repeated telemetry or
+  // isolated user/data/image updates against a lifetime counter.
+  const resizeTimes:number[]=[];
+  const resizeBurstWindow=1500,maxResizeBurst=16;
+  const resizeQuietTime=1000,maxContinuousResizeTime=6000;
+  let resizeRunStart=0,lastResizeAt:number|undefined;
   const fullView=(reason:'content-overflow'|'measurement-timeout')=>{
     if(stopped)return;
     stopped=true;clearTimeout(layoutTimeout);frame.style.visibility='hidden';
@@ -63,8 +71,18 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='',fontFac
     // report must arrive before revealing; no content is scaled or clipped to fit.
     if(!Number.isFinite(report.viewportWidth)||!Number.isFinite(report.viewportHeight)||Math.abs(report.viewportWidth-bounds.width)>1||Math.abs(report.viewportHeight-bounds.height)>1){awaitFit();return;}
     const height=report.contentHeight;
-    if(report.fits!==true||!Number.isInteger(height)||height<1||height>420){fullView('content-overflow');return;}
-    if(requestedHeight!==height){requestedHeight=height;window.BobNative?.request(JSON.stringify({method:'layout',height}),nonce);}
+    if(report.fits!==true||!Number.isInteger(height)||height<1||height>MAX_INLINE_HEIGHT){fullView('content-overflow');return;}
+    if(requestedHeight!==height){
+      const now=performance.now();
+      while(resizeTimes.length&&now-resizeTimes[0]>=resizeBurstWindow)resizeTimes.shift();
+      // A slower ACKed oscillation can evade both the burst limit and the
+      // unsettled-layout deadline. Only a genuine quiet gap starts a fresh run;
+      // ordinary isolated updates (e.g. 2s live data) have no lifetime budget.
+      if(lastResizeAt===undefined||now-lastResizeAt>=resizeQuietTime)resizeRunStart=now;
+      if(resizeTimes.length>=maxResizeBurst||now-resizeRunStart>=maxContinuousResizeTime){fullView('content-overflow');return;}
+      lastResizeAt=now;resizeTimes.push(now);requestedHeight=height;
+      window.BobNative?.request(JSON.stringify({method:'layout',height}),nonce);
+    }
     if(report.viewportFits!==true||Math.abs(report.viewportHeight-height)>1){awaitFit();return;}
     clearTimeout(layoutTimeout);layoutTimeout=undefined;
     frame.style.opacity='1';frame.style.pointerEvents='auto';status.textContent='';
@@ -72,7 +90,7 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='',fontFac
   if(inline){
     awaitFit();frame.setAttribute('scrolling','no');
     window.addEventListener('message',layoutMessage);
-    window.addEventListener('pagehide',()=>{clearTimeout(layoutTimeout);window.removeEventListener('message',layoutMessage);},{once:true});
+    window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(layoutTimeout);window.removeEventListener('message',layoutMessage);},{once:true});
   }
   const measureScript=inline?`<script>${inlineMeasure.replace('__BOB_INLINE_LAYOUT_KEY__',JSON.stringify(layoutKey))}</script>`:'';
   const dataKey=crypto.randomUUID();

@@ -59,7 +59,25 @@ Configure credentials in Bob itself. Replacing a provider API key supersedes its
 
 Schedules use additive native session/conversation documents (`bob.schedules`, `bob.schedule-worker`) and `bob.schedule-driver` v1 in the resources extension. No second scheduler, shadow database or OS cron service is introduced. Existing document/task definitions and control schema are unchanged. The standard Durable backup includes schedules and their recovery checkpoints.
 
-Keep resources installed while schedules exist. Before reverting to a release without these definitions, cancel/settle schedule work first; never restore an older database to roll code back. A missing/blocked driver is not proof that a schedule is running. On startup Bob reconciles obsolete/paused/cancelled drivers and requests their abort before resuming normal scheduling. Healthy active drivers resume their saved phase/deadline. Scheduling endpoints require ordinary paired-device authentication and backend identity. Android delivery is best-effort polling, not server-confirmed notification delivery.
+Keep resources installed while schedules exist. Before reverting to a release without these definitions, cancel/settle schedule work first; never restore an older database to roll code back. A missing/blocked driver is not proof that a schedule is running. On startup Bob reconciles obsolete/paused/cancelled drivers and requests their abort before resuming normal scheduling. Healthy active drivers resume their saved phase/deadline. Scheduling endpoints require ordinary paired-device authentication and backend identity. Android delivery uses optional generic FCM attention signals with polling fallback, never server-confirmed notification delivery.
+
+### Firebase push delivery
+
+FCM is optional. Create a Firebase project, register Android package `com.bobmobile`, and download `google-services.json`. Keep that Android configuration outside Git at `~/.local/share/bob/firebase/google-services.json`, or set `BOB_FIREBASE_CONFIG` in the Android builder's environment. It supplies public SDK resources, not server credentials. A build without the file retains polling-only notification support. Google Analytics, a Firebase database and Firebase Hosting are not needed.
+
+Enable the Firebase Cloud Messaging API (`fcm.googleapis.com`). Use a dedicated service account with the `roles/firebasecloudmessaging.admin` role, not project Owner/Editor. Store its service-account JSON privately outside the repository, owned by the backend OS account with mode `0600`. In the **intended backend state directory**, create `firebase-push.json` (also mode `0600`):
+
+```json
+{"projectId":"YOUR_FIREBASE_PROJECT_ID","serviceAccountFile":"/absolute/private/sender-service-account.json"}
+```
+
+The Android configuration and backend sender must use the same Firebase project. Never put a service-account private key in the APK, Git, a chat message, CLI arguments or logs. Restrict access to the containing directories. Back up both configuration and credentials separately and securely; external Firebase files are not included in Bob's normal state export. Rotate/revoke service-account keys through Google IAM when necessary. Provisioning or key rotation is separate from source deployment.
+
+After deploying the configured backend and installing the Android build, open Bob with notifications allowed. The paired app registers its current FCM token using authenticated `POST /v1/push/register`; deletion uses the same endpoint with `DELETE`. The token is transport metadata in the existing control store, not conversation/read authority. Revoked device grants are excluded from sends. Token rotation and removed pairings are reconciled by Android; stale hints from unknown backends are ignored.
+
+The backend observes newly committed owner-facing replies, questions and schedule alerts without replaying historical chats. A small relay observes the existing maintenance journal for newly completed/failed builds. Sending has a bounded, five-minute, coalescing transport queue; its commit-to-queue handoff is best-effort, and a crash after provider acceptance may resend a generic hint. No new task definitions, scheduler or conversation database are introduced. HTTP acceptance by FCM does not prove phone delivery.
+
+Verify on a real phone: foreground suppression; a new notice while locked on Wi-Fi and mobile data; multiple events updating one notice without previews/Reply actions; permission/channel-disabled behaviour; token refresh; backend restart; pairing removal; and preservation of unresolved legacy notification-reply feedback. Do not infer Doze or SystemUI behaviour from JVM/JavaScript tests alone.
 
 ### Backup and disaster recovery
 
@@ -166,3 +184,50 @@ Android builds conversation-style notices from the existing operation-status and
 Incomplete retained input keeps the same recoverable request identity beyond the normal empty-action expiry, but never survives revocation as authorization to a new pairing. A later notification offers retry of that retained input rather than replacing it. Old accepted-send watches cannot overwrite a newer pairing. Background reply statuses share the context/publication lock and do not reappear for viewed chats or replaced pairings. Direct failed-input feedback uses a separate notification identity from asynchronous delivery, preserving its unqueued meaning and text when the earlier send later changes status. It remains visible so new text on a consumed action is explicitly reported as not queued, never silently treated as sent.
 
 Native RemoteInput replies reuse the encrypted outbox and existing authenticated message/operation APIs with stable request identities. They do not start an activity or React Native to send, bypass question-option validation, or bypass Bob’s existing delegation policy. The app recovers native sends on startup/resume and native change events. OS acceptance of a notification and persistence of a send are not human-view or server-delivery receipts. No push service, new universal event feed or generic foreground service is introduced. Device checks should include a locked phone/unlock, app process recreation, offline/reconnect, pairing rotation, concurrent incoming notices, large text and disabled notification channels.
+
+### Native learning state and recovery
+
+The resources module includes Bob's curated memory, on-demand skill packages and learning controls. `bob.library` v1 remains the authority for existing skill bodies; additive native sidecars hold metadata, supporting files, read receipts, bounded memory and audit history. No previous chat, Notes, Hindsight bank or task schema is replaced. Old releases ignore the new documents, so rollback does not restore an older database. A rollback to old code will not expose new skill metadata or background-task definitions; settle learning work before removing the resources module.
+
+`bob.learning.settings` defaults to automatic review enabled, memory interval 10, skill interval 10, at most 16 model rounds and a 120-second review deadline. `learning` status/configure is the owner-facing control. Each source conversation has counters and idempotent submission receipts. `bob.learning.installation` establishes an activation boundary so installing the feature does not silently review every historical conversation. A queued review is a native `bob.learning.review` task with a task-owned child, stable request identity and a restricted callable tool set; review children cannot launch further reviews or delegate. Canonical owner input is distinguished from peer and task-owned input. Actual artifact changes, staged proposal IDs, failures and explicit `/refine` results are recorded as passive source-chat metadata; automatic no-signal reviews stay silent. Automatic evidence excludes turns whose persisted learning policy was disabled, not just `#nomem`/`#skip` text. Skill and memory tool mutations commit a per-task result receipt atomically with the artifact write, covering the replay-safe commit-to-tool-settlement crash window.
+
+Automatic reviews yield to new foreground turns. Explicit `/refine` and consolidation reviews continue across ordinary follow-up messages, so asking for status does not cancel them. A fresh `/refine` supersedes the active review; conversation-tree Stop still cancels background work. Disabling automatic learning does not cancel explicitly requested reviews. This explicit-review continuation is a deliberate Bob lifecycle adaptation; the pinned upstream cancels reviews on live turns.
+
+Review workers can read and modify native skill/memory artifacts; shell, browser, network mutation, scheduling and delegation tools are not part of their callable set. The existing Hindsight module retains its own configuration and state. Native reference/template/script files are stored as document content: loading a script does not execute it or create a filesystem copy.
+
+Pinned learning source and the reproducible prompt adaptation are shipped under `assets/learning/`. Run `python3 assets/learning/port.py` to regenerate prompts, then the learning tests and normal backend checks. Legal upstream attribution is retained; operative prompts use Bob tool names and storage concepts.
+
+Optional semantic skill consolidation is off by default. `learning` action `consolidate` queues an explicit restricted curator pass (ten-minute deadline), using the pinned curator prompt and a host-enforced candidate set. Native package ledgers replace filesystem backup snapshots. Original filesystem/hub/plugin installers, scanner integrations, full YAML metadata parsing and optional global write-approval switches are not part of this Bob-native port; default review behavior and the original unattended destructive-memory proposal gate are retained.
+
+
+### Learning controls and coverage boundaries
+
+- `learning(enabled=false)` disables automatic review triggers and cancels unfinished automatic reviews. Explicit `/refine` and explicitly requested consolidation remain available. Setting one interval to zero disables only that trigger.
+- Deterministic skill aging is a separate idle-triggered maintenance path; disabling automatic review does not disable it. It considers only unpinned, background-created managed skills. Pinning protects a package; archive is reversible. Curator status/run is exposed through `skill_manage`; public threshold configuration, pause/adopt controls and automatic semantic consolidation are not implemented.
+- The review input is bounded to a recent entry window and a textual budget (500 recent entries, 60,000 characters overall, 12,000 characters per entry). Boundary recovery preserves consent/opt-out context; it does not restore all omitted history. Reasoning and binary content are excluded. A completed review is not proof that the entire conversation was examined.
+- Memory budgets remain fixed at 1,375 user-profile and 2,200 environment characters. Normal review defaults remain 16 model rounds and 120 seconds; an explicit consolidation has a ten-minute deadline. These are bounded operations, not continuous trainers.
+- Native package ledgers retain at most 10 changes and are also size-bounded (2 MiB). Retained snapshots support rollback; they are not unlimited content-addressed backups. Old chats, Notes and external Hindsight stores remain independent.
+- Skill selection is model-mediated. Advertising a skill in an index and allowing `skill_view` establishes availability, not successful application. Use bounded real-model relevance/reuse evaluations alongside deterministic storage and lifecycle tests, and report their sample size and misses.
+
+
+### Native skill metadata contract
+
+Native `description`, `category`, `tags`, `version`, `author` and `platforms` fields are the routing metadata authority. Markdown frontmatter remains authored content; the limited initial one-line description fallback is not a YAML importer. Updating a description or tags means supplying the native metadata fields, not only patching similarly named text in `SKILL.md`. Unsupported YAML conditions do not silently become enforced tool, app, environment or credential checks. Such readiness dependencies require foreground verification before applying a skill.
+
+Platform applicability concerns the backend executing the skill, not the paired phone. Explicit inspection remains available for non-applicable packages; default routing and automatic body injection must not suggest that a platform-specific procedure is ready on another platform. Empty platform metadata means no declared platform restriction, not proof of all dependency readiness.
+
+
+### Curated-memory write scanning
+
+New memory entries and complete patched entries are checked against the pinned Hermes strict threat-pattern set before persistence or proposal staging. Approval replays the same checks, so a pending proposal is not a bypass. Scan normalization is applied only to a copy; accepted fact text and exact replacement whitespace are preserved. Refusals identify a pattern, not a guarantee that malicious content is otherwise impossible. Normal facts remain direct writes; this does not add a blanket approval gate.
+
+The scanner is a heuristic and can reject benign descriptions that contain upstream strict attack patterns. Existing entries are not silently rewritten, removed, or retroactively quarantined by this upgrade; untrusted-reference treatment remains in place, and explicit removal remains available. This is write-time parity, not a port of upstream filesystem-load sanitation or a complete prompt-injection defense. Provenance and differential fixtures live in `assets/learning/memory-threats/`.
+
+
+### Visible learning completion receipts
+
+`bob.learning-status` remains passive stored metadata, not a new model message or owner input. The app renders valid completed/failed/cancelled notices as plain, selectable, wrapped chat text rather than hiding them behind a disclosure. Older valid learning-status entries also become visible with the updated app; they retain their original text.
+
+Skill mutations atomically record name, action, revision and supporting path when the package changes. Foreground mutations emit a notice only in their owner conversation, not the shared library or task-owned chat. Background workers accumulate details and the review driver emits a compact aggregate after completion/failure/cancellation. Tool-task receipts prevent duplicate mutations and notices after replay/restart; transaction rollback also rolls back notices. Reads, revision conflicts and no-op saves do not claim changes. Legacy worker records without detailed action receipts use a generic “changed” fallback rather than inventing a specific action.
+
+Automatic no-change reviews stay silent; explicit reviews report no saved changes when appropriate. Model-authored review replies remain available in learning status diagnostics but do not author the saved-result notice. Memory proposals remain visibly pending approval, never described as applied. Large skill summaries are bounded at action boundaries with an explicit additional-change count; full structured changes remain in native metadata. This is chat visibility, not a promise of push delivery or on-device display before the Android update is installed.

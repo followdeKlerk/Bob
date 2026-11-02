@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+  "sourceCheckoutClean": true,
+  "files": {
+    "agent/background_review.py": {
+      "sha256": "b177b1cfe8b06f9e787e37920fd9a7b023a038ecbac951bde4e81535d88aa4dc",
+      "gitBlob": "bc1d9a33f40cbf05ddf5d51b940a7e2653cc9e32"
+    },
+    "agent/learn_prompt.py": {
+      "sha256": "14529273cc4c1f371e9f2843cfd5a1ced9c3bba16acc6304d418b1f8a38f12c1",
+      "gitBlob": "db50f95aa3196fb19f265d0491ca93f63b4f2c84"
+    },
+    "LICENSE": {
+      "sha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+      "gitBlob": "75410e73319c72cd3e991a501c5455eb78f38375"
+    },
+    "tests/agent/test_learn_prompt.py": {
+      "sha256": "c477d2b44ee037b89f42c7f915d917b229199c887d9f1b9fd876bb9d420d523c",
+      "gitBlob": "0720baa838d7a5bc601aab68eeaec460b51321d5"
+    },
+    "tests/agent/test_refine_focus.py": {
+      "sha256": "657db2f7199a2f8fe006fac8a93360639d92aa75649b29296ca4bff6656f50ee",
+      "gitBlob": "f05f4bc248d65a8df48fdc6f5e1fe7fe641defb3"
+    },
+    "agent/curator.py": {
+      "sha256": "fde73780c9b72336b0d6e67fb984f9b1506c624037376902972a7c4d3d1e9a6b",
+      "gitBlob": "a890fd3fb69f723c100564c79a30a9de1c2d1dc0"
+    }
+  }
+}

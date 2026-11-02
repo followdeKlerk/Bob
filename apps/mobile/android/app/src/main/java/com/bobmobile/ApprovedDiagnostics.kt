@@ -18,7 +18,7 @@ internal object ApprovedDiagnostics {
             val old = JSONArray(preferences.getString("events", "[]")); val next = JSONArray()
             for (index in maxOf(0, old.length() - 63) until old.length()) next.put(old.getJSONObject(index))
             next.put(JSONObject().put("time", System.currentTimeMillis()).put("event", event)
-                .put("width", width.coerceIn(0, 100000)).put("height", height.coerceIn(0, 100000)).put("requestedHeight", requested.coerceIn(0, 420)))
+                .put("width", width.coerceIn(0, 100000)).put("height", height.coerceIn(0, 100000)).put("requestedHeight", requested.coerceIn(0, VisualActions.MAX_INLINE_HEIGHT)))
             preferences.edit().putString("events", next.toString()).apply()
         } catch (_: Exception) { /* Diagnostics must never break a widget. */ }
     }

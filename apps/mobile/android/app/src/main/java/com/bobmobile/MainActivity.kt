@@ -11,8 +11,15 @@ class MainActivity : ReactActivity() {
     super.onCreate(savedInstanceState)
     AppDiagnostics.record(this, "activity.create")
   }
-  override fun onResume() { super.onResume(); AppDiagnostics.record(this, "activity.resume") }
-  override fun onPause() { AppDiagnostics.record(this, "activity.pause"); super.onPause() }
+  override fun onResume() {
+    synchronized(NotificationWatchStore) {
+      NotificationRuntime.appVisible = true
+      AttentionNotifications.clear(this)
+      AttentionNotifications.migrate(this)
+    }
+    super.onResume(); AppDiagnostics.record(this, "activity.resume")
+  }
+  override fun onPause() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false }; AppDiagnostics.record(this, "activity.pause"); super.onPause() }
   override fun onStop() { AppDiagnostics.record(this, "activity.stop"); super.onStop() }
   override fun onDestroy() { AppDiagnostics.record(this, "activity.destroy"); super.onDestroy() }
   override fun onUserLeaveHint() { AppDiagnostics.record(this, "activity.user-leave"); super.onUserLeaveHint() }

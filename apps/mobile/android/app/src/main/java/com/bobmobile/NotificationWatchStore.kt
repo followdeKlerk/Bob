@@ -12,13 +12,17 @@ import javax.crypto.SecretKey
 /** Private notification scheduling metadata, NOT chat/delivery authority.
  * Workers need a credential after process death: encrypt it with an app-owned
  * Android Keystore key; neither WorkManager Data nor preferences contain plaintext tokens. */
-internal object NotificationWatchStore {
-    private const val alias = "bob-notification-watches-v1"
-    private fun prefs(context: Context) = context.getSharedPreferences("notification-watches-encrypted-v1", Context.MODE_PRIVATE)
-    private fun key(): SecretKey {
+internal object NotificationWatchStore : EncryptedNotificationStore("notification-watches-encrypted-v1")
+
+/** Same Keystore-backed storage for independent, bounded OS scheduling metadata. */
+internal open class EncryptedNotificationStore(private val preferences: String) {
+    companion object { private val keyLock = Any() }
+    private val alias = "bob-notification-watches-v1"
+    private fun prefs(context: Context) = context.getSharedPreferences(preferences, Context.MODE_PRIVATE)
+    private fun key(): SecretKey = synchronized(keyLock) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
             init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()

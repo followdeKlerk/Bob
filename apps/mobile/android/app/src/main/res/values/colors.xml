@@ -1,0 +1,4 @@
+<resources>
+    <!-- ZXing's capture prompt otherwise forces white instead of the app theme. -->
+    <color name="zxing_status_text">#e8e0d2</color>
+</resources>

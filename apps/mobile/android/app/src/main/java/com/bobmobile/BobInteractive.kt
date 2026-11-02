@@ -11,11 +11,16 @@ import com.facebook.react.uimanager.annotations.ReactProp
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import android.view.MotionEvent
 import android.os.Bundle
 import android.webkit.*
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ScrollView
+import android.widget.Toast
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import org.json.JSONObject
@@ -75,6 +80,7 @@ class BobInteractive(private val context: ReactApplicationContext) : ReactContex
                 require(SurfaceSessions.pending.size < 8) { "Too many pending interactive surfaces" }
                 val resource = surfaceRequest(endpoint, identity, token, "/v1/chats/${chat.toLong()}/ui/$id/open", JSONObject())
                 require(resource.getString("id") == id && resource.getString("html").length <= 2097152)
+                VisualActions.fromResource(resource)
                 val handle = UUID.randomUUID().toString()
                 SurfaceSessions.pending[handle] = SurfaceSession(endpoint, identity, token, chat.toLong(), id, resource)
                 promise.resolve(handle)
@@ -91,6 +97,7 @@ class BobInteractive(private val context: ReactApplicationContext) : ReactContex
                 require(chat > 0 && chat % 1.0 == 0.0); UUID.fromString(id); UUID.fromString(identity)
                 val resource = surfaceRequest(endpoint, identity, token, "/v1/chats/${chat.toLong()}/ui/$id/open", JSONObject())
                 require(resource.getString("id") == id && resource.getString("html").length <= 2097152)
+                VisualActions.fromResource(resource)
                 require(SurfaceSessions.pending.size < 8) { "Too many pending interactive surfaces" }
                 val session = UUID.randomUUID().toString()
                 SurfaceSessions.pending[session] = SurfaceSession(endpoint, identity, token, chat.toLong(), id, resource)
@@ -110,6 +117,11 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
     private val requests = Semaphore(4)
     private lateinit var status: TextView
     private var lastInlineHeight = 0
+    private var htmlInlineHeight = 0
+    private var inlineOverflow = false
+    private var actionFooter: ScrollView? = null
+    private var actionContent: LinearLayout? = null
+    private var footerPixels = 0
     private var latestData: JSONObject? = null
     private var dataRevision = -1L
     private var dataEnabled = false
@@ -127,14 +139,15 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         }
         reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)?.emit(name, event)
     }
-    private fun canRefreshData(): Boolean {
-        if (disposed || !dataEnabled || !isAttachedToWindow || windowVisibility != View.VISIBLE || !hasWindowFocus()) return false
+    private fun isSurfaceActive(): Boolean {
+        if (disposed || !isAttachedToWindow || windowVisibility != View.VISIBLE || !hasWindowFocus()) return false
         // React Native keeps the chat mounted behind other tabs with opacity=0.
         // isShown/global bounds alone do not detect that kind of hidden parent.
         var ancestor: View? = this
         while (ancestor != null) { if (ancestor.visibility != View.VISIBLE || ancestor.alpha <= 0.01f) return false; ancestor = ancestor.parent as? View }
         return getGlobalVisibleRect(android.graphics.Rect())
     }
+    private fun canRefreshData() = dataEnabled && isSurfaceActive()
     private fun scheduleData(delay: Long = 0L) { removeCallbacks(dataRefresh); if (!disposed && dataEnabled && isAttachedToWindow && windowVisibility == View.VISIBLE && hasWindowFocus()) postDelayed(dataRefresh, delay) }
     private fun pauseData() { dataFetchAllowed = false; removeCallbacks(dataRefresh); dataConnection?.disconnect() }
     override fun onAttachedToWindow() { super.onAttachedToWindow(); scheduleData() }
@@ -196,20 +209,135 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         val value = latestData ?: return
         if (!disposed) web?.evaluateJavascript("window.__bobVisualData?.(JSON.parse(${JSONObject.quote(value.toString()).replace("<", "\\u003c")}))", null)
     }
+    // The entire inline document/footer fits the row. A descendant WebView can
+    // ask its parent directly to retain a gesture, so enforce this at the panel
+    // boundary: chat may intercept drags; DOWN/UP still reach controls normally.
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        super.requestDisallowInterceptTouchEvent(if (inline) false else disallowIntercept)
+    }
+    // Reject both fully and partially obscured taps before they reach native controls.
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0) return false
+        return super.dispatchTouchEvent(event)
+    }
+    private fun launchAction(action: VisualAction, button: Button) {
+        val selected = session ?: return
+        // The notification context tracks the selected backend/chat, including while a
+        // full-screen Activity is in front of React. Do not use appVisible here:
+        // React legitimately pauses while that Activity owns the focused window.
+        if (!isSurfaceActive() || web == null || inlineOverflow || NotificationRuntime.visibleBackend != selected.identity ||
+            NotificationRuntime.visibleChat != selected.chat || !button.isShown || !button.getGlobalVisibleRect(android.graphics.Rect())) return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(action.url)).addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { context.startActivity(intent) }
+        catch (_: ActivityNotFoundException) { Toast.makeText(context, "No app can open this destination. Nothing was opened.", Toast.LENGTH_LONG).show() }
+        catch (_: SecurityException) { Toast.makeText(context, "Android blocked opening this destination. Nothing was opened.", Toast.LENGTH_LONG).show() }
+    }
+    private fun createActionFooter(actions: List<VisualAction>): ScrollView? {
+        if (actions.isEmpty()) return null
+        val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val padding = (8 * resources.displayMetrics.density).toInt()
+        content.setPadding(padding, padding, padding, padding)
+        for (action in actions) {
+            val caption = TextView(context).apply {
+                useSurfaceTypeface(); textSize = 14f; setTextColor(0xffe8e0d2.toInt())
+                textDirection = View.TEXT_DIRECTION_LTR
+                text = "Destination: ${action.caption}"
+            }
+            content.addView(caption, LinearLayout.LayoutParams(-1, -2))
+            val button = Button(context).apply {
+                useSurfaceTypeface(); textSize = 16f; isAllCaps = false; text = action.label
+                setSingleLine(false); maxLines = Int.MAX_VALUE; ellipsize = null; setHorizontallyScrolling(false)
+                setTextColor(0xff000000.toInt()); backgroundTintList = android.content.res.ColorStateList.valueOf(0xffe8e0d2.toInt())
+                minHeight = (48 * resources.displayMetrics.density).toInt()
+                minimumHeight = minHeight; filterTouchesWhenObscured = true
+                // These immutable values are captured once, never looked up in live data or JS.
+                contentDescription = "${action.label}. Destination: ${action.caption}"
+                setOnClickListener { launchAction(action, this) }
+            }
+            content.addView(button, LinearLayout.LayoutParams(-1, -2))
+        }
+        actionContent = content
+        return ScrollView(context).apply {
+            isFillViewport = false; isHorizontalScrollBarEnabled = false
+            addView(content, LayoutParams(-1, -2)); actionFooter = this
+        }
+    }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val footer = actionFooter
+        val content = actionContent
+        if (footer != null && content != null && !inlineOverflow) {
+            val availableWidth = (View.MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight).coerceAtLeast(0)
+            content.measure(View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val measured = content.measuredHeight
+            val changed = footerPixels != measured
+            footerPixels = measured
+            // Even before HTML telemetry arrives, reserve at least one CSS dp for
+            // the document. Hide/promote now rather than clipping an oversized
+            // footer until the host's measurement timeout. Ignore zero-width passes.
+            if (inline && availableWidth > 0 && VisualActions.inlineHeight(1, measured, resources.displayMetrics.density) == null) {
+                showInlineOverflow()
+            } else {
+                // Full screen retains readable controls at large font scales via native scrolling.
+                val availableHeight = (View.MeasureSpec.getSize(heightMeasureSpec) - paddingTop - paddingBottom).coerceAtLeast(0)
+                footer.layoutParams.height = if (inline) measured else measured.coerceAtMost((availableHeight * 0.6f).toInt())
+                if (inline && changed) post { updateInlineSize() }
+            }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+    private fun updateInlineSize() {
+        if (disposed || !inline || inlineOverflow || htmlInlineHeight == 0) return
+        // Wait for real width/font-dependent footer measurement, not a guessed dp allowance.
+        if (actionFooter != null && (width <= 0 || footerPixels == 0)) { requestLayout(); return }
+        val total = VisualActions.inlineHeight(htmlInlineHeight, footerPixels, resources.displayMetrics.density)
+        if (total == null) { showInlineOverflow(); return }
+        if (lastInlineHeight == total) return
+        lastInlineHeight = total
+        ApprovedDiagnostics.record(context, "resize", web?.width ?: 0, web?.height ?: 0, total)
+        onInlineHeight?.invoke(total)
+        emit("BobSurfaceLayout") { it.putInt("height", total) }
+    }
+    private fun showInlineOverflow(reason: String = "content-overflow") {
+        if (disposed || inlineOverflow) return
+        inlineOverflow = true
+        ApprovedDiagnostics.record(context, if (reason == "measurement-timeout") "fallback-timeout" else "fallback-overflow", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
+        status.text = "Open full view to see this content."
+        status.visibility = View.VISIBLE
+        web?.visibility = View.INVISIBLE
+        actionFooter?.visibility = View.GONE
+        pauseData(); dataEnabled = false
+        emit("BobSurfaceOverflow")
+    }
     fun show(selected: SurfaceSession) {
+        if (disposed || session != null) return
         if (inline) ApprovedDiagnostics.record(context, "mount", width, height)
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(0xff000000.toInt())
         clipChildren = true; clipToPadding = true
         if (inline) { isFocusable = false; isFocusableInTouchMode = false }
         val layout = this
-        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xfff4f4f5.toInt()); textSize = 14f; setTextIsSelectable(true); visibility = View.GONE }
+        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xffe8e0d2.toInt()); textSize = 14f; setTextIsSelectable(true); visibility = View.GONE }
         layout.addView(status)
+        val actions = try { VisualActions.fromResource(selected.resource) } catch (_: IllegalArgumentException) {
+            status.text = "Content unavailable: invalid native actions. Reopen after correcting the visual."
+            status.visibility = View.VISIBLE
+            return
+        }
         session = selected
         if (selected.resource.optString("kind") == "visual") selected.resource.optJSONObject("visualData")?.let { dataEnabled = true; acceptVisualData(it) }
         val start: () -> Unit = start@{
             if (disposed) return@start
-            val view = WebView(context); web = view
+            val view = object : WebView(context) {
+                // Scroll belongs to the chat, not a hidden WebView viewport.
+                override fun scrollTo(x: Int, y: Int) {
+                    if (inline) super.scrollTo(0, 0) else super.scrollTo(x, y)
+                }
+                override fun overScrollBy(deltaX: Int, deltaY: Int, scrollX: Int, scrollY: Int, scrollRangeX: Int, scrollRangeY: Int, maxOverScrollX: Int, maxOverScrollY: Int, isTouchEvent: Boolean): Boolean {
+                    if (inline) return false
+                    return super.overScrollBy(deltaX, deltaY, scrollX, scrollY, scrollRangeX, scrollRangeY, maxOverScrollX, maxOverScrollY, isTouchEvent)
+                }
+            }; web = view
             view.isVerticalScrollBarEnabled = false; view.isHorizontalScrollBarEnabled = false
             WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
             view.settings.apply {
@@ -225,7 +353,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
                 override fun onPageFinished(view: WebView, url: String) { if (!disposed) { pushVisualData(); scheduleData() } }
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream("Network access denied".toByteArray()))
-                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; actionFooter?.visibility = View.GONE; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
             }
             view.webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
@@ -235,6 +363,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             }
             view.addJavascriptInterface(Bridge(), "BobNative")
             layout.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
+            createActionFooter(actions)?.let { layout.addView(it, LinearLayout.LayoutParams(-1, -2)) }
             val payload = JSONObject()
             for (key in listOf("kind", "title", "html", "input", "result", "allowedTools", "visualData")) if (selected.resource.has(key)) payload.put(key, selected.resource.get(key))
             val bundle = context.assets.open("bob-host.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script")
@@ -243,7 +372,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
             val fontFaceCss = surfaceFontFaces(context)
             val safePayload = payload.toString().replace("<", "\\u003c")
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#f4f4f5;font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#e8e0d2;font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
 window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }
@@ -261,19 +390,14 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
     inner class Bridge {
         @JavascriptInterface fun request(raw: String, key: String) {
             // Android exposes JS interfaces to every frame. Only the trusted opaque-parent host knows this nonce.
-            if (raw.length > 65536 || key.length != nonce.length || !MessageDigest.isEqual(key.toByteArray(), nonce.toByteArray())) return
+            if (disposed || raw.length > 65536 || key.length != nonce.length || !MessageDigest.isEqual(key.toByteArray(), nonce.toByteArray())) return
             val selected = session ?: return
             val parsed = try { JSONObject(raw) } catch (_: Exception) { return }
             if (parsed.optString("method") == "layout" && inline) {
                 val height = parsed.optDouble("height", -1.0)
-                if (!height.isFinite() || height % 1.0 != 0.0 || height < 1 || height > 420) return
+                if (!height.isFinite() || height % 1.0 != 0.0 || height < 1 || height > VisualActions.MAX_INLINE_HEIGHT) return
                 post {
-                    if (!disposed && lastInlineHeight != height.toInt()) {
-                        lastInlineHeight = height.toInt()
-                        ApprovedDiagnostics.record(context, "resize", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
-                        onInlineHeight?.invoke(lastInlineHeight)
-                        emit("BobSurfaceLayout") { it.putInt("height", lastInlineHeight) }
-                    }
+                    if (!disposed) { htmlInlineHeight = height.toInt(); updateInlineSize() }
                 }
                 return
             }
@@ -284,16 +408,13 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
                             val reason = if (parsed.optString("reason") == "measurement-timeout") "measurement-timeout" else "content-overflow"
                             android.util.Log.d("BobInline", "Full view: $reason; native viewport=${web?.width}x${web?.height}")
                         }
-                        ApprovedDiagnostics.record(context, if (parsed.optString("reason") == "measurement-timeout") "fallback-timeout" else "fallback-overflow", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
-                        status.text = "Open full view to see this content."
-                        status.visibility = View.VISIBLE
-                        web?.visibility = View.INVISIBLE
-                        pauseData(); dataEnabled = false
-                        emit("BobSurfaceOverflow")
+                        showInlineOverflow(parsed.optString("reason"))
                     }
                 }
                 return
             }
+            // Visuals have no tool or external-intent bridge authority, even with a valid host nonce.
+            if (selected.resource.optString("kind") != "mcp" || parsed.optString("method") != "callTool") return
             val id = parsed.optString("id"); try { UUID.fromString(id) } catch (_: Exception) { return }
             if (!requests.tryAcquire()) { reply(id, JSONObject().put("error", "Too many in-flight tool calls")); return }
             executor.execute {
@@ -314,6 +435,7 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
         if (disposed) return
         if (inline) ApprovedDiagnostics.record(context, "dispose", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
         disposed = true; pauseData()
+        actionFooter?.visibility = View.GONE; actionFooter = null; actionContent = null
         approval?.setOnCancelListener(null); approval?.dismiss(); approval = null
         web?.removeJavascriptInterface("BobNative"); web?.destroy(); web = null; executor.shutdownNow()
         val selected = session; session = null
@@ -362,8 +484,9 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
     }
     @ReactProp(name = "session")
     fun setSession(host: LinearLayout, handle: String?) {
-        if (handle == null || host.tag == handle) return
+        if (host.tag == handle) return
         (host.getChildAt(0) as? BobSurfacePanel)?.dispose(); host.removeAllViews(); host.tag = handle
+        if (handle == null) return
         val selected = SurfaceSessions.pending.remove(handle) ?: return
         val surface = BobSurfacePanel(host.context, {
             host.removeAllViews()

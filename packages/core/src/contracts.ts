@@ -41,13 +41,16 @@ export const CreateChat = z
     instructions: z.string().max(32000).optional(),
   })
   .strict();
+// Legacy clients advertise their 420px cap. Updated clients advertise the
+// emergency ceiling; ordinary inline cards grow naturally below it.
+export const INLINE_VISUAL_EMERGENCY_HEIGHT=8192 as const;
 export const Message = z
   .object({
     requestId: z.string().uuid(),
     questionId: z.string().min(1).max(256).optional(),
     text: z.string().min(1).max(200000),
     mode: z.enum(["steer", "followUp"]),
-    display: z.object({inline:z.object({width:z.number().int().min(1).max(10000),height:z.literal(420)}).strict(),fullscreen:z.object({width:z.number().int().min(1).max(10000),height:z.number().int().min(1).max(10000)}).strict()}).strict().optional(),
+    display: z.object({inline:z.object({width:z.number().int().min(1).max(10000),height:z.union([z.literal(420),z.literal(INLINE_VISUAL_EMERGENCY_HEIGHT)])}).strict(),fullscreen:z.object({width:z.number().int().min(1).max(10000),height:z.number().int().min(1).max(10000)}).strict()}).strict().optional(),
     allowSubagents: z.boolean().default(false),
   })
   .strict();

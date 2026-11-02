@@ -7,6 +7,8 @@ dist/
 build/
 coverage/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 
 # Local secrets and environment
 .env
@@ -50,6 +52,9 @@ id_ed25519.pub
 credentials.json
 auth.json
 hindsight.json
+google-services.json
+firebase-push.json
+*-service-account.json
 peers.json
 cli.json
 *.zip

@@ -100,7 +100,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  expect(tree.root.findByProps({testID:'bob-inline-native-surface'})).toBe(nativeSurface);
  const size=(height:number,session='prepared-visual')=>DeviceEventEmitter.emit('BobSurfaceLayout',{backendId:backend.backendId,conversationId:7,id:surface.id,session,height});
  act(()=>size(220));expect(nativeSurface.props.style.height).toBe(220);
- act(()=>{size(320);size(800);size(0);size(160,'expired-mount');});expect(nativeSurface.props.style.height).toBe(320);
+ act(()=>{size(320);size(8193);size(0);size(160,'expired-mount');});expect(nativeSurface.props.style.height).toBe(320);
  act(()=>size(180));expect(nativeSurface.props.style.height).toBe(180);
  expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
  expect(inlineSurface.props.surface.presentation).toBe('inline');
@@ -472,7 +472,7 @@ test('Send hands off to Android before JS persistence completes and immediate ba
   jest.replaceProperty(AppState,'currentState','background');
   await act(async()=>{for(let i=0;i<20;i++)await Promise.resolve();});expect(release).toBeDefined();expect(enqueue).toHaveBeenCalledTimes(1);
   await act(async()=>release());
- }finally{await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
+ }finally{(AsyncStorage.setItem as jest.Mock).mockImplementation(write);await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
 });
 
 test('Sessions assigns working state by Durable conversation ID, not by the selected chat',async()=>{
@@ -518,9 +518,18 @@ test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe r
   const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
   if(placement==='unlinked'){
    expect(tree.root.findAllByType(InlineSurface)).toHaveLength(0);
+   expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
+   const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+   act(()=>tree.root.findByProps({accessibilityLabel:'Message draft'}).props.onChangeText('Keep my draft'));
+   await act(async()=>press('Chat actions'));
+   await act(async()=>press('More'));
+   expect(list.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
+   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
    await act(async()=>press('Other interactive surfaces'));
    expect(NativeModules.BobInteractive.open).not.toHaveBeenCalled();
    await act(async()=>press('Open Nested visual'));
+   expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
+   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.value).toBe('Keep my draft');
   }else{
    expect(tree.root.findByProps({testID:`history-entry-${placement==='parent'?1:2}`}).findAllByType(InlineSurface)).toHaveLength(1);
    expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
@@ -528,4 +537,30 @@ test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe r
   }
   expect(NativeModules.BobInteractive.open).toHaveBeenCalledWith(backend.endpoint,backend.backendId,'test-token',7,surface.id);
  }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test.each([{capability:{inlineHeight:8192},height:8192},{capability:undefined,height:420}])('outbound visual bounds follow the selected backend snapshot ($height)',async({capability,height})=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
+ jest.spyOn(require('react-native').Alert,'alert').mockImplementation(()=>{});
+ let snapshot:((event:any)=>void)|undefined;
+ require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),message=url.endsWith('/messages');
+  const data=message?{error:'Keep the outgoing fixture for inspection'}:url.includes('/operations/')?{admission:null}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:!message,status:message?412:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  expect(snapshot).toBeDefined();
+  await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[],docs:capability?{'bob.display':capability}:{}}})}));
+  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  act(()=>{list.props.ListHeaderComponent.props.onLayout({nativeEvent:{layout:{width:313}}});tree.root.findByProps({accessibilityLabel:'Message draft'}).props.onChangeText('Show a naturally sized card');});
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Send message'}).props.onPress());
+  expect(require('react-native').Alert.alert).not.toHaveBeenCalled();
+  const outgoing=await readOutbox() as Array<{message:{display?:{inline:unknown}}}>;expect(outgoing).toHaveLength(1);
+  expect(outgoing[0].message.display?.inline).toEqual({width:313,height});
+ }finally{await act(async()=>tree.unmount());}
 });

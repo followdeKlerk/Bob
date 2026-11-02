@@ -21,3 +21,18 @@ test('cleared live generation is not resurrected by identity reuse',()=>{
  const previous={entries:[{id:1}],docs:{'pi.live':{generation:{message:{content:[]}}}}};
  const next={entries:[{id:1},{id:2}],docs:{'pi.live':{}}};const result=reuseSnapshotEntries(previous,next);expect(result.docs['pi.live']).toEqual({});expect(result.entries).toHaveLength(2);
 });
+
+test('passive receipt rows advance and retry while unchanged cells and heartbeat snapshots retain identity',()=>{
+ const message={id:1,kind:'pi.assistant',data:{text:'unchanged'}};
+ const queued={id:2,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'input:1'}};
+ let previous={entries:[message,queued],docs:{}};
+ for(const phase of ['save-processing','save-completed','save-failed','save-queued','save-warning','save-cancelled']){
+  const next={entries:[JSON.parse(JSON.stringify(message)),{...queued,data:{...queued.data,phase}}],docs:{}};
+  const updated=reuseSnapshotEntries(previous,next);
+  expect(updated.entries[0]).toBe(message);
+  expect(updated.entries[1]).toBe(next.entries[1]);
+  expect(updated.entries[1].id).toBe(2);
+  expect(reuseSnapshotEntries(updated,JSON.parse(JSON.stringify(updated)))).toBe(updated);
+  previous=updated;
+ }
+});

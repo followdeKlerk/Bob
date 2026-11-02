@@ -40,6 +40,10 @@
       <activity android:name=".BobCaptureActivity" android:exported="false" android:screenOrientation="portrait" />
       <activity android:name=".BobInteractiveActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
       <receiver android:name=".BobNotificationReplyReceiver" android:exported="false" />
+      <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="${bobPushConfigured}" />
+      <service android:name=".BobMessagingService" android:exported="false">
+        <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+      </service>
       <service android:name=".BobLocationService" android:exported="false" android:foregroundServiceType="location" />
 
       <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">

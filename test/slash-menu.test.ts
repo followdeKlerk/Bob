@@ -22,13 +22,16 @@ test('authenticated slash menu advertises native delegation alongside Bro withou
   const before=await app.runtime.harness.snapshot(Library,app.runtime.library.id,ctx);
   const response=await request('library');assert.equal(response.status,200);
   const library=await response.json() as any;
-  assert.deepEqual(library.commands,[delegationMenuCommand]);
+  assert.deepEqual(library.commands.map((c:any)=>c.name),['delegation','learn','refine']);
+  assert.deepEqual(library.commands[0],delegationMenuCommand);
   assert.equal(library.skills.bro.enabled,true);
   assert.equal(Object.hasOwn(library.skills,'delegation'),false,'native commands are not counterfeit saved skills');
   assert.deepEqual(await app.runtime.harness.snapshot(Library,app.runtime.library.id,ctx),before,'menu metadata is a read-only host capability');
   const menu=pickerEntries(library),bro=menu.find(entry=>entry.name==='bro')!,delegation=menu.find(entry=>entry.name==='delegation')!;
   assert.equal(pickerRequest(bro),'Use the skill "bro". ');
   assert.equal(pickerRequest(delegation),'/delegation ');
+  assert.equal(pickerRequest(menu.find(entry=>entry.name==='learn')!),'/learn ');
+  assert.equal(pickerRequest(menu.find(entry=>entry.name==='refine')!),'/refine ');
   const created=await request('chats','POST',{title:'Command menu'});assert.equal(created.status,201);
   const {id}=await created.json() as {id:number};
   // The inserted draft reaches the real owner-command handler, without model credentials.

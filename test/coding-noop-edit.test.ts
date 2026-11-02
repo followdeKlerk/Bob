@@ -29,12 +29,13 @@ function fixture(t: TestContext, content = 'alpha\nbeta\ngamma\n') {
   };
 }
 
-test('coding extension wraps only edit execution and retains native preparation/schema/metadata', () => {
+test('coding extension configures image read and wraps edit while retaining other native registrations', () => {
   assert.equal(CodingTools.name, NativeCodingTools.name);
   assert.deepEqual(Object.keys(CodingTools), Object.keys(NativeCodingTools));
   assert.deepEqual(CodingTools.tools!.map(tool => tool.name), NativeCodingTools.tools!.map(tool => tool.name));
   for (const tool of NativeCodingTools.tools!) {
-    if (tool.name !== 'edit') assert.equal(CodingTools.tools!.find(candidate => candidate.name === tool.name), tool);
+    if (tool.name !== 'edit' && tool.name !== 'read') assert.equal(CodingTools.tools!.find(candidate => candidate.name === tool.name), tool);
+    if (tool.name === 'read') assert.deepEqual(CodingTools.tools!.find(candidate => candidate.name === 'read')!.parameters, tool.parameters);
   }
   assert.deepEqual({...edit, execute: native.execute}, native);
   assert.equal(edit.prepareArguments, native.prepareArguments);

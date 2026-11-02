@@ -79,6 +79,19 @@ if (bobSigningPath != null) {
     file(bobSigningPath).withInputStream { bobSigning.load(it) }
 }
 
+// Firebase's public Android app configuration lives outside the checkout. No
+// service-account credentials or google-services plugin are needed by the SDK.
+def firebaseConfigPath = System.getenv('BOB_FIREBASE_CONFIG') ?: "${System.getProperty('user.home')}/.local/share/bob/firebase/google-services.json"
+def firebaseConfigFile = file(firebaseConfigPath)
+def firebaseConfig = firebaseConfigFile.isFile() ? new groovy.json.JsonSlurper().parse(firebaseConfigFile) : null
+def firebaseClient = firebaseConfig?.client?.find { it.client_info?.android_client_info?.package_name == 'com.bobmobile' }
+def firebaseConfigured = firebaseConfig != null
+if (firebaseConfigured && (firebaseClient == null || !firebaseConfig.project_info?.project_id ||
+        !(firebaseConfig.project_info?.project_number ==~ /[0-9]+/) ||
+        !firebaseClient.client_info?.mobilesdk_app_id || !firebaseClient.api_key?.getAt(0)?.current_key)) {
+    throw new GradleException('Invalid Firebase Android app configuration for com.bobmobile')
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -87,10 +100,16 @@ android {
     namespace "com.bobmobile"
     defaultConfig {
         applicationId "com.bobmobile"
+        buildConfigField "boolean", "BOB_PUSH_CONFIGURED", firebaseConfigured.toString()
+        manifestPlaceholders.bobPushConfigured = firebaseConfigured.toString()
+        resValue "string", "google_app_id", firebaseConfigured ? firebaseClient.client_info.mobilesdk_app_id : ""
+        resValue "string", "gcm_defaultSenderId", firebaseConfigured ? firebaseConfig.project_info.project_number : ""
+        resValue "string", "google_api_key", firebaseConfigured ? firebaseClient.api_key[0].current_key : ""
+        resValue "string", "project_id", firebaseConfigured ? firebaseConfig.project_info.project_id : ""
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 113
-        versionName "0.3.110"
+        versionCode 121
+        versionName "0.3.118"
     }
     signingConfigs {
         release {
@@ -121,6 +140,8 @@ android {
 }
 
 dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")

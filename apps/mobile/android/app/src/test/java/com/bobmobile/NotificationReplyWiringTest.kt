@@ -79,9 +79,9 @@ class NotificationReplyWiringTest {
         assertTrue(reply.contains(".setActions().setRemoteInputHistory(arrayOf(text)).setOnlyAlertOnce(true)"))
         assertTrue(reply.indexOf("slot.put(\"completed\", true)") < reply.indexOf("acknowledgeInput(context, target, text)"))
         assertTrue(reply.contains("if (NotificationRuntime.viewing(target.identity, target.chat)) return"))
-        val presentation = source("ConversationNotifications")
-        assertTrue(presentation.contains("bob.notification.backend"))
-        assertTrue(presentation.contains("bob.notification.chat"))
+        // Only legacy status carries routing metadata; generic notices do not.
+        assertTrue(reply.contains("bob.notification.backend"))
+        assertTrue(reply.contains("bob.notification.chat"))
     }
     @Test fun retainedDraftCannotBeOrphanedByActionReplacementAndOldSendCannotRevertPairing() {
         val reply = source("BobNotificationReply")
@@ -104,7 +104,8 @@ class NotificationReplyWiringTest {
         val reply = source("BobNotificationReply")
         assertTrue(reply.contains("manager.notify(NotificationReplyPolicy.statusTag(target.id, history != null), 0, builder.build())"))
         val cleanup = source("ConversationNotifications")
-        assertEquals(2, Regex("NotificationReplyPolicy\\.isReplyStatusTag\\(it.tag\\)").findAll(cleanup).count())
+        assertFalse(cleanup.contains("NotificationReplyPolicy.isReplyStatusTag(it.tag)"))
+        assertTrue(cleanup.contains("AttentionNotifications.migrate(context)"))
         val outbox = source("BobOutbox")
         assertFalse(outbox.contains("reply-feedback:")) // Receipt removal must not delete unqueued input feedback.
     }

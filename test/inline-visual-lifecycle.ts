@@ -5,7 +5,7 @@ import {build} from 'esbuild';
 import {chromium,type Page} from 'playwright';
 
 // The actual Android host document/CSP, host bundle and measurement asset. The
-// emulator harness additionally checks native construction, bridge and layout.
+// Native View/gesture dispatch still requires device evidence; this is Chromium.
 const native=readFileSync('apps/mobile/android/app/src/main/java/com/bobmobile/BobInteractive.kt','utf8');
 const template=/val html = """([\s\S]*?)"""/.exec(native)![1];
 const measurement=readFileSync('apps/mobile/android/app/src/main/assets/inline-measure.js','utf8');
@@ -30,7 +30,7 @@ const waitFit=(page:Page)=>page.waitForFunction(()=>document.querySelector('ifra
 const waitFallback=(page:Page)=>page.waitForFunction(()=>document.querySelector('iframe')?.style.visibility==='hidden');
 export function registerInlineVisualLifecycle(){
 test('inline visual size and data lifecycle in the actual isolated host document',{timeout:120000},async t=>{
- const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
+ const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,minify:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
  const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true}),scriptErrors:string[]=[];
  t.after(async()=>{await browser.close();assert.deepEqual(scriptErrors,[],'host/fixture scripts must not fail silently');});
  async function open(html=compact,options:{measure?:string;inline?:boolean;resize?:boolean;visualData?:unknown}={}){
@@ -64,7 +64,7 @@ test('inline visual size and data lifecycle in the actual isolated host document
    await page.frameLocator('iframe').getByRole('button').click();assert.equal(await page.frameLocator('iframe').getByRole('button').textContent(),'Clicked');
    await page.waitForTimeout(3300);
    const stable=await state(page);assert.equal(stable.opacity,'1');assert.notEqual(stable.visibility,'hidden');assert.equal(stable.pointerEvents,'auto');assert.equal(stable.status,'');assert.deepEqual(await overflows(page),[]);
-   await child.evaluate(()=>{document.body.style.height='650px';});await waitFallback(page);
+   await child.evaluate(()=>{document.body.style.height='8193px';});await waitFallback(page);
    assert.deepEqual(await overflows(page),[{payload:{method:'overflow',reason:'content-overflow'},nonce:nativeNonce}]);
    await child.evaluate(()=>{document.body.style.height='100px';});await page.waitForTimeout(400);
    assert.equal((await state(page)).visibility,'hidden');assert.equal((await overflows(page)).length,1);
@@ -74,8 +74,10 @@ test('inline visual size and data lifecycle in the actual isolated host document
   const page=await open();
   try{
    await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
-   await child.evaluate(()=>{(window as any).localState='retained';document.body.style.height='320px';});
-   await page.waitForFunction(()=>innerHeight===320&&document.querySelector('iframe')?.style.opacity==='1');
+   await child.evaluate(()=>{(window as any).localState='retained';document.body.style.height='650px';});
+   await page.waitForFunction(()=>innerHeight===650&&document.querySelector('iframe')?.style.opacity==='1');
+   await child.evaluate(()=>{document.body.style.height='1200px';});
+   await page.waitForFunction(()=>innerHeight===1200&&document.querySelector('iframe')?.style.opacity==='1');
    await child.evaluate(()=>{document.body.style.height='180px';});
    await page.waitForFunction(()=>innerHeight===180&&document.querySelector('iframe')?.style.opacity==='1');
    assert.equal(await child.evaluate(()=>(window as any).localState),'retained');assert.deepEqual(await overflows(page),[]);
@@ -83,12 +85,16 @@ test('inline visual size and data lifecycle in the actual isolated host document
  });
  await t.test('exact viewport fits; oversized, internally scrolling or clipped content does not',async()=>{
   for(const [extra,fits] of [
-   ['<style>body{height:420px}</style>',true],['<style>body{height:650px}</style>',false],
+   ['<style>body{height:420px}</style>',420],['<style>body{height:650px}</style>',650],
+   ['<style>body{height:1200px}</style>',1200],['<style>body{height:8192px}</style>',8192],
+   ['<style>body{height:8193px}</style>',false],
+   ['<div style="width:400px">Too wide</div>',false],
+   ['<div style="position:absolute;left:-20px">Off left edge</div>',false],
    ['<div style="height:30px;overflow:auto"><div style="height:150px">Too tall</div></div>',false],
    ['<div style="height:30px;overflow:hidden"><div style="height:150px">Clipped</div></div>',false],
   ] as const){
    const page=await open(compact+extra);
-   try{if(fits){await waitFit(page);assert.equal((await state(page)).height,420);assert.deepEqual(await overflows(page),[]);}
+   try{if(fits){await waitFit(page);assert.equal((await state(page)).height,fits);assert.deepEqual(await overflows(page),[]);}
     else{await waitFallback(page);assert.equal((await overflows(page))[0]?.payload.reason,'content-overflow');}}
    finally{await page.close();}
   }
@@ -111,7 +117,7 @@ test('inline visual size and data lifecycle in the actual isolated host document
    await waitFit(page);const frame=page.frameLocator('iframe'),child=page.frames().find(frame=>frame!==page.mainFrame())!;
    assert.equal(await frame.locator('#live').textContent(),'Initial saved data');
    await frame.getByRole('textbox').fill('keep this');const initialHeight=(await state(page)).height;
-   await page.evaluate(()=>window.__bobVisualData!({revision:2,data:{text:'Live update',height:110},updatedAt:2}));
+   await page.evaluate(()=>window.__bobVisualData!({revision:2,data:{text:'Live update',height:1100},updatedAt:2}));
    await page.waitForFunction(height=>innerHeight>height&&document.querySelector('iframe')?.style.opacity==='1',initialHeight);
    assert.equal(await frame.locator('#live').textContent(),'Live update');assert.equal(await frame.getByRole('textbox').inputValue(),'keep this');
    assert.equal(await child.evaluate(()=>(window as any).initializations),1);
@@ -125,8 +131,108 @@ test('inline visual size and data lifecycle in the actual isolated host document
    assert.equal(await child.evaluate(()=>{try{parent.document.body;return false;}catch{return true;}}),true);
    assert.equal(await child.evaluate(async()=>{try{await fetch('https://example.com/');return false;}catch{return true;}}),true);
    assert.deepEqual(await overflows(page),[]);
-   await page.evaluate(()=>window.__bobVisualData!({revision:4,data:{text:'Too tall',height:650},updatedAt:4}));await waitFallback(page);
+   await page.evaluate(()=>window.__bobVisualData!({revision:4,data:{text:'Too tall',height:8193},updatedAt:4}));await waitFallback(page);
    assert.equal((await overflows(page))[0]?.payload.reason,'content-overflow');
+  }finally{await page.close();}
+ });
+ await t.test('delayed image intrinsic size grows then removal shrinks without scrolling or remount',async()=>{
+  const page=await open(compact+'<img id="late" style="display:block;max-width:100%">');
+  try{
+   await waitFit(page);const initial=(await state(page)).height,child=page.frames().find(frame=>frame!==page.mainFrame())!;
+   await page.waitForTimeout(350);
+   await child.evaluate(()=>{(document.getElementById('late') as HTMLImageElement).src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="1000"></svg>');});
+   await page.waitForFunction(()=>innerHeight>1000&&document.querySelector('iframe')?.style.opacity==='1');
+   const bounds=await child.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));
+   assert.equal(bounds.width,bounds.scrollWidth);assert.equal(bounds.height,bounds.scrollHeight);
+   await child.evaluate(()=>document.getElementById('late')!.remove());
+   await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1',initial);
+   assert.deepEqual(await overflows(page),[]);
+  }finally{await page.close();}
+ });
+ await t.test('rapid acknowledged oscillation and viewport-relative runaway are bounded',async()=>{
+  for(const runaway of [false,true]){
+   const page=await open();
+   try{
+    await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
+    const initialRequests=(await state(page)).requests.filter(request=>request.payload.method==='layout').length;
+    // Exercise the burst window deterministically while retaining real Chromium
+    // layout/ACKs. A heavily loaded build host can stretch 20 fast requests past
+    // 1500ms, legitimately invoking the continuous guard instead of the burst.
+    // Freeze only this page's guard clock; browser layout and timers remain real.
+    await page.evaluate("(()=>{const now=performance.now();Object.defineProperty(performance,'now',{value:()=>now});})()");
+    if(runaway){
+     await child.evaluate(()=>{document.body.style.height='calc(100vh + 10px)';});
+     await waitFallback(page);
+    }else{
+     for(let i=0;i<20;i++){
+      if((await overflows(page)).length)break;
+      const height=i%2?650:1200;
+      await child.evaluate(height=>{document.body.style.height=height+'px';},height);
+      await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1'||document.querySelector('iframe')?.style.visibility==='hidden',height);
+     }
+     await waitFallback(page);
+    }
+    const requests=(await state(page)).requests;
+    assert.ok(requests.filter(request=>request.payload.method==='layout').length-initialRequests<=16);
+    assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
+   }finally{await page.close();}
+  }
+ });
+ await t.test('slow continuously acknowledged oscillation still falls back within a bounded run',async()=>{
+  const page=await open();
+  try{
+   await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!,started=Date.now();
+   for(let i=0;i<24;i++){
+    if((await overflows(page)).length)break;
+    await page.waitForTimeout(350);const height=i%2?400:600;
+    await child.evaluate(height=>{document.body.style.height=height+'px';},height);
+    await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1'||document.querySelector('iframe')?.style.visibility==='hidden',height);
+   }
+   await waitFallback(page);assert.ok(Date.now()-started<10000);
+   assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
+  }finally{await page.close();}
+ });
+ await t.test('quiet gaps allow normal 2s data updates beyond the continuous-run deadline',async()=>{
+  const page=await open(compact+'<script>bobVisual.subscribe(({data})=>{if(data)document.body.style.height=data.height+"px";});</script>');
+  try{
+   await waitFit(page);
+   for(let i=0;i<4;i++){
+    await page.waitForTimeout(2000);const height=i%2?650:1200;
+    await page.evaluate(({height,revision})=>window.__bobVisualData!({revision,data:{height},updatedAt:revision}),{height,revision:i+1});
+    await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1',height);
+   }
+   assert.deepEqual(await overflows(page),[]);
+  }finally{await page.close();}
+ });
+ await t.test('spaced valid resizes are not charged against a lifetime burst counter',async()=>{
+  const page=await open();
+  try{
+   await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
+   for(let i=0;i<20;i++){
+    await page.waitForTimeout(180);const height=i%2?650:1200;
+    await child.evaluate(height=>{document.body.style.height=height+'px';},height);
+    await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1',height);
+   }
+   assert.deepEqual(await overflows(page),[]);assert.ok((await state(page)).requests.length>16);
+  }finally{await page.close();}
+ });
+ await t.test('stale viewport reports cannot promote, wrong keys cannot resize, and pagehide cleans up',async()=>{
+  const page=await open();
+  try{
+   await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
+   const key=/const key\s*=\s*"([^"]+)"/.exec((await state(page)).srcdoc)![1];
+   const before=(await state(page)).requests.length;
+   await child.evaluate(key=>{
+    parent.postMessage({bobLayout:'wrong-key',fits:true,contentHeight:1200,viewportWidth:innerWidth,viewportHeight:innerHeight,viewportFits:true},'*');
+    parent.postMessage({bobLayout:key,fits:false,contentHeight:9000,viewportWidth:innerWidth,viewportHeight:innerHeight+100,viewportFits:false},'*');
+   },key);
+   await page.waitForTimeout(80);assert.equal((await state(page)).requests.length,before);
+   await child.evaluate(()=>dispatchEvent(new Event('resize')));await waitFit(page);assert.deepEqual(await overflows(page),[]);
+   await page.evaluate(()=>dispatchEvent(new Event('pagehide')));
+   await child.evaluate(()=>{dispatchEvent(new Event('pagehide'));document.body.style.height='1200px';dispatchEvent(new Event('resize'));});
+   const reports=(await state(page)).reports.length;
+   await page.waitForTimeout(3300);
+   assert.equal((await state(page)).reports.length,reports);assert.equal((await state(page)).requests.length,before);
   }finally{await page.close();}
  });
  await t.test('fullscreen receives data without an inline measurement gate',async()=>{

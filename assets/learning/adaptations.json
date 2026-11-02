@@ -1,0 +1,128 @@
+[
+  {
+    "reason": "Bob's two native memory targets are Durable stores, not upstream home-directory files.",
+    "from": "USER.md (memory tool, target='user')",
+    "to": "User profile (memory tool, target='user')"
+  },
+  {
+    "from": "MEMORY.md (memory tool, target='memory')",
+    "to": "Environment memory (memory tool, target='memory')"
+  },
+  {
+    "from": "both files",
+    "to": "both stores"
+  },
+  {
+    "from": "USER.md only",
+    "to": "the user memory target only"
+  },
+  {
+    "from": "a memory file",
+    "to": "a memory store"
+  },
+  {
+    "reason": "Bob loads skills through explicit requests and native skill_view, not dynamic slash-command aliases.",
+    "from": "via /skill-name",
+    "to": "via explicit skill requests"
+  },
+  {
+    "reason": "Native LearningWorker background reviews enforce fresh exact-target reads; scope the upstream enforcement statement to those workers.",
+    "from": "Read-before-write (ENFORCED — skill_manage refuses otherwise):",
+    "to": "Read-before-write (ENFORCED in background reviews — skill_manage refuses otherwise):"
+  },
+  {
+    "reason": "The native deterministic curator performs lifecycle maintenance, not semantic consolidation of overlapping instructions.",
+    "from": "the background curator handles consolidation at scale.",
+    "to": "the deterministic background curator handles lifecycle maintenance; flag overlaps for consolidation."
+  },
+  {
+    "from": "the background curator handles consolidation.",
+    "to": "the deterministic background curator handles lifecycle maintenance; flag overlaps for consolidation.",
+    "reason": "The native deterministic curator performs lifecycle maintenance, not semantic consolidation of overlapping instructions."
+  },
+  {
+    "reason": "Use Bob's native author identity and metadata namespace; do not discover host-user identity.",
+    "from": "Hermes",
+    "to": "Bob"
+  },
+  {
+    "from": "metadata.hermes.tags",
+    "to": "metadata.bob.tags"
+  },
+  {
+    "reason": "Keep the upstream authoring standards as guidance, not a claim of enforced maintainer/tool policy.",
+    "from": "These are the same\nHARDLINE rules a maintainer enforces in review:",
+    "to": "These are authoring\nguidelines, not tool validation or approval gates:"
+  },
+  {
+    "reason": "Replace the entire upstream tool-framing block with supported Bob tools; do not advertise unavailable image/audio/search/extraction tools or prohibit shell search when that is the native capability.",
+    "from": "Bob-tool framing (this is what makes it a skill, not shell docs):\n- Frame running scripts as \"invoke through the `terminal` tool\".\n- Reference Bob tools by name in backticks: `terminal`, `read_file`,\n  `write_file`, `search_files`, `patch`, `web_extract`, `web_search`,\n  `vision_analyze`, `browser_navigate`, `delegate_task`, `image_generate`,\n  `text_to_speech`, `cronjob`, `memory`, `skill_view`, `execute_code`.\n- Do NOT name shell utilities the agent already has wrapped: say `read_file`\n  not cat/head/tail, `search_files` not grep/rg/find/ls, `patch` not sed/awk,\n  `web_extract` not curl-to-scrape, `write_file` not echo>file or heredocs.\n- Third-party CLIs (ffmpeg, gh, an SDK) are fine inside a script file, but the\n  prose still frames them as \"invoke through the `terminal` tool\". If the\n  skill needs an MCP server, name it and document its setup in Prerequisites.",
+    "to": "Bob-tool framing (this is what makes it a skill, not shell docs):\n- Frame running scripts as \"invoke through the `bash` tool\".\n- Reference available Bob tools by name in backticks: `bash`, `read`,\n  `write`, `edit`, `web_search`, `browser`, `subagent`, `memory`,\n  `skills_list`, `skill_view`, `skill_manage`.\n- Use `read` for file contents, `write` for whole files, `edit` for exact\n  replacements, and `bash` with search utilities for file discovery/search.\n  Use `browser` action=\"navigate\" for a URL and action=\"text\" for page text.\n- Third-party CLIs (ffmpeg, gh, an SDK) are fine inside a script file, but the\n  prose still frames them as \"invoke through the `bash` tool\". If the\n  skill needs an MCP server, name it and document its setup in Prerequisites."
+  },
+  {
+    "reason": "The /learn gather step uses native coding and browser capabilities.",
+    "from": "`read_file`/`search_files` for local files or directories, `web_extract` for URLs",
+    "to": "`read`/`bash` for local files or directories, `browser` action=\"navigate\" for URLs"
+  },
+  {
+    "reason": "Explicitly name the new native skill-list capability.",
+    "from": "First check the available skills for one covering this source or topic.",
+    "to": "First check the available skills with `skills_list` for one covering this source or topic."
+  },
+  {
+    "reason": "Do not mention an unavailable upstream execution tool in a negative-claim example.",
+    "from": "cannot use Y from execute_code",
+    "to": "cannot use Y from tool scripting"
+  },
+  {
+    "reason": "Supporting scripts are native Durable text; materialize them before shell execution rather than pretending a skill-relative filesystem path exists.",
+    "from": "statically re-runnable actions the skill can invoke directly",
+    "to": "statically re-runnable actions to load with skill_view, materialize with write, then invoke through bash"
+  },
+  {
+    "from": "`scripts/<name>.<ext>` for statically re-runnable actions (verification, fixture generators, probes).",
+    "to": "`scripts/<name>.<ext>` for statically re-runnable actions (verification, fixture generators, probes): load with skill_view, materialize with write, then invoke through bash."
+  },
+  {
+    "from": "referenced from SKILL.md by relative path — not\n  inlined for the agent to re-type every run.",
+    "to": "referenced from SKILL.md by relative path — not\n  inlined for the agent to re-type every run. Supporting files live in native\n  Durable state, not the backend filesystem: load scripts with `skill_view`,\n  materialize them with `write`, then invoke through `bash`."
+  },
+  {
+    "from": "Bob' background skill CURATOR",
+    "to": "Bob's background skill CURATOR",
+    "reason": "Bob-native curator identity."
+  },
+  {
+    "from": "(`skills.external_dirs`)",
+    "to": "(externally owned skill packages)"
+  },
+  {
+    "from": "Archiving (moving the skill's directory into ~/.hermes/skills/.archive/)",
+    "to": "Archiving (marking the complete native skill package archived)"
+  },
+  {
+    "from": "hermes-config-*, hermes-dashboard-*",
+    "to": "bob-config-*, bob-dashboard-*"
+  },
+  {
+    "from": "`hermes curator rollback`",
+    "to": "`skill_manage action=rollback`"
+  },
+  {
+    "from": "3c. DO NOT archive or prune any skill marked `cron=yes` in the candidate list. A cron job depends on it and will fail to load it on its next run. You MAY still consolidate it into an umbrella — but only because the curator rewrites cron job skill references to follow consolidations; never simply prune it.",
+    "to": "3c. Bob's scheduled checks do not bind native skill packages. This pass does not rewrite schedules or their task text; do not claim otherwise.",
+    "reason": "Bob schedules have no upstream cron skill-reference field to migrate."
+  },
+  {
+    "from": "`absorbed_into` drives cron-job skill-reference migration — guessing from your YAML summary after the fact is fragile.",
+    "to": "`absorbed_into` records the verified native forwarding target; the ledger, not the YAML summary, is the mutation record."
+  },
+  {
+    "from": "every filesystem mutation goes through skill_manage",
+    "to": "every native skill mutation goes through skill_manage"
+  },
+  {
+    "from": "Every skill you moved to .archive/",
+    "to": "Every native skill package you archived"
+  }
+]

@@ -18,9 +18,12 @@
         <!-- Edge-to-edge drawer content supplies its own fade behind the controls;
              do not add Android's separate opaque navigation contrast scrim. -->
         <item name="android:enforceNavigationBarContrast">false</item>
-        <item name="android:textColorPrimary">#f4f4f5</item>
-        <item name="android:textColorSecondary">#f4f4f5</item>
-        <item name="colorAccent">#f4f4f5</item>
+        <item name="android:textColorPrimary">#e8e0d2</item>
+        <item name="android:textColorSecondary">#e8e0d2</item>
+        <item name="colorAccent">#e8e0d2</item>
+        <item name="android:colorAccent">#e8e0d2</item>
+        <item name="colorControlNormal">#e8e0d2</item>
+        <item name="android:colorControlNormal">#e8e0d2</item>
         <item name="colorPrimary">#000000</item>
         <item name="colorPrimaryDark">#000000</item>
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>

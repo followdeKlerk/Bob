@@ -1,3 +1,6 @@
+import {createLearning} from './learning.js';
+import {createPush} from './push.js';
+import {watchPushMaintenance} from './push-maintenance.js';
 import {createEmailRead} from './email-read.js';
 import {createSchedules} from './schedules.js';
 import {withDelegationPeerPolicy} from './peer-policy.js';
@@ -53,6 +56,8 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   const releaseOwner=acquireOwner(state.dir);
   let disposeCustom=()=>{};
   let closeMemory=async()=>{};
+  let closeLearning=async()=>{};
+  let closePush=async()=>{};
   let closeCodemode=async()=>{};
   let closeWeb=async()=>{};
   let disposeInteractive=()=>{};
@@ -62,7 +67,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const errors:unknown[]=[];
     // Join native invocations before destroying the VM host. Attempt every cleanup,
     // even on startup failure or when another resource's close throws.
-    for(const dispose of [disposeInteractive,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
+    for(const dispose of [disposeInteractive,closePush,closeLearning,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
       try {await dispose();} catch(error){errors.push(error);}
     }
     if(errors.length)throw new AggregateError(errors,'Runtime cleanup failed');
@@ -103,11 +108,12 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       :requestPeer(state,id,action,request,signal)}));
     const custom=await loadCustomModules(state);disposeCustom=custom.dispose;
     const scheduling=createSchedules(()=>harness);
+    const learning=createLearning(()=>harness,()=>libraryId);
     const email=createEmailRead(()=>harness);
     const diagnostics=createDiagnosticExtension(state,async(id,context)=>(await harness.conversation(id as ConversationId,context))??undefined);
     // Host-composed custom extension: existing resources selections gain the tool,
     // without changing persisted module identities or any existing task definition.
-    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[],...scheduling.extension.tools??[],...email.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[],...scheduling.extension.sections??[],...email.sections??[]],tasks:[...resources.tasks??[],...scheduling.extension.tasks??[]]});
+    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[],...scheduling.extension.tools??[],...email.tools??[],...learning.extension.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[],...scheduling.extension.sections??[],...email.sections??[],...learning.extension.sections??[]],tasks:[...resources.tasks??[],...scheduling.extension.tasks??[],...learning.extension.tasks??[]],hooks:[...resources.hooks??[],...learning.extension.hooks??[]]});
     const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:coding.extension,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
     // An explicit owner-managed config provisions this newly bundled module once.
     if(memory.config.enabled&&!state.get<boolean>('hindsightProvisioned')){
@@ -149,10 +155,20 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     if(options.resume!==false&&registry.snapshot().extension(memory.extension.name)){
       const attached=await memory.attach(harness,storage,state.id,{selectExisting:true});closeMemory=attached.close;
     }
+    let learningAttached:Awaited<ReturnType<typeof learning.attach>>|undefined;
+    if(options.resume!==false&&registry.snapshot().extension('bob.resources')){
+      learningAttached=await learning.attach(storage);closeLearning=learningAttached.close;
+    }
+    const push=await createPush(state,harness);
+    closePush=()=>push.close();
+    const stopPushMaintenance=push.enabled?watchPushMaintenance(state,key=>push.attention(key,'update')):()=>{};
+    closePush=async()=>{stopPushMaintenance();await push.close();};
     if(options.resume!==false){await scheduling.recover();harness.resume();}
     return {
       harness,
+      push,
       scheduling,
+      learning:{...learning,flush:async()=>{await learningAttached?.flush();}},
       library,
       interactive,
       delegation,

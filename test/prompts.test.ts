@@ -21,6 +21,6 @@ test('native prompt resolution separates defaults, conversation overrides, templ
    assert.match(seen[0],/BACKEND_DEFAULT_MARKER/);
    assert.doesNotMatch(seen[1],/BACKEND_DEFAULT_MARKER/);assert.match(seen[1],/CONVERSATION_OVERRIDE_MARKER/);
    assert.doesNotMatch(seen[2],/BACKEND_DEFAULT_MARKER/);
-   for(const prompt of seen){assert.match(prompt,/ENABLED_SKILL_MARKER/);assert.doesNotMatch(prompt,/DISABLED_SKILL_MARKER|TEMPLATE_NOT_SYSTEM_MARKER/);}
+   for(const prompt of seen){assert.match(prompt,/Enabled/);assert.match(prompt,/skill_view/);assert.doesNotMatch(prompt,/ENABLED_SKILL_MARKER|DISABLED_SKILL_MARKER|TEMPLATE_NOT_SYSTEM_MARKER/);}
  } finally {await runtime.close();state.close();}
 });

@@ -3,10 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source=apps/mobile/assets/bob-logo.png
 res=apps/mobile/android/app/src/main/res
+warm_white='#e8e0d2'
 # Cropped transparent wordmark for in-app overlays; never place the black icon
 # canvas over scrolling content.
 magick "$source" -colorspace gray -threshold 35% -alpha off \
-  \( +clone -fill white -colorize 100 \) +swap -compose CopyOpacity -composite \
+  \( +clone -fill "$warm_white" -colorize 100 \) +swap -compose CopyOpacity -composite \
   -trim +repage -resize 304x144 PNG32:apps/mobile/assets/bob-wordmark.png
 for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
   density=${spec%:*}; size=${spec#*:}
@@ -23,7 +24,7 @@ done
 mkdir -p "$res/drawable-nodpi" "$res/mipmap-anydpi-v26" "$res/mipmap-anydpi-v33"
 magick "$source" -resize 192x192 "$res/drawable-nodpi/bob_notification_logo.png"
 # 108dp adaptive foreground; the wordmark stays inside the 66dp safe zone.
-magick "$source" -colorspace gray -threshold 35% -alpha copy -fill white -colorize 100 \
+magick "$source" -colorspace gray -threshold 35% -alpha copy -fill "$warm_white" -colorize 100 \
   -resize 288x288 -gravity center -background none -extent 432x432 "$res/drawable-nodpi/bob_launcher_foreground.png"
 for name in ic_launcher ic_launcher_round; do
 cat > "$res/mipmap-anydpi-v26/$name.xml" <<'XML'

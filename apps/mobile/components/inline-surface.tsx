@@ -5,19 +5,21 @@ import * as Keychain from 'react-native-keychain';
 import {Maximize2} from 'lucide-react-native';
 import {ActionIcon,ActionRow} from './message-actions';
 import {colors} from '../theme';
+import {MAX_INLINE_HEIGHT,initialInlineHeight,rememberInlineHeight,forgetInlineHeight} from '../inline-visual-policy';
 const NativeSurface=requireNativeComponent<ViewProps&{session:string}>('BobInlineSurface');
 type Backend={backendId:string;endpoint:string};
 type Props={backend:Backend;surface:{id:string;conversationId:number;title:string;kind:string;presentation?:'inline'|'fullscreen'};onExpand:()=>void};
 function Content({backend,surface,onOverflow}:{backend:Backend;surface:Props['surface'];onOverflow:()=>void}) {
  const [handle,setHandle]=useState<string>();const [error,setError]=useState('');
- const [height,setHeight]=useState(420),[dataStatus,setDataStatus]=useState('');
+ const scope={backendId:backend.backendId,conversationId:surface.conversationId,id:surface.id};
+ const [height,setHeight]=useState(()=>initialInlineHeight(scope)),[dataStatus,setDataStatus]=useState('');
  useEffect(()=>{
   let active=true;let prepared:string|undefined;
-  setHandle(undefined);setError('');setHeight(420);setDataStatus('');
+  setHandle(undefined);setError('');setHeight(initialInlineHeight(scope));setDataStatus('');
   const matches=(event:any)=>active&&prepared!==undefined&&event.session===prepared&&event.backendId===backend.backendId&&event.conversationId===surface.conversationId&&event.id===surface.id;
-  const listener=DeviceEventEmitter.addListener('BobSurfaceOverflow',event=>{if(matches(event))onOverflow();});
+  const listener=DeviceEventEmitter.addListener('BobSurfaceOverflow',event=>{if(matches(event)){forgetInlineHeight(scope);onOverflow();}});
   const layout=DeviceEventEmitter.addListener('BobSurfaceLayout',event=>{
-   if(matches(event)&&Number.isInteger(event.height)&&event.height>=1&&event.height<=420)setHeight(event.height);
+   if(matches(event)&&Number.isInteger(event.height)&&event.height>=1&&event.height<=MAX_INLINE_HEIGHT){rememberInlineHeight(scope,event.height);setHeight(event.height);}
   });
   const data=DeviceEventEmitter.addListener('BobSurfaceDataStatus',event=>{if(matches(event)&&typeof event.message==='string')setDataStatus(event.message.slice(0,160));});
   void (async()=>{

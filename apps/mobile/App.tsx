@@ -16,6 +16,7 @@ import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, 
 import {colors} from './theme';
 import {surfaceAnchors} from './surface-placement';
 import {InlineSurface} from './components/inline-surface';
+import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {SettingsGroup,SettingsRow,sectionStyles} from './components/section-ui';
 import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks} from 'lucide-react-native';
@@ -49,7 +50,7 @@ import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults,type ToolMessage} from './tool-results';
-import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,compactMemoryStatuses} from './chat-presentation';
+import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -100,7 +101,7 @@ function Button({label,onPress,disabled=false,accessibilityLabel}: {label:string
   return <KitButton variant="secondary" accessibilityLabel={accessibilityLabel??label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={styles.button}><KitText style={styles.buttonText}>{label}</KitText></KitButton>;
 }
 function IconButton({icon:Icon,label,onPress,disabled=false,primary=false}:{icon:typeof Plus;label:string;onPress:()=>void;disabled?:boolean;primary?:boolean}) {
- return <KitButton variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={{width:48,height:48,borderRadius:24,backgroundColor:'transparent',opacity:disabled?0.4:1}}>{primary?<View pointerEvents="none" style={{width:32,height:32,borderRadius:16,backgroundColor:'#ffffff',alignItems:'center',justifyContent:'center'}}><Icon size={Icon===Square?14:22} color="#000000" fill={Icon===Square?'#000000':'none'} strokeWidth={2.6}/></View>:<Icon size={22} color={colors.foreground}/>}</KitButton>;
+ return <KitButton variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={{width:48,height:48,borderRadius:24,backgroundColor:'transparent',opacity:disabled?0.4:1}}>{primary?<View pointerEvents="none" style={{width:32,height:32,borderRadius:16,backgroundColor:colors.accent,alignItems:'center',justifyContent:'center'}}><Icon size={Icon===Square?14:22} color="#000000" fill={Icon===Square?'#000000':'none'} strokeWidth={2.6}/></View>:<Icon size={22} color={colors.foreground}/>}</KitButton>;
 }
 function Disclosure({label,children}:{label:string;children:React.ReactNode}) {
  const [open,setOpen]=useState(false);
@@ -111,11 +112,11 @@ function textOf(value: unknown): string {
   if (Array.isArray(value))
     return value
       .map(v =>
-        v.type === 'text'
+        v?.type === 'text'
           ? v.text
-          : v.type === 'toolCall'
+          : v?.type === 'toolCall'
           ? `Tool: ${v.name}\n${JSON.stringify(v.arguments)}`
-          : v.type === 'thinking'
+          : v?.type === 'thinking'
           ? ''
           : JSON.stringify(v),
       )
@@ -332,6 +333,7 @@ function Main() {
       const list = JSON.parse(
         (await AsyncStorage.getItem('backends')) ?? '[]',
       ) as Backend[];
+      try{await NativeModules.BobNotifications.syncPushBackends?.(list.map(b=>b.backendId));}catch{/* A push scheduling failure must never block app hydration. */}
       setBackends(list);
       setNotifyEnabled((await AsyncStorage.getItem('notification-opt-in')) !== 'false');
       const last = JSON.parse(
@@ -540,7 +542,7 @@ function Main() {
     const foregroundOnly=files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
     const item:OutgoingMessage={id:op,scope:current,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
       message:Message.parse({requestId:op,...(answer?{questionId:answer.questionId}:{}),text:answer?.text??(draft.trim()?draft:'Please look at the attached file'+(files.length===1?'.':'s.')),mode,allowSubagents:true,
-        ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:420},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
+        ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:visualDisplayHeight(view?.docs?.['bob.display'])},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
     // Publish the ordinary chat bubble and clear the composer before any await.
     const saved=outbox.add(item);
     // Dispatch to native before awaiting JS storage: locking may suspend JS immediately.
@@ -779,6 +781,9 @@ function Main() {
     }
     return grouped;
   },[surfaces,parentLinked.surfaceAnchors,backend?.backendId,chat]);
+  // Legacy/unloaded anchors stay reachable without becoming a permanent row
+  // beneath every new reply in the inverted chat list.
+  const unlinkedSurfaces=surfaces.filter(item=>item.backendId===backend?.backendId&&item.value.conversationId===chat&&!parentLinked.surfaceAnchors.has(item.value.id.toLowerCase()));
   function transcript(v?: Snapshot,isChild=false) {
     const history=!isChild?parentHistory:childHistory,stored=history.page;
     const follow=!isChild?parentFollow:childFollow;
@@ -822,10 +827,6 @@ function Main() {
 
         ListHeaderComponent={<View style={{gap:CHAT_CONTENT_GAP}} onLayout={event=>{if(!isChild)setVisualWidth(event.nativeEvent.layout.width);}}>
           {!isChild && !!surfaceError && <Text style={styles.caption}>{surfaceError}</Text>}
-          {!isChild&&surfaces.some(item=>item.backendId===backend?.backendId&&item.value.conversationId===chat&&!linked.surfaceAnchors.has(item.value.id.toLowerCase()))&&<Disclosure label="Other interactive surfaces">
-            <Text style={styles.caption}>These surfaces are not linked to a loaded tool result.</Text>
-            {surfaces.filter(item=>item.backendId===backend?.backendId&&item.value.conversationId===chat&&!linked.surfaceAnchors.has(item.value.id.toLowerCase())).map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>run(()=>openSurface(item))}/>)}
-          </Disclosure>}
           {/* Live text streams here. Tool boxes render only in their recorded
               entry slot below, so they never migrate from this transient header. */}
           {v?.docs['pi.live']?.generation?.message && !isRecordedToolGeneration(linked.rawEntries,v.docs['pi.live'].generation.message.content) && <ModelContent speakable={false} showTools={false} value={v.docs['pi.live'].generation.message.content} results={linked.results}/>}
@@ -838,7 +839,7 @@ function Main() {
         </View>}
         renderItem={({ item }) => {
           const attribution=inputAttribution(item),user=attribution.owner;
-          const memoryStatus=memoryStatusText(item);
+          const memoryStatus=memoryStatusText(item),learningStatus=learningStatusText(item);
           const peerAdmission=item.kind==='bob.peer-admission';
           const artifact=(item.kind==='bob.artifact'||item.kind==='bob.file')&&Attachment.safeParse(item.data).success;
           const fallback=()=>textOf(item.data)||'Stored event has no displayable text.';
@@ -849,7 +850,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:learningStatus!==undefined?<Text selectable style={styles.message}>{learningStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -881,7 +882,7 @@ function Main() {
     </SafeAreaView>
   );
   return (
-    <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={[styles.root,{backgroundColor:keyboardInset>0?colors.background:'#ffffff'}]}>
+    <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={[styles.root,{backgroundColor:keyboardInset>0?colors.background:colors.navigationSurface}]}>
       {/* BottomTabs draws the continuous rounded lower edge; rounding here would cut its neck. */}
       <View testID="rounded-app-surface" style={[styles.content,{backgroundColor:colors.background,overflow:'hidden',paddingBottom:Math.max(0,keyboardInset-insets.bottom)}]}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle="light-content" />}
@@ -1090,7 +1091,7 @@ function Main() {
                   const enabled=!notifyEnabled;NativeModules.BobNotifications.setReplyNotifications?.(enabled);await AsyncStorage.setItem('notification-opt-in',String(enabled));setNotifyEnabled(enabled);
                 })}/>
                 <SettingsRow title="Notification settings" label="Android notification settings" icon={Bell} onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
-                <Disclosure label="About notifications"><Text style={styles.caption}>Replies, questions and schedule alerts are grouped by conversation; install-ready updates stay separate. Manual Reply queues a text message without opening the chat; structured questions open in chat. No generated reply suggestions. Reply previews are silent by default. Android schedules background checks and may delay delivery; force-stop pauses them. Automatic location has its own visible service notification.</Text></Disclosure>
+                <Disclosure label="About notifications"><Text style={styles.caption}>Replies, questions and schedule alerts, plus updates, share one generic attention alert without message previews or Reply actions. Tap it to open Bob. Existing reply input and delivery feedback stay separate until resolved. Android schedules background checks and may delay delivery; push delivery can also be delayed, and force-stop pauses both. Automatic location has its own visible service notification.</Text></Disclosure>
               </SettingsGroup>
               <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
@@ -1170,6 +1171,10 @@ function Main() {
                 <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
                 {parentHistory.page&&<Text style={styles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
               </Disclosure>
+              {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
+                <Text style={styles.caption}>Older surfaces without a link in the loaded history.</Text>
+                {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
+              </Disclosure>}
               {busy&&<Button label="Steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
               <Button label="Send on next" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
               <Button label="Build & install" disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>

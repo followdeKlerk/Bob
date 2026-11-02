@@ -125,7 +125,7 @@ test('existing coding selections gain codemode without rewriting tools/modelTool
 
 test('official response mechanics: nested image read is text-only, explicit image output reaches model, and failures remain errors',{timeout:20000},async()=>{
  const f=fixture(),rt=await openRuntime(f.state,f.models);
- const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB1sAAAAASUVORK5CYII=';
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
  try{
   const c=await chat(rt);writeFileSync(join(f.dir,'pixel.png'),Buffer.from(png,'base64'));
   const result=await execute(f,c,`text({nestedImage:await tools.read({path:'pixel.png'})});image({type:'image',mimeType:'image/png',data:${JSON.stringify(png)}});`);

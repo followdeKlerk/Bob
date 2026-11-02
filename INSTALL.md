@@ -72,6 +72,8 @@ npm ci
 ../../node_modules/.bin/tsc --noEmit
 ```
 
+Optional FCM push setup is described in [operations](OPERATIONS.md#firebase-push-delivery). Supply the external Firebase Android configuration before building if you want push; without it, Bob retains polling-only notifications.
+
 Configure your Android SDK locally through `ANDROID_HOME` or ignored `android/local.properties`. For a signed release, set `BOB_SIGNING_PROPERTIES` to an absolute path to a private properties file containing `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. `storeFile` should be an absolute keystore path. Create and retain your own signing identity using Android's signing tools; keep the properties file and keystore outside the checkout with restricted permissions. Never commit them.
 
 ```sh

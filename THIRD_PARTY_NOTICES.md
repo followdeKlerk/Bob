@@ -55,3 +55,33 @@ SOFTWARE.
 ## Nordwand Mono
 
 Bob bundles unmodified [Nordwand Mono 1.4.0](https://github.com/tywr/Nordwand-Mono/releases/tag/1.4.0), Copyright (c) 2026, Tanguy VIVIER, under the SIL Open Font License 1.1. The [full font licence](apps/mobile/android/app/src/main/assets/fonts/OFL.txt) is shipped in the Android app alongside the web fonts. [Provenance and SHA-256 checksums](apps/mobile/android/app/src/main/assets/fonts/README.md) identify the bundled upstream TTF and WOFF2 files. No font is downloaded at runtime.
+
+## Learning review, `/learn` prompts and memory threat patterns
+
+Bob's learning review prompts, `/learn` authoring prompt, and `/refine` focus suffix are adapted from [Nous Research's Hermes Agent, commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e`](https://github.com/NousResearch/hermes-agent/tree/bf0203a794a07aac3ff764972ab9087baa4e4f4e), specifically `agent/background_review.py`, `agent/learn_prompt.py`, and `agent/curator.py`. The latter credits the knowledge-base layout to [virgiliojr94/book-to-skill](https://github.com/virgiliojr94/book-to-skill). Bob uses native Pi Durable memory/skill resources and coding/browser tools, not the upstream runtime. These are prompt instructions, not tool enforcement or approval gates.
+
+[Provenance, adaptation details and reproducible AST extraction](assets/learning/README.md) include byte-identical pinned source files, original regression tests, the upstream license, SHA-256 digests and Git blob IDs. The upstream agent/runtime code is retained for provenance only and is never imported or executed by the Bob runtime.
+
+Bob also adapts the pinned `tools/threat_patterns.py` strict scanner for native curated-memory writes. [Scanner provenance and parity checks](assets/learning/memory-threats/README.md) retain original source bytes, hashes, Git blob IDs and the same MIT licence. Development differential tests execute only the vendored standalone standard-library Python scanner, not the Hermes agent/runtime. Bob runtime scanning is native TypeScript.
+
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

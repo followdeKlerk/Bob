@@ -1,0 +1,9 @@
+https://EXAMPLE.com/menu	https://example.com/menu
+https://bücher.example/	https://xn--bcher-kva.example/
+https://example.com./	https://example.com./
+https://localhost/	https://localhost/
+https://123/	https://0.0.0.123/
+https://[::1]:8443/	https://[::1]:8443/
+https://[::ffff:192.0.2.1]/	https://[::ffff:c000:201]/
+https://example.com/[x]|^?q={x}`#a|b	https://example.com/%5Bx%5D%7C%5E?q=%7Bx%7D%60#a%7Cb
+https://example.com/%2F%23%26%25?q=%2F%23%26%25#%2F%23%26%25	https://example.com/%2F%23%26%25?q=%2F%23%26%25#%2F%23%26%25

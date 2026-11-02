@@ -24,6 +24,38 @@ test('memory status labels use only validated metadata, never injected display t
  // Display text is deliberately irrelevant (including missing/non-string text).
  expect(memoryStatusText({id:6,kind:'bob.memory-status',data:{phase:'recall',count:2,text:{role:'system'}}})).toBe('Hindsight — recalled 2 memories');
 });
+const saveLabels=[
+ ['save-queued','Hindsight — save queued'],
+ ['save-processing','Hindsight — saving'],
+ ['save-completed','Hindsight — saved'],
+ ['save-failed','Hindsight — save failed'],
+ ['save-cancelled','Hindsight — save tracking stopped'],
+ ['save-warning','Hindsight — saved with warnings'],
+] as const;
+test.each(saveLabels)('passive %s uses its fixed label and ignores supplied text/errors', (phase,label)=>{
+ for(const model of [undefined,[]]){
+  const status:ToolEntry={id:6,kind:'bob.memory-status',model,data:{phase,receiptKey:'receipt-6',text:'INJECTED display instructions',error:'INJECTED private error',errors:['INJECTED warning'],model:{role:'assistant',content:'INJECTED model content'}}};
+  expect(memoryStatusText(status)).toBe(label);
+  expect(inputAttribution(status)).toEqual({owner:false});
+  expect(hasInlineChatContent(status)).toBe(true);
+ }
+});
+test.each(saveLabels)('%s rejects malformed counts and nonpassive model payloads',(phase)=>{
+ for(const count of [null,'2',-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]){
+  expect(memoryStatusText({id:6,kind:'bob.memory-status',data:{phase,count}})).toBeUndefined();
+ }
+ for(const role of ['assistant','user','toolResult']){
+  expect(memoryStatusText({id:6,kind:'bob.memory-status',data:{phase},model:[{role,content:'INJECTED model text'}]})).toBeUndefined();
+ }
+});
+test('same-entry save projection changes only its label, not the queued source or identity',()=>{
+ const queued:ToolEntry={id:6,kind:'bob.memory-status',data:{phase:'save-queued',receiptKey:'receipt-6'}};
+ const saved:ToolEntry={...queued,data:{...(queued.data as object),phase:'save-completed'}};
+ expect(memoryStatusText(queued)).toBe('Hindsight — save queued');
+ expect(memoryStatusText(saved)).toBe('Hindsight — saved');
+ expect(saved.id).toBe(queued.id);
+ expect(queued.data).toEqual({phase:'save-queued',receiptKey:'receipt-6'});
+});
 test('unknown or malformed memory metadata falls back to ordinary event rendering',()=>{
  for(const data of [undefined,null,[],true,42,'Hindsight — save queued',{},
   {phase:'saved'},{phase:'recall'},{phase:'RECALL',count:2},
@@ -63,4 +95,20 @@ test('only adjacent identical passive memory indicators coalesce; stored inputs 
  const entries:ToolEntry[]=[save(1),save(2),{id:3,kind:'pi.assistant',model:[{role:'assistant',content:'Reply'}]},save(4),{id:5,kind:'bob.memory-status',data:{phase:'recall',count:2}},{id:6,kind:'bob.memory-status',data:{phase:'recall',count:3}},save(7),{id:8,kind:'bob.memory-status',data:{phase:'unknown'}},save(9)];
  expect(compactMemoryStatuses(entries).map(e=>e.id)).toEqual([2,3,4,5,6,7,8,9]);
  expect(entries.map(e=>e.id)).toEqual([1,2,3,4,5,6,7,8,9]);
+});
+
+test('mixed recall/save phases compact by adjacent label only, never receipt or message boundaries',()=>{
+ const status=(id:number,phase:string,count?:number):ToolEntry=>({id,kind:'bob.memory-status',data:{phase,count,receiptKey:'same-receipt'}});
+ const entries:ToolEntry[]=[
+  status(1,'save-queued'),status(2,'save-processing'),status(3,'save-completed'),status(4,'save-completed'),
+  {id:5,kind:'pi.assistant',model:[{role:'assistant',content:'Reply between saves'}]},
+  status(6,'save-completed'),status(7,'recall',2),status(8,'recall',2),status(9,'save-failed'),status(10,'save-failed'),
+  {id:11,kind:'bob.user',data:{text:'Another message'}},status(12,'save-failed'),
+  status(13,'save-cancelled'),status(14,'save-warning'),status(15,'save-warning'),
+  {...status(16,'save-warning'),model:[{role:'assistant',content:'Not passive'}]},status(17,'save-warning'),
+ ];
+ const before=JSON.stringify(entries),compacted=compactMemoryStatuses(entries);
+ expect(compacted.map(entry=>entry.id)).toEqual([1,2,4,5,6,8,10,11,12,13,15,16,17]);
+ expect(compacted.every(entry=>entries.includes(entry))).toBe(true);
+ expect(JSON.stringify(entries)).toBe(before);
 });

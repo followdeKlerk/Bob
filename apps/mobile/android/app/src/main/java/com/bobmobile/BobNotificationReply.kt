@@ -73,14 +73,8 @@ internal object BobNotificationReply {
     fun revoke(context: Context, identity: String) {
         synchronized(NotificationWatchStore) {
             val config = NotificationWatchStore.read(context, identity)
-            config?.optJSONObject(SLOTS)?.let { slots ->
-                for (key in slots.keys()) {
-                    val id = slots.getJSONObject(key).getString("requestId")
-                    NotificationReplyStore.remove(context, id)
-                    context.getSystemService(NotificationManager::class.java).cancel(NotificationReplyPolicy.statusTag(id, false), 0)
-                    context.getSystemService(NotificationManager::class.java).cancel(NotificationReplyPolicy.statusTag(id, true), 0)
-                }
-            }
+            // Pairing revocation must not delete unresolved input or its OS feedback.
+            // Old actions fail closed; retained drafts remain available for recovery.
             if (config != null) NotificationWatchStore.update(context, identity) {
                 it.remove(SLOTS); it.remove(EPOCH); it.remove(FINGERPRINT)
             }

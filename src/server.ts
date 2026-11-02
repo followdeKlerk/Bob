@@ -1,4 +1,5 @@
 import {Schedules,schedulesView,scheduleAlerts,scheduleHealth} from './schedules.js';
+import {displayContext,INLINE_VISUAL_EMERGENCY_HEIGHT} from './display-context.js';
 import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
@@ -6,7 +7,7 @@ import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
 import {setTimeout as locationDelay} from 'node:timers/promises';
 import {bindLocationDevice,locationAvailability,pollLocations,pendingLocations,respondLocation} from './phone-location.js';
 import {readNotes,syncNote} from './notes.js';
-import {QuestionChoices} from '@bob-local/resources';
+import {QuestionChoices,SkillMetadata,mutateSkill} from '@bob-local/resources';
 import {
   createServer as httpServer,
   type IncomingMessage,
@@ -35,6 +36,7 @@ import {SessionUI} from './session-controls.js';
 import { ChatMeta, Library, Questions, Todos } from "./documents.js";
 import { Subagents } from "./subagents.js";
 import {presentSubagentReports} from './subagent-presentation.js';
+import {presentMemoryStatuses} from './memory-presentation.js';
 import {McpConnection, validateMcpEndpoint, type McpConnectionConfig} from "./interactive.js";
 import {
   Configure,
@@ -113,7 +115,7 @@ export async function serve(
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, entries:await presentSubagentReports(h,id,view.entries,subagents), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents)), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -149,6 +151,15 @@ export async function serve(
         throw new HttpError(401, "Device authorization required");
       if (req.headers["x-bob-backend"] !== state.id)
         throw new HttpError(409, "Backend identity mismatch");
+      if(path==='/v1/push/register'){
+        const deviceId=String(state.authenticate(token)!.id);
+        if(req.method==='POST'){
+          const p=z.object({token:z.string().min(20).max(4096).regex(/^[A-Za-z0-9_:\-]+$/)}).strict().parse(await body(req,8192));
+          return send(res,200,await runtime.push.register(deviceId,p.token));
+        }
+        if(req.method==='DELETE'){await runtime.push.unregister(deviceId);return send(res,200,{registered:false});}
+        throw new HttpError(405,'Push registration supports POST or DELETE');
+      }
       if(path.startsWith('/v1/location/')){
         const deviceId=String(state.authenticate(token)!.id);
         if(path==='/v1/location/availability'&&req.method==='POST'){
@@ -268,12 +279,10 @@ export async function serve(
         return send(res, 200, { revoked: true });
       }
       if (path === "/v1/library") {
-        if (req.method === "GET")
-          return send(
-            res,
-            200,
-            {...await h.snapshot(Library, runtime.library.id, ctx),commands:[delegationMenuCommand]}
-          );
+        if (req.method === "GET") {
+          const library=await h.snapshot(Library,runtime.library.id,ctx),metadata=await h.snapshot(SkillMetadata,runtime.library.id,ctx);
+          return send(res,200,{...library,skills:Object.fromEntries(Object.entries(library?.skills??{}).filter(([name])=>!metadata?.skills[name]?.archived)),commands:[delegationMenuCommand,{name:'learn',description:'Learn a reusable skill from sources or this workflow.'},{name:'refine',description:'Review this conversation to improve memory and skills.'}],archivedSkills:Object.entries(metadata?.skills??{}).filter(([,skill])=>skill.archived).map(([name])=>name)});
+        }
         if (req.method === "PUT") {
           const value = z
             .object({
@@ -290,24 +299,23 @@ export async function serve(
       }
       if (path === "/v1/skills" && req.method === "PUT") {
         const p = Skill.parse(await body(req));
-        await runtime.library.commit(async (tx) => {
-          (await tx.doc(Library, runtime.library.id)).skills[p.name] = {
-            description: p.description,
-            markdown: p.markdown,
-            enabled: p.enabled,
-          };
-        }, ctx);
-        return send(res, 200, { saved: true });
+        const result=await runtime.library.commit(async tx=>{
+          if((await tx.doc(SkillMetadata,runtime.library.id)).skills[p.name]?.archived)await mutateSkill(tx,runtime.library.id,runtime.library.id,{name:p.name,action:'restore'});
+          return mutateSkill(tx,runtime.library.id,runtime.library.id,{...p,action:'save'});
+        },ctx);
+        return send(res, 200, { saved: result.persisted,...result });
       }
       if (path.startsWith("/v1/skills/") && req.method === "DELETE") {
         const name = z
           .string()
           .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
           .parse(path.split("/")[3]);
-        await runtime.library.commit(async (tx) => {
-          delete (await tx.doc(Library, runtime.library.id)).skills[name];
-        }, ctx);
-        return send(res, 200, { deleted: true });
+        const result=await runtime.library.commit(async tx=>{
+          const library=await tx.doc(Library,runtime.library.id),metadata=await tx.doc(SkillMetadata,runtime.library.id);
+          if(!Object.hasOwn(library.skills,name)||metadata.skills[name]?.archived)return {persisted:true,archived:true};
+          return mutateSkill(tx,runtime.library.id,runtime.library.id,{name,action:'archive'});
+        },ctx);
+        return send(res, 200, { deleted:result.persisted,...result });
       }
       if (path === "/v1/chats") {
         if (req.method === "GET") {
@@ -431,7 +439,7 @@ export async function serve(
           const resource=`history:${id}`,cursor=decodeCursor(state,resource,url.searchParams.get('cursor'));
           const query=(url.searchParams.get('query')??'').trim().slice(0,160),limit=Math.min(Math.max(Number(url.searchParams.get('limit')??100)||100,1),100);
           const page=await chat.entries({order:'descending'},limit,cursor,ctx);
-          let items=await presentSubagentReports(h,id,page.items);
+          let items=await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,page.items));
           if(query){const terms=query.toLocaleLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
           return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items,next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
         }
@@ -498,7 +506,7 @@ export async function serve(
           const submission = await chat.submit(
             { type: "input", content: p.display ? `${p.text}
 
-[Bob display context for this request: CSS-pixel viewports ${JSON.stringify(p.display)}. Inline must fit completely without any internal scrolling; no page headings or introductory prose that consume the visual. Use render_visual presentation=inline only for compact content that fits. Choose presentation=fullscreen for larger diagrams, dense explanations, or uncertain fit. Fullscreen opens on user tap, not automatically. Keep typography readable; never clip or shrink content to force a fit. Use responsive layouts; viewport may change before opening.]` : p.text, whenBusy: p.mode, requestId,
+${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
               entry:{kind:'bob.user',data:{text:p.text,allowSubagents:p.allowSubagents,requestId:p.requestId}} },
             ctx
           );

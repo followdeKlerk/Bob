@@ -5,11 +5,24 @@ import * as Keychain from 'react-native-keychain';
 type Backend={backendId:string;endpoint:string;name:string};
 export async function enableUpdateNotifications(backends:Backend[],askPermission=true,onRegistered?:(backendId:string)=>Promise<void>){
  if(Platform.OS!=='android'||!backends.length||AppState.currentState!=='active')return false;
+ await NativeModules.BobNotifications.syncPushBackends?.(backends.map(backend=>backend.backendId));
+ // Activation also reconciles deregistration when Android permission was revoked.
+ // Native WorkManager retries registration without blocking pairing or the UI.
+ for(const backend of backends){
+  const credential=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});
+  if(credential)try{await NativeModules.BobNotifications.activatePush?.(backend.endpoint,backend.backendId,credential.password);}catch{/* Retry on the next activation. */}
+ }
  if(Number(Platform.Version)>=33){
   const permission=PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
   if(!await PermissionsAndroid.check(permission)){
    if(!askPermission)return false;
    if(await PermissionsAndroid.request(permission)!=='granted')return false;
+   // A pre-dialog worker may already have completed DELETE while permission was
+   // denied. Reconcile after the grant, not only on a future app activation.
+   for(const backend of backends){
+    const credential=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});
+    if(credential)try{await NativeModules.BobNotifications.activatePush?.(backend.endpoint,backend.backendId,credential.password);}catch{/* Polling still works; retry registration on resume. */}
+   }
   }
  }
  let watching=false;

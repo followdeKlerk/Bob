@@ -2,8 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {INITIAL_INLINE_HEIGHT,MAX_INLINE_HEIGHT} from '../apps/mobile/inline-visual-policy.js';
 const source=readFileSync('apps/mobile/android/app/src/main/assets/inline-measure.js','utf8');
-function measure(natural:number,viewport=420,nestedOverflow=false){
+function measure(natural:number,viewport=INITIAL_INLINE_HEIGHT,nestedOverflow=false){
  let load=()=>{},raf:(()=>void)|undefined;
  const sent:Array<{fits:boolean;contentHeight:number;viewportFits:boolean}>=[];
  class Element {
@@ -24,11 +25,20 @@ function measure(natural:number,viewport=420,nestedOverflow=false){
  });
  load();raf?.();return sent;
 }
+test('initial loading stays 420 and JS, bundled measurement and native emergency constants agree',()=>{
+ assert.equal(INITIAL_INLINE_HEIGHT,420);assert.equal(MAX_INLINE_HEIGHT,8192);
+ assert.ok(source.includes(`maxHeight=${MAX_INLINE_HEIGHT}`));
+ const native=readFileSync('apps/mobile/android/app/src/main/java/com/bobmobile/VisualActions.kt','utf8');
+ assert.ok(native.includes(`const val MAX_INLINE_HEIGHT = ${MAX_INLINE_HEIGHT}`));
+});
 test('inline measurement reports natural height, not the scrollHeight viewport floor',()=>{
  const result=measure(214)[0];assert.equal(result.fits,true);assert.equal(result.contentHeight,214);assert.equal(result.viewportFits,true);
 });
 test('growth within the maximum requests a resize, while real or nested overflow rejects inline',()=>{
  const growth=measure(300,180)[0];assert.equal(growth.fits,true);assert.equal(growth.viewportFits,false);assert.equal(growth.contentHeight,300);
- assert.equal(measure(450)[0].fits,false);assert.equal(measure(214,420,true)[0].fits,false);
+ for(const height of [650,1200,MAX_INLINE_HEIGHT]){
+  const report=measure(height)[0];assert.equal(report.fits,true);assert.equal(report.contentHeight,height);assert.equal(report.viewportFits,false);
+ }
+ assert.equal(measure(MAX_INLINE_HEIGHT+1)[0].fits,false);assert.equal(measure(214,420,true)[0].fits,false);
  assert.deepEqual(measure(214,0),[],'detachment is not an overflow report; the host still bounds missing telemetry');
 });

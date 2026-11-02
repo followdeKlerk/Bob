@@ -26,7 +26,32 @@ export function memoryStatusText(entry:ToolEntry):string|undefined {
  if(count!==undefined&&(typeof count!=='number'||!Number.isSafeInteger(count)||count<0))return undefined;
  if(phase==='recall'&&typeof count==='number')return `Hindsight — recalled ${count} memories`;
  if(phase==='save-queued')return 'Hindsight — save queued';
+ if(phase==='save-processing')return 'Hindsight — saving';
+ if(phase==='save-completed')return 'Hindsight — saved';
+ if(phase==='save-failed')return 'Hindsight — save failed';
+ if(phase==='save-cancelled')return 'Hindsight — save tracking stopped';
+ if(phase==='save-warning')return 'Hindsight — saved with warnings';
  return undefined;
+}
+
+/** Passive receipts only. Treat supplied text as literal display data, never model
+ * content or owner input. Legacy reviews need no origin; foreground skill updates
+ * need no taskId. Unknown/malformed events stay on the generic disclosure path. */
+export function learningStatusText(entry:ToolEntry):string|undefined {
+ if(entry.kind!=='bob.learning-status'||entry.model?.length)return undefined;
+ const data=entry.data;
+ if(!data||typeof data!=='object'||Array.isArray(data))return undefined;
+ const {status,text}=data as {status?:unknown;text?:unknown};
+ if(status!=='completed'&&status!=='failed'&&status!=='cancelled')return undefined;
+ if(typeof text!=='string'||!text.trim()||text.length>65536)return undefined;
+ // Bound UTF-8 bytes without depending on a native TextEncoder/Buffer polyfill.
+ let bytes=0;
+ for(const character of text){
+  const point=character.codePointAt(0)!;
+  bytes+=point<=0x7f?1:point<=0x7ff?2:point<=0xffff?3:4;
+  if(bytes>65536)return undefined;
+ }
+ return text;
 }
 
 /** Transcript projection only: never delete stored tools or their recorded output. */
