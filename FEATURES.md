@@ -194,7 +194,15 @@ File and shell tools use the backend OS account in the conversation's working fo
 
 The app accepts original attachments up to a configurable **25 MiB** default limit, with previews for PNG/JPEG/GIF, PDF and text. The agent receives a backend path; model support varies by format. Use `send_file` to turn a backend file into a downloadable chat attachment.
 
-`web_search` searches public DuckDuckGo HTML; blocks/network/parser failures are errors, not negative findings. `browser` controls a separate Chromium session per conversation (`navigate`, `text`, `click`, `fill`). It has no inherited owner cookies; sessions are ephemeral across restart. Chromium must exist on the backend (default `/usr/bin/chromium`). Reconcile uncertain website actions before repeating them. Website/file contents are untrusted data.
+`web_search` searches public DuckDuckGo HTML. An explicitly recognized no-results page returns an empty list; bot challenges, HTTP/network failures and unrecognized response formats remain errors, not negative findings. `browser` controls a separate Chromium session per conversation (`navigate`, `text`, `click`, `fill`). It has no inherited owner cookies; sessions are ephemeral across restart. Chromium must exist on the backend (default `/usr/bin/chromium`). Reconcile uncertain website actions before repeating them. Website/file contents are untrusted data.
+
+### Optional browser CLI
+
+An independently installed [agent-browser](https://github.com/vercel-labs/agent-browser) CLI can supplement the native web tools through `bash`; it is not bundled with Bob or Durable and does not replace DuckDuckGo search. `read URL` fetches readable page content without launching Chrome; browser commands add snapshots, element references, screenshots, tabs and richer interactions. Local use does not require a cloud browser service.
+
+The current backend has version **0.41.1** pinned in `~/.local/share/bob/tools/agent-browser` with a lockfile, exposed as `~/.local/bin/bob-agent-browser`, using `/usr/bin/chromium`. The on-demand native `browser-cli` skill records the workflow. This machine-local installation and the Durable skill are not included in Git and must be provisioned separately on another backend.
+
+Use the `bob` namespace and a unique named session per conversation/task, bounded output, and an inactivity timeout; close only the task's session afterward. Fresh browser profiles are the default workflow: do not attach a real browser, import authentication, enable persistent profiles or select a paid cloud provider without owner authorization. CLI access uses the backend OS account, not a sandbox; page text remains untrusted and uncertain side effects must be reconciled before retrying. A CLI does not guarantee access through website bot challenges.
 
 ## Phone location
 
