@@ -1,4 +1,4 @@
-import {hasVisibleChatContent,hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,compactMemoryStatuses} from '../chat-presentation';
+import {hasVisibleChatContent,hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,compactMemoryStatuses,isCompactActivityEntry,chatEntryGap} from '../chat-presentation';
 import type {ToolEntry} from '../tool-results';
 test('owner attribution requires owner entry metadata, never role or report-looking text',()=>{
  const content='[subagent Audit helper answered, no reply needed] report';
@@ -112,3 +112,21 @@ test('mixed recall/save phases compact by adjacent label only, never receipt or 
  expect(compacted.every(entry=>entries.includes(entry))).toBe(true);
  expect(JSON.stringify(entries)).toBe(before);
 });
+
+ test('only consecutive compact activities lose their message gutter; prose, unknown content and owner inputs keep it',()=>{
+ const tool:ToolEntry={id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'a',name:'read',arguments:{path:'a'}}]}]};
+ const memory:ToolEntry={id:2,kind:'bob.memory-status',data:{phase:'save-queued'}};
+ const report:ToolEntry={id:3,kind:'bob.subagent-report',data:{name:'Helper'},model:[{role:'user',content:'Report body'}]};
+ const orphan:ToolEntry={id:4,kind:'pi.tool-result',model:[{role:'toolResult',content:'Output'}]};
+ for(const row of [tool,memory,report,orphan]){expect(isCompactActivityEntry(row)).toBe(true);expect(chatEntryGap(tool,row)).toBe(0);expect(chatEntryGap(row,tool)).toBe(0);}
+ const ordinary:ToolEntry[]=[
+  {id:5,kind:'bob.user',data:{text:'Owner message'}},
+  {...tool,kind:'bob.user'},
+  {id:6,kind:'pi.assistant',model:[{role:'assistant',content:'Answer'}]},
+  {id:7,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'Checking'},...(tool.model![0].content as any[])]}]},
+  {id:8,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'unknown',data:'keep visible'}]}]},
+  {id:9,kind:'bob.memory-status',data:{phase:'unknown'}},
+ ];
+ for(const row of ordinary){expect(isCompactActivityEntry(row)).toBe(false);expect(chatEntryGap(tool,row)).toBe(16);expect(chatEntryGap(row,tool)).toBe(16);}
+ expect(chatEntryGap(tool,undefined)).toBe(16);
+ });

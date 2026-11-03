@@ -6,12 +6,12 @@ import {toolPresentation,toolResultPreview} from '../tool-presentation';
 jest.mock('../components/message-actions',()=>({CopyAction:()=>null}));
 jest.mock('lucide-react-native',()=>({ChevronDown:()=>null,ChevronRight:()=>null,SquareTerminal:()=>null}));
 const flatten=(value:any):string=>typeof value==='string'?value:Array.isArray(value)?value.map(flatten).join(''):value?.children?flatten(value.children):'';
-test('collapsed shell cards show the command and result excerpt while full arguments and output remain expandable',async()=>{
+test('compact shell rows show an inline command but keep output and full arguments expandable',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  const content=JSON.stringify({command:'npm test -- --runInBand',timeout:120});
  await act(async()=>{tree=Renderer.create(<ToolContent name="bash" content={content} result={{status:'done',content:[{type:'text',text:'Tests passed\nSummary complete\nFull result marker'}]}}/>);});
  expect(flatten(tree.toJSON())).toContain('Run tests');expect(flatten(tree.toJSON())).toContain('npm test -- --runInBand');
- expect(flatten(tree.toJSON())).toContain('Tests passed');expect(flatten(tree.toJSON())).not.toContain('Full result marker');expect(flatten(tree.toJSON())).not.toContain('"timeout"');
+ expect(flatten(tree.toJSON())).not.toContain('Tests passed');expect(flatten(tree.toJSON())).not.toContain('Full result marker');expect(flatten(tree.toJSON())).not.toContain('"timeout"');
  await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Tool details: bash'})[0].props.onPress());
  expect(flatten(tree.toJSON())).toContain('"timeout": 120');expect(flatten(tree.toJSON())).not.toContain('Full result marker');
  await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Tool result: bash'})[0].props.onPress());
@@ -20,10 +20,12 @@ test('collapsed shell cards show the command and result excerpt while full argum
  expect(flatten(tree.toJSON())).toContain('npm test');expect(flatten(tree.toJSON())).not.toContain('Full result marker');
  await act(async()=>tree.unmount());
 });
-test('failed cards show the actual error instead of a generic expand-for-details message',async()=>{
+test('compact failed rows expose failure status and retain the actual error on expansion',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ToolContent name="self_update" content={'{"action":"update","target":"android"}'} result={{status:'failed',isError:true,content:'Build failure'}}/>);});
- expect(flatten(tree.toJSON())).toContain('Update app');expect(flatten(tree.toJSON())).toContain('Build failure');expect(flatten(tree.toJSON())).not.toContain('expand details to inspect');expect(flatten(tree.toJSON())).not.toContain('"action"');
+ expect(flatten(tree.toJSON())).toContain('Update app');expect(tree.root.findAllByProps({accessibilityLabel:'Failed'}).length).toBeGreaterThan(0);expect(flatten(tree.toJSON())).not.toContain('Build failure');expect(flatten(tree.toJSON())).not.toContain('expand details to inspect');expect(flatten(tree.toJSON())).not.toContain('"action"');
+ await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Tool details: self_update'})[0].props.onPress());
+ expect(flatten(tree.toJSON())).toContain('Build failure');
  await act(async()=>tree.unmount());
 });
 test('shell previews separate the working directory from the useful command',()=>{
@@ -41,14 +43,40 @@ test('file cards expose paths, and output-only cards retain a useful excerpt',()
  expect(toolPresentation('Result','ENOENT: File not found')).toEqual({title:'Tool result',detail:'ENOENT: File not found'});
 });
 
-test('quiet collapsed rows never grow a command or result preview as output arrives',async()=>{
+test('compact rows keep their single-line summary as results arrive',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  const content=JSON.stringify({command:'printf ORIGINAL_ARGUMENT'});
  await act(async()=>{tree=Renderer.create(<ToolContent quiet name="bash" content={content}/>);});
- expect(flatten(tree.toJSON())).not.toContain('ORIGINAL_ARGUMENT');
+ expect(flatten(tree.toJSON())).toContain('ORIGINAL_ARGUMENT');
  await act(async()=>tree.update(<ToolContent quiet name="bash" content={content} result={{status:'done',content:'ORIGINAL_RESULT'}}/>));
- expect(flatten(tree.toJSON())).not.toContain('ORIGINAL_ARGUMENT');expect(flatten(tree.toJSON())).not.toContain('ORIGINAL_RESULT');
+ expect(flatten(tree.toJSON())).toContain('ORIGINAL_ARGUMENT');expect(flatten(tree.toJSON())).not.toContain('ORIGINAL_RESULT');
  await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Tool details: bash'})[0].props.onPress());
  expect(flatten(tree.toJSON())).toContain('ORIGINAL_ARGUMENT');expect(flatten(tree.toJSON())).toContain('ORIGINAL_RESULT');
+ await act(async()=>tree.unmount());
+});
+
+ test('collapsed rows are unboxed, small type, single-line and retain a native touch target',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ToolContent name="read" content={JSON.stringify({path:'/long/path/file.ts'})}/>);});
+ const header=tree.root.findAllByProps({accessibilityLabel:'Tool details: read'}).find(node=>node.props.style&&node.props.accessibilityRole==='button')!;
+ const {StyleSheet}=require('react-native');
+ expect(StyleSheet.flatten(header.props.style)).toMatchObject({minHeight:48,flexDirection:'row',paddingVertical:6});
+ expect(StyleSheet.flatten(header.parent!.props.style)??{}).not.toHaveProperty('borderWidth');
+ const label=tree.root.findAll(node=>node.props.numberOfLines===1&&StyleSheet.flatten(node.props.style)?.fontWeight==='600')[0];
+ expect(StyleSheet.flatten(label.props.style)).toMatchObject({fontSize:12,lineHeight:18});
+ expect(header.props.accessibilityHint).toContain('Status unavailable');
+ await act(async()=>tree.unmount());
+ });
+
+test('unmatched historical results keep their tool identity and accessible hints track the expansion action',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ToolContent name="bash" content="Arguments are outside the loaded history." result={{status:'done',content:'RECORDED_RESULT'}}/>);});
+ expect(flatten(tree.toJSON())).toContain('bash');
+ expect(flatten(tree.toJSON())).not.toContain('RECORDED_RESULT');
+ const header=()=>tree.root.findAllByProps({accessibilityLabel:'Tool details: bash'}).find(node=>node.props.accessibilityRole==='button')!;
+ expect(header().props.accessibilityHint).toContain('Expand');
+ await act(async()=>header().props.onPress());
+ expect(header().props.accessibilityHint).toContain('Collapse');
+ expect(flatten(tree.toJSON())).toContain('RECORDED_RESULT');
  await act(async()=>tree.unmount());
 });

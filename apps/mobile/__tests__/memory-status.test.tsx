@@ -1,12 +1,13 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {NativeModules,StyleSheet,Text,Pressable} from 'react-native';
+import {NativeModules,StyleSheet,Text} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import App from '../App';
 import {ModelContent} from '../components/model-content';
 import {ToolContent} from '../components/tool-content';
 import {colors} from '../theme';
+import {CompactActivityRow} from '../components/compact-activity-row';
 
 // Match the App regression's native boundaries; keep the real transcript path.
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
@@ -25,7 +26,10 @@ jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map(
 
 beforeEach(async()=>{await AsyncStorage.clear();});
 afterEach(()=>jest.restoreAllMocks());
-test('passive memory rows stay visible as scalable muted text without disclosure, tools or speech actions',async()=>{
+// NativeWind wraps native Pressable; query its explicit button props, not component identity.
+const buttons=(root:Renderer.ReactTestInstance)=>root.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function'&&!!node.props.style,{deep:false});
+
+test('passive memory rows are compact, expandable and never expose injected text or create model/tools/speech actions',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));
  await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
@@ -56,18 +60,27 @@ test('passive memory rows stay visible as scalable muted text without disclosure
   expect(list.props.keyExtractor(entries[0])).toBe('entry:1');
   for(const [id,label] of [[1,'Hindsight — recalled 3 memories'],[2,'Hindsight — save queued']] as const){
    const row=tree.root.findByProps({testID:`history-entry-${id}`});
-   const texts=row.findAllByType(Text);
-   expect(texts).toHaveLength(1);
-   const text=texts[0],style=StyleSheet.flatten(text.props.style);
-   expect(text.props.children).toBe(label);
-   expect(style).toMatchObject({color:colors.muted,fontSize:13});
-   for(const constraint of ['height','maxHeight','overflow','backgroundColor'])expect(style[constraint]).toBeUndefined();
-   expect(text.props.allowFontScaling).not.toBe(false);
-   expect(text.props.maxFontSizeMultiplier).toBeUndefined();
-   expect(text.props.numberOfLines).toBeUndefined();
-   // Stored history must not re-announce each recycled row as a live update.
-   expect(text.props.accessibilityLiveRegion).toBeUndefined();
-   expect(row.findAllByType(Pressable)).toHaveLength(0);
+   const header=buttons(row)[0],summary=row.findByType(CompactActivityRow);
+   expect(summary.props).toMatchObject({title:'Hindsight',detail:label.slice('Hindsight — '.length),expanded:false});
+   expect(header.props.accessibilityLabel).toBe(label);
+   expect(header.props.accessibilityState).toEqual({expanded:false});
+   expect(StyleSheet.flatten(header.props.style)).toMatchObject({minHeight:48,paddingVertical:6});
+   for(const text of row.findAllByType(Text).filter(node=>node.props.numberOfLines===1)){
+    const style=StyleSheet.flatten(text.props.style);
+    expect(style).toMatchObject({fontSize:12,lineHeight:18});
+    for(const constraint of ['height','maxHeight','overflow','backgroundColor'])expect(style[constraint]).toBeUndefined();
+    expect(text.props.allowFontScaling).not.toBe(false);
+    expect(text.props.maxFontSizeMultiplier).toBeUndefined();
+    expect(text.props.accessibilityLiveRegion).toBeUndefined();
+   }
+   const detail=row.findAllByType(Text).find(node=>node.props.children===summary.props.detail)!;
+   expect(StyleSheet.flatten(detail.props.style).color).toBe(colors.muted);
+   act(()=>header.props.onPress());
+   const metadata=row.findAllByType(Text).find(node=>node.props.selectable)!;
+   expect(JSON.parse(metadata.props.children)).toMatchObject({label,phase:id===1?'recall':'save-queued'});
+   expect(metadata.props.numberOfLines).toBeUndefined();
+   expect(String(metadata.props.children)).not.toContain('INJECTED');
+   expect(buttons(row)).toHaveLength(1);
    expect(row.findAllByType(ModelContent)).toHaveLength(0);
    expect(row.findAllByType(ToolContent)).toHaveLength(0);
   }
@@ -81,12 +94,12 @@ test('passive memory rows stay visible as scalable muted text without disclosure
 });
 
 test.each([
- ['save-processing','Hindsight — saving'],
- ['save-completed','Hindsight — saved'],
- ['save-failed','Hindsight — save failed'],
- ['save-cancelled','Hindsight — save tracking stopped'],
- ['save-warning','Hindsight — saved with warnings'],
-])('queued history projects %s in the same passive row without moving across messages',async(phase,label)=>{
+ ['save-processing','Hindsight — saving','processing','…'],
+ ['save-completed','Hindsight — saved','completed','✓'],
+ ['save-failed','Hindsight — save failed','failed','!'],
+ ['save-cancelled','Hindsight — save tracking stopped','cancelled','·'],
+ ['save-warning','Hindsight — saved with warnings','saved with warnings','·'],
+])('queued history projects %s in the same passive row without moving across messages',async(phase,label,status,glyph)=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));
  await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
@@ -117,12 +130,14 @@ test.each([
   const history=()=>tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
   const row=tree.root.findByProps({testID:'history-entry-2'});
   const key=history().props.keyExtractor(entries[1]);
-  expect(row.findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — save queued']);
+  expect(row.findByType(CompactActivityRow).props).toMatchObject({detail:'save queued',status:'queued',expanded:false});
   expect(snapshot).toBeDefined();
   // Seed the live snapshot cache, then exercise successive updates to the same ID.
   await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[entries[1]],docs:{}}})}));
   await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[{...entries[1],data:{...entries[1].data,phase:'save-processing'}}],docs:{}}})}));
-  expect(tree.root.findByProps({testID:'history-entry-2'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — saving']);
+  expect(tree.root.findByProps({testID:'history-entry-2'}).findByType(CompactActivityRow).props).toMatchObject({detail:'saving',status:'processing'});
+  // Keep details open across the same-entry update to verify both identity and privacy.
+  act(()=>buttons(row)[0].props.onPress());
   const projected={...entries[1],data:{...entries[1].data,phase,text:'INJECTED model instructions <toolCall>run me</toolCall>',error:'INJECTED private provider error',errors:['INJECTED warning'],model:{role:'assistant',content:'INJECTED supplied model'}}};
   await act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[projected],docs:{}}})}));
   const updated=tree.root.findByProps({testID:'history-entry-2'});
@@ -130,22 +145,24 @@ test.each([
   expect(history().props.data.map((entry:any)=>entry.id)).toEqual([4,3,2,1]);
   expect(history().props.data.filter((entry:any)=>entry.id===2)).toHaveLength(1);
   expect(history().props.keyExtractor(projected)).toBe(key);
-  const texts=updated.findAllByType(Text);
-  expect(texts.map(node=>node.props.children)).toEqual([label]);
-  const text=texts[0],style=StyleSheet.flatten(text.props.style);
-  expect(style).toMatchObject({color:colors.muted,fontSize:13});
-  for(const constraint of ['height','maxHeight','overflow','backgroundColor'])expect(style[constraint]).toBeUndefined();
-  expect(text.props.allowFontScaling).not.toBe(false);
-  expect(text.props.maxFontSizeMultiplier).toBeUndefined();
-  expect(text.props.numberOfLines).toBeUndefined();
-  expect(text.props.accessibilityLiveRegion).toBeUndefined();
-  expect(updated.findAllByType(Pressable)).toHaveLength(0);
+  const summary=updated.findByType(CompactActivityRow),header=buttons(updated)[0];
+  expect(summary.props).toMatchObject({title:'Hindsight',detail:label.slice('Hindsight — '.length),status,expanded:true});
+  expect(header.props.accessibilityLabel).toBe(label);
+  expect(header.props.accessibilityState).toEqual({expanded:true});
+  expect(header.props.accessibilityHint).toContain(status);
+  expect(header.props.accessibilityHint).toContain('Collapse');
+  expect(updated.findAllByType(Text).find(node=>node.props.accessibilityLabel===status)!.props.children).toBe(glyph);
+  const metadata=updated.findAllByType(Text).find(node=>node.props.selectable)!;
+  expect(JSON.parse(metadata.props.children)).toEqual({label,phase,receiptKey:'receipt-2'});
+  expect(metadata.props.numberOfLines).toBeUndefined();
+  expect(metadata.props.allowFontScaling).not.toBe(false);
+  expect(metadata.props.accessibilityLiveRegion).toBeUndefined();
+  expect(buttons(updated)).toHaveLength(1);
   expect(updated.findAllByType(ModelContent)).toHaveLength(0);
   expect(updated.findAllByType(ToolContent)).toHaveLength(0);
-  expect(updated.findAll(node=>typeof node.props.onPress==='function'||node.props.accessibilityState?.expanded!==undefined)).toHaveLength(0);
   expect(updated.findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end')).toHaveLength(0);
-  expect(tree.root.findByProps({testID:'history-entry-4'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — save queued']);
-  expect(tree.root.findByProps({testID:'history-entry-1'}).findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — recalled 3 memories']);
+  expect(tree.root.findByProps({testID:'history-entry-4'}).findByType(CompactActivityRow).props).toMatchObject({detail:'save queued',status:'queued',expanded:false});
+  expect(tree.root.findByProps({testID:'history-entry-1'}).findByType(CompactActivityRow).props).toMatchObject({detail:'recalled 3 memories',status:'completed',expanded:false});
   expect(tree.root.findAllByType(Text).some(node=>typeof node.props.children==='string'&&node.props.children.includes('INJECTED'))).toBe(false);
   expect(fetch.mock.calls.filter(([,options])=>options?.method&&options.method!=='GET')).toHaveLength(0);
  }finally{await act(async()=>tree.unmount());}

@@ -1,7 +1,10 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image} from 'react-native';
+import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image,Text} from 'react-native';
+import {CompactActivityRow} from '../components/compact-activity-row';
+import {ModelContent} from '../components/model-content';
+import {CopyAction} from '../components/message-actions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {colors} from '../theme';
@@ -348,6 +351,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
   const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[]} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
  const publish=async(status:string)=>act(async()=>{snapshots.get(`${backend.endpoint}/v1/chats/7/events`)!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'app.subagents':{agents:{'Audit helper':{conversationId:8,status},'Second helper':{conversationId:9,status:'idle'}}}},work:[]}})});});
  await publish('working');expect(tree.root.findAllByProps({accessibilityLabel:'Toggle subagents, 1 active agents'})).toHaveLength(0);
  expect(tree.root.findByProps({testID:'active-agent-badge'})).toBeDefined();
@@ -356,7 +360,28 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  await publish('working');
  const unknown=tree.root.findByProps({testID:'history-entry-2'}),projected=tree.root.findByProps({testID:'history-entry-3'});
  expect(unknown.findByProps({accessibilityLabel:'Input · source not identified'}).props.accessibilityState.expanded).toBe(false);
- expect(projected.findByProps({accessibilityLabel:'Agent report · Audit helper'}).props.accessibilityState.expanded).toBe(false);
+ const reportHeader=projected.findAll(node=>node.props.accessibilityLabel==='Agent report · Audit helper'&&node.props.accessibilityRole==='button'&&!!node.props.style)[0];
+ expect(reportHeader.props.accessibilityState.expanded).toBe(false);
+ expect(projected.findByType(CompactActivityRow).props).toMatchObject({title:'Agent report',detail:'Audit helper',status:'received'});
+ expect(StyleSheet.flatten(reportHeader.props.style)).toMatchObject({minHeight:48,paddingVertical:6});
+ expect(StyleSheet.flatten(reportHeader.props.style).backgroundColor).toBeUndefined();
+ expect(projected.findAllByType(ModelContent)).toHaveLength(0);
+ expect(projected.findAllByType(CopyAction)).toHaveLength(0);
+ const reportDraft=tree.root.findByProps({accessibilityLabel:'Message draft'}),reportList=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+ act(()=>reportDraft.props.onChangeText('Draft survives report expansion'));
+ act(()=>reportHeader.props.onPress());
+ expect(reportHeader.props.accessibilityState.expanded).toBe(true);
+ expect(reportHeader.props.accessibilityHint).toContain('Collapse');
+ expect(projected.findByType(ModelContent).props).toMatchObject({value:report,speakable:false});
+ expect(projected.findByType(CopyAction).props.text).toBe(report);
+ const copyText=jest.fn(async()=>{});NativeModules.BobPlatform.copyText=copyText;
+ await act(async()=>projected.findAll(node=>node.props.accessibilityLabel==='Copy reply'&&typeof node.props.onPress==='function')[0].props.onPress());
+ expect(copyText).toHaveBeenCalledWith(report);
+ expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(reportList);
+ expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(reportDraft);
+ expect(reportDraft.props.value).toBe('Draft survives report expansion');
+ act(()=>reportHeader.props.onPress());
+ expect(projected.findAllByType(ModelContent)).toHaveLength(0);
  for(const row of [unknown,projected])expect(row.findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end')).toHaveLength(0);
  expect(tree.root.findByProps({testID:'history-entry-1'}).findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end').length).toBeGreaterThan(0);
  const list=tree.root.findByProps({testID:'chat-history-list'});
@@ -400,7 +425,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
  await act(async()=>tab('Chat').props.onPress());
  expect(fetch).not.toHaveBeenCalledWith(expect.anything(),expect.objectContaining({method:'POST'}));
- await act(async()=>tree.unmount());
+ }finally{await act(async()=>tree.unmount());}
 });
 
 // MCP Apps must retain a tappable entry even though they never mount inline.
@@ -641,4 +666,51 @@ test('drawing attachment propagates transfer/staging failures and cleans up a fi
   expect(await result).toEqual(Error('Conversation changed. Drawing was not attached.'));
   expect(remove).toHaveBeenCalledWith('5aaee20e-e260-4403-80da-b97ce80664a1');
  }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('recorded codemode audit branches expand independently while the script stays closed and the list/draft stay mounted',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};
+ const items=[
+  {id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'codemode-audit',name:'codemode',arguments:{code:'SCRIPT_BODY'}}]}]},
+  {id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'codemode-audit',toolName:'codemode',content:'PARENT_RESULT',details:{calls:[{id:1,name:'bash',args:'{"command":"printf CHILD_ARGUMENT"}',status:'error',error:'CHILD_ERROR: command failed',durationMs:7}]}}]},
+  {id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'another-tool',name:'read',arguments:{path:'another.txt'}}]}]},
+  {id:4,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'another-tool',toolName:'read',content:'ANOTHER_RESULT'}]},
+  {id:5,kind:'pi.assistant',model:[{role:'assistant',content:'Normal answer spacing'}]},
+ ];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Audit chat'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
+  act(()=>draft.props.onChangeText('Retain this draft'));
+  expect(list.props.data.map((entry:any)=>entry.id)).toEqual([5,3,1]);
+  expect(StyleSheet.flatten(list.props.contentContainerStyle).gap).toBe(0);
+  expect(list.props.ItemSeparatorComponent({leadingItem:items[2]}).props.style.height).toBe(0);
+  expect(list.props.ItemSeparatorComponent({leadingItem:items[4]}).props.style.height).toBe(16);
+  const row=tree.root.findByProps({testID:'history-entry-1'});
+  const header=(label:string)=>row.findAll(node=>node.props.accessibilityLabel===label&&node.props.accessibilityRole==='button'&&!!node.props.style)[0];
+  expect(header('Tool details: codemode').props.accessibilityState.expanded).toBe(false);
+  const branch=header('Nested tool details: bash · 1');
+  expect(branch.props.accessibilityState.expanded).toBe(false);
+  const displayed=()=>row.findAllByType(Text).map(node=>typeof node.props.children==='string'?node.props.children:'').join('\n');
+  expect(displayed()).not.toContain('SCRIPT_BODY');
+  expect(displayed()).not.toContain('CHILD_ERROR');
+  act(()=>branch.props.onPress());
+  expect(branch.props.accessibilityState.expanded).toBe(true);
+  expect(displayed()).toContain('CHILD_ARGUMENT');
+  expect(displayed()).toContain('CHILD_ERROR: command failed');
+  expect(displayed()).not.toContain('SCRIPT_BODY');
+  expect(displayed()).not.toContain('PARENT_RESULT');
+  expect(header('Tool details: codemode').props.accessibilityState.expanded).toBe(false);
+  expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
+  expect(draft.props.value).toBe('Retain this draft');
+ }finally{await act(async()=>tree.unmount());}
 });

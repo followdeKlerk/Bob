@@ -23,11 +23,18 @@ function Content({value,results,showTools=true,quietTools=false,speakable=true}:
   }else groups.push({kind:'block',block,key:index});
  }
  if(!groups.length)return null;
- return <View style={{gap:CHAT_CONTENT_GAP}}>{groups.map(group=>{
-  if(group.kind==='text')return <View key={group.key} style={{gap:4}}><ChatMarkdown text={group.text}/><ActionRow><CopyAction text={group.text}/>{speakable&&<SpeechAction text={group.text}/>}</ActionRow></View>;
-  const block=group.block;
-  if(block?.type==='toolCall')return <ToolContent quiet={quietTools} key={block.id??group.key} name={block.name??'Tool'} content={JSON.stringify(block.arguments)??''} result={results?.get(block.id)}/>;
-  return <Text key={group.key} selectable style={{fontSize:15,lineHeight:26,color:colors.body}}>{JSON.stringify(block)}</Text>;
+ return <View>{groups.map((group,index)=>{
+  const previous=groups[index-1];
+  const tool=(value:Group|undefined)=>value?.kind==='block'&&value.block?.type==='toolCall';
+  const gap=index>0&&!(tool(previous)&&tool(group))?CHAT_CONTENT_GAP:0;
+  const key=group.kind==='block'?group.block?.id??group.key:group.key;
+  let body:React.ReactNode;
+  if(group.kind==='text')body=<View style={{gap:4}}><ChatMarkdown text={group.text}/><ActionRow><CopyAction text={group.text}/>{speakable&&<SpeechAction text={group.text}/>}</ActionRow></View>;
+  else {
+   const block=group.block;
+   body=block?.type==='toolCall'?<ToolContent quiet={quietTools} name={block.name??'Tool'} content={JSON.stringify(block.arguments)??''} result={results?.get(block.id)}/>:<Text selectable style={{fontSize:15,lineHeight:26,color:colors.body}}>{JSON.stringify(block)}</Text>;
+  }
+  return <View key={key} testID={`model-group-${key}`} style={{paddingTop:gap}}>{body}</View>;
  })}</View>;
 }
 

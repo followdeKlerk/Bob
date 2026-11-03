@@ -28,6 +28,7 @@ import {BottomTabs,type BottomDestination} from './components/bottom-tabs';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {useSessionWorking} from './use-session-working';
 import {BuildCard} from './components/build-card';
+import {HindsightActivity,AgentReportActivity} from './components/passive-activity';
 import {useBuildStatus} from './use-build-status';
 import {MessageOutbox,visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
 import {OutboxDelivery} from './outbox-delivery';
@@ -53,7 +54,7 @@ import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults,type ToolMessage} from './tool-results';
-import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses} from './chat-presentation';
+import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry,chatEntryGap} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -802,6 +803,13 @@ function Main() {
     const history=!isChild?parentHistory:childHistory,stored=history.page;
     const follow=!isChild?parentFollow:childFollow;
     const linked=isChild?childLinked:parentLinked;
+    // Native separators know only their leading item. Resolve the adjacent pair
+    // from the actual inverted display order, without regrouping recorded rows.
+    const entryGaps=new Map(linked.entries.map((entry,index)=>{
+      const next=linked.entries[index+1];
+      const surfaceBoundary=!isChild&&(positionedSurfaces.has(entry.id)||!!next&&positionedSurfaces.has(next.id));
+      return [entry.id,surfaceBoundary?CHAT_CONTENT_GAP:chatEntryGap(entry,next)];
+    }));
     return (
       <View style={{flex:1}}>
       {isChild&&<View style={{paddingHorizontal:24}}><Disclosure label="Conversation history">
@@ -829,7 +837,10 @@ function Main() {
         // offset zero instead of preserving an old cell and scrolling it back.
         maintainVisibleContentPosition={follow.following?undefined:{minIndexForVisible:0}}
         keyExtractor={transcriptKey}
-        contentContainerStyle={[styles.messages,!isChild&&{paddingTop:16,paddingBottom:16}]}
+        contentContainerStyle={[styles.messages,{gap:0},!isChild&&{paddingTop:16,paddingBottom:16}]}
+        ItemSeparatorComponent={({leadingItem}:{leadingItem?:Entry})=><View testID="chat-entry-separator" style={{height:leadingItem?entryGaps.get(leadingItem.id)??CHAT_CONTENT_GAP:CHAT_CONTENT_GAP}}/>}
+        ListHeaderComponentStyle={{paddingBottom:CHAT_CONTENT_GAP}}
+        ListFooterComponentStyle={{paddingTop:CHAT_CONTENT_GAP}}
         ListFooterComponent={<View style={{gap:12}}>
           {stored?.next&&<Button label={history.loading?'Loading history…':'Load earlier messages'} disabled={history.loading} onPress={()=>{follow.pause();run(history.load);}}/>}
           {!!history.error&&<View style={{gap:8}}><Text accessibilityLiveRegion="polite" style={styles.caption}>Couldn’t load stored history: {history.error}</Text><Button label="Retry loading history" disabled={history.loading} onPress={()=>run(history.refresh)}/></View>}
@@ -860,11 +871,11 @@ function Main() {
           const originalText=item.kind==='bob.user'&&item.data&&typeof item.data==='object'&&'text' in item.data&&typeof item.data.text==='string'?item.data.text:undefined;
           const scheduleReceipt=item.kind==='bob.schedule-receipt',scheduleAlert=item.kind==='bob.schedule-alert';
           const scheduleId=scheduleReceipt?(item.data as {id?:string}|undefined)?.id:undefined;
-          const body=scheduleReceipt?<ScheduleReceipt job={scheduleId?v?.docs['bob.schedules']?.[scheduleId]:undefined} onOpen={()=>run(()=>openSection('Schedules'))}/>:scheduleAlert?<ScheduleAlert data={item.data} onOpen={()=>run(()=>openSection('Schedules'))}/>:originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent speakable={m.role==='assistant'} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
+          const body=scheduleReceipt?<ScheduleReceipt job={scheduleId?v?.docs['bob.schedules']?.[scheduleId]:undefined} onOpen={()=>run(()=>openSection('Schedules'))}/>:scheduleAlert?<ScheduleAlert data={item.data} onOpen={()=>run(()=>openSection('Schedules'))}/>:originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:isCompactActivityEntry(item)?0:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent speakable={m.role==='assistant'} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<Text style={styles.memoryStatus}>{memoryStatus}</Text>:learningStatus!==undefined?<Text selectable style={styles.message}>{learningStatus}</Text>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<Text selectable style={styles.message}>{learningStatus}</Text>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<View style={[styles.bubble,(user||(artifact&&item.kind==='bob.artifact'))&&styles.userBubble,!!delivery&&{minWidth:Math.min(180,Math.max(0,windowSize.width-insets.left-insets.right-96))}]}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:12,lineHeight:19,minHeight:19,marginTop:6,fontWeight:'500'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</View>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}

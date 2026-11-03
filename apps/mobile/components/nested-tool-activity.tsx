@@ -2,31 +2,44 @@ import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {Text} from './app-text';
 import {colors} from '../theme';
-import type {NestedToolActivity as Activity} from '../nested-tool-results';
+import {CompactActivityRow} from './compact-activity-row';
+import {CopyAction} from './message-actions';
+import {toolPresentation} from '../tool-presentation';
+import type {NestedToolActivity as Activity,NestedToolRow} from '../nested-tool-results';
 
-/** Bounded excerpts only: audit rows are not full nested tool results. */
-export function NestedToolActivity({activity}:{activity:Activity}){
+function Branch({row,source}:{row:NestedToolRow;source:Activity['source']}){
  const [expanded,setExpanded]=useState(false);
- const active=(status:string)=>status==='running'||status==='pending'||status==='error';
- const rows=expanded?activity.rows:[...activity.rows.filter(row=>active(row.status)),...activity.rows.filter(row=>!active(row.status))].slice(0,4);
+ const presentation=row.args?toolPresentation(row.name,row.args):undefined;
+ const hint=presentation?.command??presentation?.detail??row.args;
+ return <View style={[styles.branch,{marginLeft:Math.min(row.depth,3)*8}]}>
+  <CompactActivityRow title={row.name.replace(/^functions\./,'').replaceAll('_',' ')} detail={hint} status={row.status} accessibilityLabel={`Nested tool details: ${row.name} · ${row.id}`} expanded={expanded} onPress={()=>setExpanded(!expanded)}/>
+  {expanded&&<View style={styles.details}>
+   <Text style={styles.text}>{row.name} · {row.status}{row.durationMs===undefined?'':` · ${Math.round(row.durationMs)} ms`}</Text>
+   {!!row.args&&<><View style={styles.caption}><Text style={styles.text}>Arguments excerpt</Text><CopyAction text={row.args} label={`Copy nested arguments: ${row.name}`}/></View><Text selectable style={styles.code}>{row.args}</Text></>}
+   {!!row.preview&&<><Text style={styles.text}>{row.status==='error'?'Error excerpt':'Progress excerpt'}</Text><Text selectable style={styles.code}>{row.preview}</Text></>}
+   <Text style={styles.text}>{source==='audit'?'Recorded status and argument/error excerpts; full nested results are not included.':'Live progress excerpts only; a done call does not include its full result.'}</Text>
+  </View>}
+ </View>;
+}
+
+/** Compact branches remain visible below their parent, independently of its script panel. */
+export function NestedToolActivity({activity}:{activity:Activity}){
+ const [all,setAll]=useState(false);
+ const active=(row:NestedToolRow)=>['running','pending','error'].includes(row.status);
+ const rows=all?activity.rows:[...activity.rows.filter(active),...activity.rows.filter(row=>!active(row))].slice(0,4);
  return <View style={styles.container}>
-  <Pressable accessibilityRole="button" accessibilityLabel="Nested tool activity" accessibilityState={{expanded}} onPress={()=>setExpanded(!expanded)} style={styles.toggle}>
-   <Text style={styles.label}>{activity.source==='audit'?'Nested call audit':'Nested tools'} · {activity.total}{expanded?' · Less':' · Details'}</Text>
-  </Pressable>
-  {rows.map(row=><View key={row.id} style={[styles.row,{marginLeft:Math.min(row.depth,3)*10}]}>
-   <Text numberOfLines={2} style={styles.name}>{row.name} · {row.status}{row.durationMs===undefined?'':` · ${Math.round(row.durationMs)} ms`}</Text>
-   {!!row.preview&&<Text selectable numberOfLines={expanded?5:2} style={styles.text}>{row.preview}</Text>}
-   {expanded&&!!row.args&&<Text selectable numberOfLines={5} style={styles.text}>Arguments: {row.args}</Text>}
-  </View>)}
-  {activity.total>rows.length&&<Text style={styles.text}>{activity.total-rows.length} more calls{expanded?` not shown (${activity.source==='live'?'latest':'first'} 50 display limit)`:' — expand for details'}.</Text>}
-  {expanded&&<Text style={styles.text}>{activity.source==='audit'?'Recorded status and argument/error excerpts; full nested results are not included.':'Live progress excerpts only; a done call does not include its full result.'}</Text>}
+  {rows.map(row=><Branch key={`${activity.source}:${row.id}`} row={row} source={activity.source}/>)}
+  {!all&&activity.total>rows.length&&<Pressable accessibilityRole="button" accessibilityLabel="More nested tool calls" accessibilityState={{expanded:false}} onPress={()=>setAll(true)} style={styles.more}><Text style={styles.text}>{activity.total-rows.length} more calls — show branches</Text></Pressable>}
+  {all&&activity.total>rows.length&&<Text style={styles.text}>{activity.total-rows.length} more calls not shown ({activity.source==='live'?'latest':'first'} 50 display limit)</Text>}
+  {all&&activity.rows.length>4&&<Pressable accessibilityRole="button" accessibilityLabel="Fewer nested tool calls" onPress={()=>setAll(false)} style={styles.more}><Text style={styles.text}>Show fewer branches</Text></Pressable>}
  </View>;
 }
 const styles=StyleSheet.create({
- container:{paddingHorizontal:12,paddingBottom:12,gap:6},
- toggle:{minHeight:44,justifyContent:'center'},
- label:{color:colors.muted,fontSize:12,lineHeight:20},
- row:{borderLeftWidth:1,borderLeftColor:colors.border,paddingLeft:10,gap:2},
- name:{color:colors.body,fontSize:12,lineHeight:20},
+ container:{marginLeft:7,paddingLeft:13,borderLeftWidth:1,borderLeftColor:colors.border},
+ branch:{minWidth:0},
+ details:{paddingLeft:21,paddingBottom:10,gap:6},
+ caption:{flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
+ more:{minHeight:48,justifyContent:'center'},
  text:{color:colors.muted,fontSize:12,lineHeight:20},
+ code:{color:colors.body,fontSize:12,lineHeight:20},
 });

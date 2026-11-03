@@ -11,40 +11,80 @@ jest.mock('lucide-react-native',()=>({ChevronDown:()=>null,ChevronRight:()=>null
 const flatten=(value:any):string=>typeof value==='string'?value:Array.isArray(value)?value.map(flatten).join(''):value?.children?flatten(value.children):'';
 const value=[{type:'toolCall',id:'code',name:'codemode',arguments:{code:'SCRIPT_BODY'}}];
 const entries:ToolEntry[]=[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:value}]}];
-const live=(output:string)=>({tools:[{callId:'code',name:'codemode',taskId:10,status:'running'}],nestedTools:[{callId:'code/c1',name:'bash',parentCallId:'code',parentTaskId:10,taskId:11,arguments:{command:'PRIVATE_ARGUMENT'},status:'running',output}]});
-test('quiet parent shows live nested status/results and updates even when parent content/status is unchanged',async()=>{
+const live=(output:string)=>({tools:[{callId:'code',name:'codemode',taskId:10,status:'running'}],nestedTools:[{callId:'code/c1',name:'bash',parentCallId:'code',parentTaskId:10,taskId:11,arguments:{command:'INLINE_COMMAND',timeout:120},status:'running',output}]});
+const press=async(tree:Renderer.ReactTestRenderer,label:string)=>act(async()=>{tree.root.findAllByProps({accessibilityLabel:label})[0].props.onPress();});
+test('codemode branches appear directly beneath a closed parent and expand independently as progress updates',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelContent quietTools value={value} results={linkToolResults(entries,live('first progress')).results}/>);});
- expect(flatten(tree.toJSON())).toContain('Nested tools · 1');
+ expect(flatten(tree.toJSON())).toContain('bash');
+ expect(flatten(tree.toJSON())).toContain('INLINE_COMMAND');
+ expect(flatten(tree.toJSON())).not.toContain('first progress');
+ expect(flatten(tree.toJSON())).not.toContain('SCRIPT_BODY');
+ await press(tree,'Nested tool details: bash · code/c1');
  expect(flatten(tree.toJSON())).toContain('bash · running');
  expect(flatten(tree.toJSON())).toContain('first progress');
+ expect(flatten(tree.toJSON())).toContain('"timeout":120');
  expect(flatten(tree.toJSON())).not.toContain('SCRIPT_BODY');
- expect(flatten(tree.toJSON())).not.toContain('PRIVATE_ARGUMENT');
  await act(async()=>tree.update(<ModelContent quietTools value={value} results={linkToolResults(entries,live('second progress')).results}/>));
  expect(flatten(tree.toJSON())).toContain('second progress');expect(flatten(tree.toJSON())).not.toContain('first progress');
- await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Nested tool activity'})[0].props.onPress());
- expect(flatten(tree.toJSON())).toContain('PRIVATE_ARGUMENT');
+ await press(tree,'Tool details: codemode');
+ expect(flatten(tree.toJSON())).toContain('SCRIPT_BODY');
+ await press(tree,'Tool details: codemode');
  expect(flatten(tree.toJSON())).not.toContain('SCRIPT_BODY');
+ expect(flatten(tree.toJSON())).toContain('second progress');
+ await press(tree,'Nested tool details: bash · code/c1');
+ expect(flatten(tree.toJSON())).not.toContain('second progress');
+ expect(flatten(tree.toJSON())).toContain('INLINE_COMMAND');
  await act(async()=>tree.unmount());
 });
-test('settled audit replaces live rows and leaves the original script/result expandable',async()=>{
+test('settled audit replaces live branches with truthful independent status and keeps original script/result expandable',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelContent quietTools value={value} results={linkToolResults(entries,live('old progress')).results}/>);});
+ await press(tree,'Nested tool details: bash · code/c1');
  const result:ToolEntry={id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'code',toolName:'codemode',content:'FINAL_SCRIPT_OUTPUT',details:{calls:[{id:1,name:'bash',args:'{}',status:'error',error:'Command failed',durationMs:123},{id:2,name:'read',args:'{}',status:'cancelled'}]}}]};
  await act(async()=>tree.update(<ModelContent quietTools value={value} results={linkToolResults([...entries,result],undefined).results}/>));
- const text=flatten(tree.toJSON());expect(text).toContain('Nested call audit · 2');expect(text).toContain('bash · error · 123 ms');expect(text).toContain('Command failed');expect(text).toContain('read · cancelled');expect(text).not.toContain('old progress');expect(text).not.toContain('FINAL_SCRIPT_OUTPUT');
- await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Tool details: codemode'})[0].props.onPress());
+ expect(flatten(tree.toJSON())).not.toContain('old progress');
+ expect(flatten(tree.toJSON())).not.toContain('Command failed');
+ expect(flatten(tree.toJSON())).not.toContain('FINAL_SCRIPT_OUTPUT');
+ expect(tree.root.findAllByProps({accessibilityLabel:'error'}).length).toBeGreaterThan(0);
+ expect(tree.root.findAllByProps({accessibilityLabel:'cancelled'}).length).toBeGreaterThan(0);
+ await press(tree,'Nested tool details: bash · 1');
+ expect(flatten(tree.toJSON())).toContain('bash · error · 123 ms');
+ expect(flatten(tree.toJSON())).toContain('Command failed');
+ expect(flatten(tree.toJSON())).toContain('full nested results are not included');
+ await press(tree,'Tool details: codemode');
  expect(flatten(tree.toJSON())).toContain('SCRIPT_BODY');expect(flatten(tree.toJSON())).toContain('FINAL_SCRIPT_OUTPUT');
  await act(async()=>tree.unmount());
 });
-test('large audits show bounded rows/excerpts with an explicit display-limit notice',async()=>{
+test('large audits keep bounded branches and excerpts with an explicit display-limit notice',async()=>{
  const nested=codemodeAudit('codemode',{calls:Array.from({length:100},(_,id)=>({id,name:`tool-${id}`,args:'x'.repeat(10000),status:'ok'}))})!;
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ToolContent quiet name="codemode" content="{}" result={{status:'done',content:'',nested}}/>);});
+ expect(flatten(tree.toJSON())).toContain('tool-0');
  expect(flatten(tree.toJSON())).toContain('96 more calls');expect(flatten(tree.toJSON())).not.toContain('tool-4');
- await act(async()=>tree.root.findAllByProps({accessibilityLabel:'Nested tool activity'})[0].props.onPress());
+ await press(tree,'More nested tool calls');
  expect(flatten(tree.toJSON())).toContain('tool-49');expect(flatten(tree.toJSON())).not.toContain('tool-50');expect(flatten(tree.toJSON())).toContain('50 more calls not shown (first 50 display limit)');
  expect(flatten(tree.toJSON())).not.toContain('x'.repeat(602));
+ await press(tree,'Nested tool details: tool-0 · 0');
  expect(flatten(tree.toJSON())).toContain('full nested results are not included');
+ await press(tree,'Fewer nested tool calls');
+ expect(flatten(tree.toJSON())).not.toContain('tool-4');
+ await act(async()=>tree.unmount());
+});
+test('expanding one branch never expands its sibling or the parent script',async()=>{
+ const nested=codemodeAudit('codemode',{calls:[{id:1,name:'bash',args:'{}',status:'error',error:'FIRST_ERROR'},{id:2,name:'read',args:'{}',status:'error',error:'SECOND_ERROR'}]})!;
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ToolContent name="codemode" content={JSON.stringify({code:'SCRIPT_BODY'})} result={{status:'done',content:'',nested}}/>);});
+ await press(tree,'Nested tool details: read · 2');
+ expect(flatten(tree.toJSON())).toContain('SECOND_ERROR');expect(flatten(tree.toJSON())).not.toContain('FIRST_ERROR');expect(flatten(tree.toJSON())).not.toContain('SCRIPT_BODY');
+ await act(async()=>tree.unmount());
+});
+
+test('bounded branch previews keep running calls and failures visible before settled calls',async()=>{
+ const nested=codemodeAudit('codemode',{calls:[...Array.from({length:5},(_,id)=>({id,name:`finished-${id}`,args:'{}',status:'ok'})),{id:6,name:'active-call',args:'{}',status:'running'},{id:7,name:'failed-call',args:'{}',status:'error',error:'ERROR_DETAIL'}]})!;
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ToolContent name="codemode" content="{}" result={{status:'running',content:'',nested}}/>);});
+ expect(flatten(tree.toJSON())).toContain('active-call');expect(flatten(tree.toJSON())).toContain('failed-call');
+ expect(flatten(tree.toJSON())).not.toContain('finished-4');expect(flatten(tree.toJSON())).not.toContain('ERROR_DETAIL');
  await act(async()=>tree.unmount());
 });

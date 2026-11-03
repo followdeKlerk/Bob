@@ -82,8 +82,9 @@ test('stored learning completions and partial outcomes are visible selectable li
    expect(texts.some(node=>['You','Sent','Input · source not identified'].includes(node.props.children))).toBe(false);
   }
   const hindsight=tree.root.findByProps({testID:'history-entry-6'});
-  expect(hindsight.findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight — save queued']);
-  expect(hindsight.findAllByType(Pressable)).toHaveLength(0);
+  expect(hindsight.findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight','save queued','…']);
+  const memoryHeader=hindsight.findAll(node=>node.props.accessibilityRole==='button'&&node.props.accessibilityLabel==='Hindsight — save queued'&&!!node.props.style)[0];
+  expect(memoryHeader.props.accessibilityState).toEqual({expanded:false});
   for(const id of [7,8,9,10]){
    const row=tree.root.findByProps({testID:`history-entry-${id}`});
    const label=id===10?'learning status injected':'learning status';

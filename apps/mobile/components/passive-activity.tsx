@@ -1,0 +1,40 @@
+import React,{useState} from 'react';
+import {StyleSheet,View} from 'react-native';
+import {CompactActivityRow} from './compact-activity-row';
+import {Text} from './app-text';
+import {memoryStatusText,inputAttribution} from '../chat-presentation';
+import type {ToolEntry} from '../tool-results';
+import {colors} from '../theme';
+
+function PassiveActivity({title,detail,status,accessibilityLabel,children}:{title:string;detail?:string;status:string;accessibilityLabel:string;children:React.ReactNode}){
+ const [expanded,setExpanded]=useState(false);
+ return <View>
+  <CompactActivityRow title={title} detail={detail} status={status} accessibilityLabel={accessibilityLabel} expanded={expanded} onPress={()=>setExpanded(!expanded)}/>
+  {expanded&&<View style={styles.details}>{children}</View>}
+ </View>;
+}
+
+/** Backend metadata stays literal, never model content or supplied status text. */
+export function HindsightActivity({entry}:{entry:ToolEntry}){
+ const label=memoryStatusText(entry);
+ if(label===undefined)return null;
+ const {phase,count,receiptKey}=entry.data as {phase:string;count?:number;receiptKey?:unknown};
+ const metadata={label,phase,...(count===undefined?{}:{count}),...(typeof receiptKey==='string'&&receiptKey.length>0&&receiptKey.length<=256?{receiptKey}:{})};
+ const status=phase==='recall'||phase==='save-completed'?'completed':phase==='save-queued'?'queued':phase==='save-processing'?'processing':phase==='save-failed'?'failed':phase==='save-cancelled'?'cancelled':'saved with warnings';
+ return <PassiveActivity title="Hindsight" detail={label.slice('Hindsight — '.length)} status={status} accessibilityLabel={label}>
+  <Text selectable style={styles.metadata}>{JSON.stringify(metadata,null,2)}</Text>
+ </PassiveActivity>;
+}
+
+/** Only explicit provenance metadata names the agent. Keep the original body/actions. */
+export function AgentReportActivity({entry,children}:{entry:ToolEntry;children:React.ReactNode}){
+ if(entry.kind!=='bob.subagent-report')return null;
+ const name=(entry.data as {name?:unknown}|undefined)?.name;
+ // A received report proves delivery, not successful completion of the agent's task.
+ return <PassiveActivity title="Agent report" detail={typeof name==='string'&&name?name:undefined} status="received" accessibilityLabel={inputAttribution(entry).label!}>{children}</PassiveActivity>;
+}
+
+const styles=StyleSheet.create({
+ details:{paddingLeft:21,paddingBottom:10,gap:6},
+ metadata:{color:colors.body,fontSize:12,lineHeight:20},
+});

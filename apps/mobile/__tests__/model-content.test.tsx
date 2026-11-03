@@ -48,3 +48,13 @@ test('read aloud only receives visible text and is absent from streaming or non-
  expect(tree.root.findAllByType(SpeechAction)).toHaveLength(0);
  await act(async()=>tree.unmount());
 });
+
+ test('consecutive tools have no extra gap but commentary and answers retain normal spacing',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const tool=(id:string)=>({type:'toolCall',id,name:'read',arguments:{path:id}});
+ await act(async()=>{tree=Renderer.create(<ModelContent value={[{type:'text',text:'Checking'},tool('first'),{type:'thinking',thinking:'hidden'},tool('second'),{type:'text',text:'Answer'}]}/>);});
+ expect(tree.root.findByProps({testID:'model-group-first'}).props.style.paddingTop).toBe(16);
+ expect(tree.root.findByProps({testID:'model-group-second'}).props.style.paddingTop).toBe(0);
+ expect(tree.root.findByProps({testID:'model-group-4'}).props.style.paddingTop).toBe(16);
+ await act(async()=>tree.unmount());
+ });

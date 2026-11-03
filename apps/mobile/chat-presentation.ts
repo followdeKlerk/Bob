@@ -1,4 +1,5 @@
 import {replyText} from './reply-text';
+import {CHAT_CONTENT_GAP} from './tool-presentation';
 import type {ToolEntry} from './tool-results';
 
 /** Only Bob's explicit owner-entry kind proves a phone-authored message.
@@ -90,4 +91,26 @@ export function compactMemoryStatuses<T extends ToolEntry>(entries:readonly T[])
   else result.push(entry);
  }
  return result;
+}
+
+/** Compact presentation only; visible prose and unknown blocks keep message spacing. */
+export function isCompactActivityEntry(entry:ToolEntry):boolean {
+ if(memoryStatusText(entry)!==undefined||entry.kind==='bob.subagent-report')return true;
+ if(entry.kind==='bob.user'||entry.kind==='pi.user'||!entry.model?.length)return false;
+ let hasTool=false;
+ for(const message of entry.model){
+  if(message.role==='toolResult'){hasTool=true;continue;}
+  if(message.role!=='assistant'||!Array.isArray(message.content))return false;
+  for(const block of message.content){
+   if(block?.type==='toolCall'){hasTool=true;continue;}
+   if(block?.type==='thinking'||block?.type==='redactedThinking'||block?.type==='text'&&!replyText(block.text))continue;
+   return false;
+  }
+ }
+ return hasTool;
+}
+
+/** No extra message gutter inside a run of compact activity rows. */
+export function chatEntryGap(first:ToolEntry|undefined,second:ToolEntry|undefined):number {
+ return first&&second&&isCompactActivityEntry(first)&&isCompactActivityEntry(second)?0:CHAT_CONTENT_GAP;
 }
