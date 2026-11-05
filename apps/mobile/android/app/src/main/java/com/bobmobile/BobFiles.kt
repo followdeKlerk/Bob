@@ -151,41 +151,29 @@ class BobFiles(private val context: ReactApplicationContext) : ReactContextBaseJ
         } finally { connection.disconnect() }
     }
     override fun getConstants(): MutableMap<String, Any> = mutableMapOf("versionCode" to BuildConfig.VERSION_CODE, "versionName" to BuildConfig.VERSION_NAME)
+    private fun updateStatus(value: UpdateStatus): WritableMap = Arguments.createMap().apply {
+        putString("state", value.state); putString("message", value.message)
+    }
+    @ReactMethod fun getUpdateStatus(sha256: String, expectedSize: Double, promise: Promise) {
+        try { promise.resolve(updateStatus(UpdateDownloads.status(context, sha256, UpdateDownloadPolicy.artifact(sha256, expectedSize)))) }
+        catch (_: Exception) { promise.reject("update", "Update status unavailable. Reopen Bob and try again.") }
+    }
     @ReactMethod fun installUpdate(url: String, token: String, identity: String, sha256: String, expectedSize: Double, promise: Promise) {
-        if (android.os.Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            try { context.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            catch (e: Exception) { promise.reject("permission", "Open Android Settings and allow Bob to install app updates"); return }
-            promise.reject("permission", "Allow updates from Bob, then return and tap Install again"); return
-        }
-        Thread {
-            var file: File? = null
+        val size = try { UpdateDownloadPolicy.validate(url, sha256, expectedSize, BuildConfig.DEBUG) }
+        catch (_: Exception) { promise.reject("update", "Invalid update metadata or paired transport"); return }
+        UiThreadUtil.runOnUiThread {
+            val activity = context.currentActivity
+            if (context.lifecycleState != com.facebook.react.common.LifecycleState.RESUMED || activity == null || activity.isFinishing || activity.isDestroyed) {
+                promise.reject("foreground", "Open Bob and tap Install to start the update"); return@runOnUiThread
+            }
             try {
-                require(Regex("^[a-f0-9]{64}$").matches(sha256)) { "Invalid update checksum" }
-                require(Regex("^/v1/updates/[A-Za-z0-9_-]{1,128}/apk$").matches(URI(url).path)) { "Invalid update endpoint" }
-                require(expectedSize >= 1 && expectedSize <= 268435456) { "Invalid update size" }
-                val directory = File(context.cacheDir, "bob-previews").apply { mkdirs() }
-                directory.listFiles()?.filter { it.name.startsWith("update-") && it.lastModified() < System.currentTimeMillis() - 86400000 }?.forEach { it.delete() }
-                file = File(directory, "update-" + UUID.randomUUID() + ".apk")
-                file.outputStream().use { receive(operation(url, token, identity, expectedSize, promise), it) }
-                require(file.length() == expectedSize.toLong()) { "Incomplete update download" }
-                val digest = java.security.MessageDigest.getInstance("SHA-256")
-                file.inputStream().use { input -> val buffer = ByteArray(65536); while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) } }
-                require(digest.digest().joinToString("") { "%02x".format(it) } == sha256) { "Update checksum mismatch" }
-                val flags = if (android.os.Build.VERSION.SDK_INT >= 28) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES else android.content.pm.PackageManager.GET_SIGNATURES
-                val candidate = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags) ?: throw Exception("Invalid Android update")
-                val installed = context.packageManager.getPackageInfo(context.packageName, flags)
-                require(candidate.packageName == context.packageName) { "This update belongs to a different app" }
-                val version = if (android.os.Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
-                val current = if (android.os.Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
-                require(version > current) { "This update is already installed or older" }
-                fun signers(info: android.content.pm.PackageInfo): List<String> = (if (android.os.Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures)?.map { java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).joinToString("") { byte -> "%02x".format(byte) } }?.sorted() ?: emptyList()
-                val signatures = signers(candidate)
-                require(signatures.isNotEmpty() && signatures == signers(installed)) { "Update signing identity does not match Bob" }
-                val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
-                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
-                promise.resolve("Android installer opened. Confirm the update there; your app data is retained.")
-            } catch (e: Exception) { file?.delete(); promise.reject("update", e.message ?: "Cannot install update") }
-        }.start()
+                val status = UpdateDownloads.status(context, sha256, size)
+                if (status.state == "ready") {
+                    activity.startActivity(Intent(activity, BobUpdateInstallActivity::class.java).putExtra("sha", sha256))
+                    promise.resolve(updateStatus(UpdateStatus("ready", "Android installer opening. Confirm there; your app data is retained.")))
+                } else promise.resolve(updateStatus(UpdateDownloads.start(context, url, token, identity, sha256, size)))
+            } catch (_: Exception) { promise.reject("update", "Cannot open the update. Reopen Bob and tap Install to try again.") }
+        }
     }
     @ReactMethod fun importMarkdown(promise: Promise) {
         val activity = context.currentActivity

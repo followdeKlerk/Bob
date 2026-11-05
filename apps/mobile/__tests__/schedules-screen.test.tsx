@@ -72,11 +72,18 @@ test('schedule footer has return left and Refresh/Create right below a separate 
   expect(heading.props).toMatchObject({title:'Schedules',subtitle:'This workstation'});
   expect(heading.findAllByType(RoundAction)).toHaveLength(0);
   const footer=tree.root.findByType(SectionActions);expect(footer.props.onBack).toBe(back);
-  const body=heading.parent!.children[1] as Renderer.ReactTestInstance;
+  const host=heading.parent!.findByProps({testID:'section-scroll-host'}),body=host.children[0] as Renderer.ReactTestInstance;
   expect(StyleSheet.flatten(body.props.style)).toMatchObject({flex:1,minHeight:0});
   expect(StyleSheet.flatten(body.findByType(require('react-native').FlatList).props.style)).toMatchObject({flex:1,minHeight:0});
-  expect(body.findAllByType(SectionActions)).toHaveLength(0);
-  expect(heading.parent!.children.indexOf(body)).toBeLessThan(heading.parent!.children.indexOf(footer));
+  expect(body.findByType(require('react-native').FlatList).findAllByType(SectionActions)).toHaveLength(0);
+  expect(footer.parent!.props.testID).toBe('section-footer-overlay');
+  const list=tree.root.findByType(require('react-native').FlatList),overlay=tree.root.findByProps({testID:'section-footer-overlay'});
+  act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:176}}}));
+  expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(220);
+  expect(tree.root.findByType(require('react-native').FlatList)===list).toBe(true);
+  expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+
+  expect(StyleSheet.flatten(footer.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
   expect(footer.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'schedules-menu-control'}).length).toBeGreaterThan(0);
   expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules','Create a schedule in chat']);
   const actions=footer.findByProps({testID:'section-footer-actions'});

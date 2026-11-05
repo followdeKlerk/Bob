@@ -6,7 +6,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Check,Search,Star,X} from 'lucide-react-native';
 import {Button} from './ui/button';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,SectionActions,RoundAction,SectionAction} from './section-ui';
+import {SectionHeading,SectionActions,SectionBody,RoundAction,SectionAction} from './section-ui';
 export type ModelOption={provider:string;modelId:string;name:string;available?:boolean;thinkingLevels?:string[]};
 export type ModelChoice={model?:{provider:string;modelId:string};thinkingLevel?:string};
 const favoriteKey='model-favorites:v1';
@@ -40,6 +40,7 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
    <Pressable style={StyleSheet.absoluteFill} onPress={()=>{if(!saving)onClose();}} accessibilityLabel="Close model selection"/>
    <SafeAreaView edges={['top','bottom']} style={s.sheet}>
     <SectionHeading title="Model & thinking"/>
+    <SectionBody footer={<SectionActions overlay leading={<RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionActions>}>{clearance=><>
     <FlatList data={rows} keyExtractor={key} style={s.models} keyboardShouldPersistTaps="handled" extraData={[selected,favorites,favoriteSaving,saving,loading]} ListHeaderComponent={<View style={s.header}>
      <View testID="current-model-summary" style={s.summary}><Text style={s.label}>Current model</Text><Text selectable style={s.text}>{loading?'Loading…':currentModel?.name??current.model?.modelId??'Not configured'}</Text><Text style={s.caption}>{current.model?.provider}{current.thinkingLevel?` · ${labels[current.thinkingLevel]??current.thinkingLevel} thinking`:''}</Text></View>
      <View style={s.search}><Search size={19} color={colors.muted}/><TextInput style={s.input} value={query} onChangeText={setQuery} editable={!saving} placeholder="Search models" placeholderTextColor={colors.muted} accessibilityLabel="Search models" autoCapitalize="none"/></View>
@@ -53,7 +54,7 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
     </View>;}} ListEmptyComponent={<Text style={s.caption}>{loading?'Loading available models…':available.length?'No matching models.':'Connect a provider in Settings to choose a model.'}</Text>}/>
     {/* Keep staged controls outside the virtualized catalog; scroll them independently on short screens. */}
     <View testID="selected-model-panel" style={s.selection}>
-     <ScrollView testID="selected-model-controls" style={s.controls} contentContainerStyle={s.section} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+     <ScrollView testID="selected-model-controls" style={s.controls} contentContainerStyle={[s.section,{paddingBottom:clearance+8}]} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
       <View style={s.summary}><Text style={s.label}>Selected model</Text><Text selectable style={s.text}>{chosen?.name??'Choose a model'}</Text>{!!chosen&&<Text style={s.caption}>{chosen.provider} · {pending?'Changes not applied':'Current selection'}</Text>}</View>
       <Text style={s.label}>Thinking effort</Text>
       <View style={s.wrap}>{levels.map(level=><Button key={level} variant={thinking===level?'secondary':'ghost'} style={[s.filter,thinking===level&&s.choice]} disabled={saving||loading} onPress={()=>setThinking(level)} accessibilityLabel={`${labels[level]??level} thinking`} accessibilityRole="radio" accessibilityState={{checked:thinking===level}}>{thinking===level&&<Check size={18} color={colors.accent}/>}<Text style={s.text}>{labels[level]??level}</Text></Button>)}</View>
@@ -62,7 +63,7 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
      </ScrollView>
 
     </View>
-    <SectionActions leading={<RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionActions>
+    </>}</SectionBody>
    </SafeAreaView>
   </KeyboardAvoidingView>
  </Modal>;

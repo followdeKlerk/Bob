@@ -6,6 +6,7 @@ import {themed,useTheme,useThemedValue} from '../theme';
 import {Button} from './ui/button';
 import {Tabs,TabsList,TabsTrigger} from './ui/tabs';
 import {Text as ControlText} from './ui/text';
+import {EdgeFade} from './edge-fade';
 
 /** Shared chrome for non-chat destinations. Keep content readable as text grows. */
 export const sectionStylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
@@ -30,16 +31,34 @@ export function SectionHeading({title,subtitle}:{title:string;subtitle?:string})
   {!!subtitle&&<Text testID="section-heading-subtitle" style={s.subtitle}>{subtitle}</Text>}
  </View>;
 }
+/** Full-height scroll host: the footer is absolute, never an in-flow cutoff.
+ * Render functions are called normally (not mounted as component types), so
+ * measurements update padding without replacing lists, inputs or draft state.
+ * Insets belong to the existing screen/Modal parent, not this inner frame.
+ * Include every persistent footer row in `footer` so its full height is measured. */
+export function SectionBody({footer,children,surfaceColor,style}:{footer:React.ReactNode;children:(clearance:number)=>React.ReactNode;surfaceColor?:string;style?:StyleProp<ViewStyle>}){
+ const [height,setHeight]=React.useState(80);
+ const clearance=height+12;
+ return <View testID="section-scroll-host" style={[{flex:1,minHeight:0},style]}>
+  {children(clearance)}
+  <EdgeFade edge="bottom" height={clearance} color={surfaceColor}/>
+  <View testID="section-footer-overlay" pointerEvents="box-none" style={{position:'absolute',left:0,right:0,bottom:0}} onLayout={event=>{
+   const next=event.nativeEvent.layout.height;
+   if(Number.isFinite(next)&&next>0)setHeight(next);
+  }}>{footer}</View>
+ </View>;
+}
 /** Controls use natural flow, including wrapped large text. Normal screen hosts
  * reserve this below an expanding body; floating hosts must reserve its measured
- * height in scroll clearance. The host owns safe-area/IME insets once.
+ * height in scroll clearance. Overlay mode leaves the host fade visible and
+ * removes the hard divider. The host owns safe-area/IME insets once.
  * Return stays left, page actions follow, and Menu stays at the bottom right. */
-export function SectionActions({onBack,leading,children,menu}:{onBack?:()=>void;leading?:React.ReactNode;children?:React.ReactNode;menu?:React.ReactNode}){
+export function SectionActions({onBack,leading,children,menu,overlay=false}:{onBack?:()=>void;leading?:React.ReactNode;children?:React.ReactNode;menu?:React.ReactNode;overlay?:boolean}){
  const s=useThemedValue(sectionStylesTheme);
  const hasActions=React.Children.toArray(children).length>0;
  const returnControl=leading??(onBack?<RoundAction label="Back to previous menu" icon={ArrowLeft} onPress={onBack}/>:undefined);
  if(!returnControl&&!hasActions&&!menu)return null;
- return <View pointerEvents="box-none" testID="section-footer" style={s.footer}>
+ return <View pointerEvents="box-none" testID="section-footer" style={[s.footer,overlay&&{backgroundColor:'transparent',borderTopWidth:0}]}>
   <View pointerEvents="box-none" testID="section-footer-toolbar" style={s.toolbar}>
    {!!returnControl&&<View pointerEvents="box-none" testID="section-footer-leading" style={s.leading}>{returnControl}</View>}
    {hasActions&&<View pointerEvents="box-none" testID="section-footer-actions" style={s.actions}>{children}</View>}

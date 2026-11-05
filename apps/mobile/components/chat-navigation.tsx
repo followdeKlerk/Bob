@@ -5,7 +5,7 @@ import {Menu as NavigationMenu,MessagesSquare,NotebookPen,Monitor,Users,Settings
 import {Text} from './app-text';
 import type {BottomDestination} from './bottom-tabs';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,SectionActions,RoundAction} from './section-ui';
+import {SectionHeading,SectionActions,SectionBody,RoundAction} from './section-ui';
 
 const destinations:{id:BottomDestination;icon:LucideIcon}[]=[
  {id:'Sessions',icon:MessagesSquare},
@@ -33,14 +33,15 @@ export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,
     <Pressable accessibilityRole="button" accessibilityLabel="Dismiss navigation menu" onPress={onClose} style={StyleSheet.absoluteFill}/>
     <SafeAreaView edges={['left','right','bottom']} testID="chat-navigation-sheet" accessibilityViewIsModal onAccessibilityEscape={onClose} style={s.sheet}>
      <SectionHeading title="Menu"/>
-     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} style={s.scroll}>
+     <SectionBody surfaceColor={colors.surface} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/>}/>}>{clearance=>
+     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content,{paddingBottom:clearance+12}]} style={s.scroll}>
       {destinations.map(({id,icon:Icon})=><Pressable key={id} accessibilityRole="button" accessibilityLabel={id} accessibilityValue={id==='Agents'?{text:agentActivity}:undefined} accessibilityState={{selected:id==='Chat'}} onPress={()=>onSelect(id)} style={s.row}>
        <Icon size={23} color={colors.foreground}/>
        <Text style={s.label}>{id}</Text>
        {id==='Agents'&&count>0&&<Text accessible={false} style={s.count}>{count}</Text>}
       </Pressable>)}
      </ScrollView>
-     <SectionActions leading={<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/>}/>
+     }</SectionBody>
     </SafeAreaView>
    </View>
   </Modal>

@@ -21,7 +21,7 @@ import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {ThemeProvider} from './theme-provider';
 import {AppearanceSettings} from './components/appearance-settings';
-import {SettingsGroup,SettingsRow,SectionHeading,SectionActions,RoundAction} from './components/section-ui';
+import {SettingsGroup,SettingsRow,SectionHeading,SectionActions,SectionBody,RoundAction} from './components/section-ui';
 import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks,Users,Settings as SettingsIcon} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {type BottomDestination} from './components/bottom-tabs';
@@ -823,7 +823,7 @@ function Main() {
   // Legacy/unloaded anchors stay reachable without becoming a permanent row
   // beneath every new reply in the inverted chat list.
   const unlinkedSurfaces=surfaces.filter(item=>item.backendId===backend?.backendId&&item.value.conversationId===chat&&!parentLinked.surfaceAnchors.has(item.value.id.toLowerCase()));
-  function transcript(v?: Snapshot,isChild=false) {
+  function transcript(v?: Snapshot,isChild=false,footerClearance=0) {
     const history=!isChild?parentHistory:childHistory,stored=history.page;
     const follow=!isChild?parentFollow:childFollow;
     const linked=isChild?childLinked:parentLinked;
@@ -861,7 +861,7 @@ function Main() {
         // offset zero instead of preserving an old cell and scrolling it back.
         maintainVisibleContentPosition={follow.following?undefined:{minIndexForVisible:0}}
         keyExtractor={transcriptKey}
-        contentContainerStyle={[styles.messages,{gap:0},!isChild&&{paddingTop:16,paddingBottom:16}]}
+        contentContainerStyle={[styles.messages,{gap:0},!isChild?{paddingTop:16,paddingBottom:16}:{paddingTop:footerClearance+16}]}
         ItemSeparatorComponent={({leadingItem}:{leadingItem?:Entry})=><View testID="chat-entry-separator" style={{height:leadingItem?entryGaps.get(leadingItem.id)??CHAT_CONTENT_GAP:CHAT_CONTENT_GAP}}/>}
         ListHeaderComponentStyle={{paddingBottom:CHAT_CONTENT_GAP}}
         ListFooterComponentStyle={{paddingTop:CHAT_CONTENT_GAP}}
@@ -872,7 +872,7 @@ function Main() {
         ListEmptyComponent={linked.rawEntries.length?undefined:<View style={{paddingVertical:24,gap:12}}>
           {isChild&&!!emptyConversationMessage(history)&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{emptyConversationMessage(history)}</Text>}
         </View>}
-        scrollIndicatorInsets={!isChild?{top:0,bottom:0}:undefined}
+        scrollIndicatorInsets={{top:0,bottom:isChild?footerClearance:0}}
 
         ListHeaderComponent={<View style={{gap:CHAT_CONTENT_GAP}} onLayout={event=>{if(!isChild)setVisualWidth(event.nativeEvent.layout.width);}}>
           {!isChild && !!surfaceError && <Text style={styles.caption}>{surfaceError}</Text>}
@@ -905,7 +905,7 @@ function Main() {
           </View>;
         }}
       />
-      {isChild&&follow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest child message" onPress={follow.resume} style={{position:'absolute',bottom:16,right:20,width:48,height:48,borderRadius:24,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderColor:colors.border,borderWidth:1}}><ArrowDown size={22} color={colors.foreground}/></Pressable>}
+      {isChild&&follow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest child message" onPress={follow.resume} style={{position:'absolute',bottom:footerClearance+16,right:20,width:48,height:48,borderRadius:24,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderColor:colors.border,borderWidth:1}}><ArrowDown size={22} color={colors.foreground}/></Pressable>}
       </View>
     );
   }
@@ -995,13 +995,14 @@ function Main() {
         onDismiss={()=>setSlashDismissed(true)}
         onSelect={entry=>{setDraft(pickerRequest(entry));setSlashDismissed(true);}}
       />}
-      {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} visible={screen==='Agents'} agents={visibleAgents} selected={displayedChild} onSelect={setChild} history={agentHistory} historyCount={inactiveAgents.length} onHistoryChange={value=>{setChild(undefined);setAgentHistory(value);}} status={childStatus} hasConversation={!!backend&&!!chat}>{displayedChild&&transcript(childView,true)}</AgentsScreen>}
+      {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} visible={screen==='Agents'} agents={visibleAgents} selected={displayedChild} onSelect={setChild} history={agentHistory} historyCount={inactiveAgents.length} onHistoryChange={value=>{setChild(undefined);setAgentHistory(value);}} status={childStatus} hasConversation={!!backend&&!!chat}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
       {backend&&<NotesScreen menu={screen==='Notes'?sectionMenu:undefined} key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
       {backend&&<SchedulesScreen menu={screen==='Schedules'?sectionMenu:undefined} key={'schedules:'+backend.backendId} visible={screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
       {screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <View testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>
           <SectionHeading title={screen}/>
-          <ScrollView testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:0,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
+          <SectionBody footer={<SectionActions overlay menu={sectionMenu} onBack={screen!=='Settings'?backSection:undefined}/>}>{clearance=>
+          <ScrollView testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:0,paddingHorizontal:20,paddingBottom:clearance+28,gap:18}]}>
 
           {sectionLoading?<View testID="section-loading-overlay" style={{minHeight:160,alignItems:'center',justifyContent:'center',gap:12}}><ActivityIndicator color={colors.accent}/><Text style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>:<>
           {!!sectionError&&<View style={{gap:8}}><Text style={styles.caption}>{sectionError}</Text><Button label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
@@ -1226,7 +1227,7 @@ function Main() {
           )}
           </>}
           </ScrollView>
-          <SectionActions menu={sectionMenu} onBack={screen!=='Settings'?backSection:undefined}/>
+          }</SectionBody>
         </View>
       )}
       <Modal visible={actions} transparent animationType="none" onRequestClose={()=>setActions(false)}>
@@ -1234,7 +1235,8 @@ function Main() {
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
           {!actionsMore?<PlusMenu bottom={Math.max(insets.bottom+12,keyboardInset+composerHeight+8)} maxHeight={Math.max(140,windowSize.height-Math.max(insets.bottom+12,keyboardInset+composerHeight+8)-insets.top-20)} disabled={!chat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>:<SafeAreaView edges={['bottom']} style={styles.actionSheet}>
             <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"/></View>
-            <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <SectionBody style={{flex:undefined,flexShrink:1,marginHorizontal:-20,marginBottom:-20}} footer={<SectionActions overlay leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/>}>{clearance=>
+            <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:20,paddingBottom:clearance+20}}>
               <Text accessibilityLiveRegion="polite" style={[styles.caption,{marginBottom:12}]}>{backend?.name??'Workstation'} · {busy?'Working':status}</Text>
               <SettingsGroup title="Messages">
                 {busy&&<Button label="Send now to steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
@@ -1262,7 +1264,7 @@ function Main() {
                 <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
               </SettingsGroup>}
             </ScrollView>
-            <View style={{marginHorizontal:-20,marginBottom:-20}}><SectionActions leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/></View>
+            }</SectionBody>
           </SafeAreaView>}
         </View>
       </Modal>

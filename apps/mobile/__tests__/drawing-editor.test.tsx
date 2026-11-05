@@ -10,7 +10,7 @@ jest.mock('react-native-safe-area-context',()=>({SafeAreaView:'SafeAreaView'}));
 jest.mock('lucide-react-native',()=>({RotateCcw:()=>null,RotateCw:()=>null}));
 jest.mock('react-native-svg',()=>{
  const {forwardRef,useImperativeHandle,createElement:mockElement}=require('react');
- return {__esModule:true,default:forwardRef((props:any,ref:any)=>{useImperativeHandle(ref,()=>({toDataURL:mockExport}));return mockElement('Svg',props,props.children);}),Path:'Path'};
+ return {__esModule:true,default:forwardRef((props:any,ref:any)=>{useImperativeHandle(ref,()=>({toDataURL:mockExport}));return mockElement('Svg',props,props.children);}),Path:'Path',Defs:'Defs',LinearGradient:'LinearGradient',Rect:'Rect',Stop:'Stop'};
 });
 const find=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
 const canvas=(tree:Renderer.ReactTestRenderer)=>tree.root.findAll(node=>node.props.accessibilityLabel==='Drawing canvas'&&typeof node.props.onLayout==='function')[0];
@@ -23,7 +23,7 @@ async function mount(onAdd=jest.fn().mockResolvedValue(undefined),onCancel=jest.
 }
 async function draw(x=10,y=20){await act(async()=>canvas(tree).props.onTouchStart({nativeEvent:{locationX:x,locationY:y}}));}
 async function resize(width:number,height:number){await act(async()=>canvas(tree).props.onLayout({nativeEvent:{layout:{width,height}}}));}
-const svg=()=>tree.root.findByType('Svg' as any);
+const svg=()=>tree.root.findAllByType('Svg' as any).find(node=>node.props.viewBox)!;
 beforeEach(()=>{
  mockExport.mockReset().mockImplementation((callback:(value:string)=>void)=>callback('png'));
  jest.spyOn(PanResponder,'create').mockImplementation((config:any)=>({panHandlers:{onTouchStart:config.onPanResponderGrant,onTouchMove:config.onPanResponderMove,onTouchEnd:config.onPanResponderRelease}} as any));
@@ -188,4 +188,15 @@ test('drawing keeps Cancel left and primary Add right in a separate bottom foote
  expect(tree.root.findAllByType('Path' as any)[0].props.fill).toBe('#ffffff');
  await act(async()=>find(tree,'Eraser').props.onPress());
  expect(StyleSheet.flatten(find(tree,'Eraser').props.style)).toMatchObject({borderRadius:14,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+});
+
+
+test('non-scroll drawing paper stays outside measured controls while its strokes and canvas identity survive footer wrapping',async()=>{
+ await mount();await draw();
+ const paper=canvas(tree),before=ink(tree)[0].props.d,overlay=tree.root.findByProps({testID:'section-footer-overlay'});
+ act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:176}}}));
+ expect(StyleSheet.flatten(paper.props.style).marginBottom).toBe(200);
+ expect(canvas(tree)===paper).toBe(true);expect(ink(tree)[0].props.d).toBe(before);
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+ expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({position:'absolute',bottom:0});
 });

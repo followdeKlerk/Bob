@@ -39,8 +39,17 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
  expect(scroll.findAllByType(SectionHeading)).toHaveLength(0);
  expect(scroll.findAllByType(SectionActions)).toHaveLength(0);
  expect(footer.findByProps({testID:'section-footer-leading'}).findAllByProps({accessibilityLabel:'Close navigation menu'}).length).toBeGreaterThan(0);
- expect(footer.parent).toBe(scroll.parent);
- expect(scroll.parent!.children.indexOf(scroll)).toBeLessThan(scroll.parent!.children.indexOf(footer));
+ expect(footer.parent!.props.testID).toBe('section-footer-overlay');
+ expect(StyleSheet.flatten(footer.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
+ expect(scroll.parent!.props.testID).toBe('section-scroll-host');
+ const overlay=sheet.findByProps({testID:'section-footer-overlay'});
+ act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:168}}}));
+ expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(192);
+ expect(sheet.findByType(ScrollView)===scroll).toBe(true);
+ const fade=sheet.findByType(require('../components/edge-fade').EdgeFade);
+ expect(fade.props).toMatchObject({edge:'bottom',height:180,color:StyleSheet.flatten(sheet.props.style).backgroundColor});
+ expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+
  const destinations=['Sessions','Notes','Workstations','Agents','Settings','Chat'];
  for(const destination of destinations){
   const row=scroll.findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0];

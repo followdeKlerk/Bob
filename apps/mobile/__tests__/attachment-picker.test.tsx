@@ -146,8 +146,9 @@ test('attachment modal keeps Close left and Add right in a separate bottom foote
   const list=tree.root.findByType(require('react-native').FlatList);
   expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
   expect(heading.props.children).toBeUndefined();
-  expect(footer.parent).toBe(list.parent);
-  expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(footer));
+  expect(footer.parent!.props.testID).toBe('section-footer-overlay');
+  expect(StyleSheet.flatten(footer.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
+  expect(list.parent!.props.testID).toBe('section-scroll-host');
   expect(list.findAllByProps({testID:'section-footer'})).toHaveLength(0);
   expect(footer.findByProps({testID:'section-footer-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
   expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
@@ -178,4 +179,28 @@ test('attachment input dialog preserves native Android resize without adding Act
   if(tree)await act(async()=>tree.unmount());
   Object.defineProperty(Platform,'OS',originalOS);
  }
+});
+
+
+test('selection summary and Add/Close share one measured overlay; browser viewport and selection survive footer reflow',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<AttachmentPicker initialTab="files" limit={1000} onClose={()=>{}} onAdd={()=>{}}/>);});
+ try{
+  const list=tree.root.findByType(require('react-native').FlatList),overlay=tree.root.findByProps({testID:'section-footer-overlay'});
+  await act(async()=>find(tree,'report.pdf').props.onPress());
+  expect(overlay.findAll(node=>node.props.accessibilityLabel==='Clear selection').length).toBeGreaterThan(0);
+  expect(overlay.findAll(node=>node.props.accessibilityLabel==='Add 1 attachments').length).toBeGreaterThan(0);
+  for(const height of [216,144]){
+   act(()=>overlay.props.onLayout({nativeEvent:{layout:{height}}}));
+   expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(height+28);
+   expect(tree.root.findByType(require('react-native').FlatList)===list).toBe(true);
+   expect(find(tree,'report.pdf').props.accessibilityState.checked).toBe(true);
+   expect(tree.root.findByType(require('../components/edge-fade').EdgeFade).props.height).toBe(height+12);
+  }
+  await act(async()=>find(tree,'Clear selection').props.onPress());
+  expect(find(tree,'report.pdf').props.accessibilityState.checked).toBe(false);
+  act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:64}}}));
+  expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(92);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+ }finally{await act(async()=>tree.unmount());}
 });

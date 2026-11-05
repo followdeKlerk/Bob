@@ -5,7 +5,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import Svg,{Path} from 'react-native-svg';
 import {RotateCcw,RotateCw} from 'lucide-react-native';
 import {themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,SectionActions,SectionAction} from './section-ui';
+import {SectionHeading,SectionActions,SectionBody,SectionAction} from './section-ui';
 
 type Size={width:number;height:number};
 type Stroke={color:string;width:number;points:{x:number;y:number}[]};
@@ -92,13 +92,16 @@ export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel
    <View style={s.widthRow}><Text style={s.widthLabel}>Width</Text>{[3,5,8].map(value=><Pressable key={value} accessibilityRole="button" accessibilityLabel={`Pen width ${value}`} accessibilityState={{selected:penWidth===value,disabled:saving}} disabled={saving} onPress={()=>setPenWidth(value)} style={[s.widthChoice,penWidth===value&&s.selected]}><View style={{width:value+5,height:value+5,borderRadius:12,backgroundColor:colors.foreground}}/></Pressable>)}</View>
    {saving&&<Text accessibilityLiveRegion="polite" style={s.feedback}>Adding drawing…</Text>}
    {!!error&&<Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={s.feedback}>{error} Your drawing is still here.</Text>}
-   <View onLayout={event=>{const layout=event.nativeEvent.layout;viewport.current={width:layout.width,height:layout.height};setCanvas(viewport.current);}} style={s.canvas} {...responder.panHandlers} accessibilityLabel="Drawing canvas" accessibilityRole="image">
+   {/* A gesture canvas is not a scroll viewport: keep the paper above the
+       measured controls so strokes can never be hidden under Add/Cancel. */}
+   <SectionBody footer={<SectionActions overlay leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionActions>}>{clearance=>
+   <View onLayout={event=>{const layout=event.nativeEvent.layout;viewport.current={width:layout.width,height:layout.height};setCanvas(viewport.current);}} style={[s.canvas,{marginBottom:clearance+12}]} {...responder.panHandlers} accessibilityLabel="Drawing canvas" accessibilityRole="image">
     <Svg ref={svgRef} pointerEvents="none" width={fit.width} height={fit.height} style={{position:'absolute',left:fit.left,top:fit.top}} viewBox={`0 0 ${Math.max(1,size.width)} ${Math.max(1,size.height)}`} preserveAspectRatio="xMidYMid meet">
      <Path d={`M0 0 H${size.width} V${size.height} H0 Z`} fill="#ffffff"/>
      {strokes.map((stroke,index)=><Path key={index} d={pathFor(stroke)} stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
     </Svg>
    </View>
-   <View style={{marginHorizontal:-12}}><SectionActions leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionActions></View>
+   }</SectionBody>
   </SafeAreaView>
  </Modal>;
 }

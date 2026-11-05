@@ -1,7 +1,7 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image,Text,Keyboard,Modal,Dimensions} from 'react-native';
+import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image,Text,Keyboard,Modal,Dimensions,ScrollView} from 'react-native';
 import {CompactActivityRow} from '../components/compact-activity-row';
 import {ModelContent} from '../components/model-content';
 import {ChatBubble} from '../components/chat-bubble';
@@ -17,7 +17,7 @@ import {InlineSurface} from '../components/inline-surface';
 import {BottomTabs,type BottomDestination} from '../components/bottom-tabs';
 import {ChatNavigation} from '../components/chat-navigation';
 import {SkillPicker} from '../components/skill-picker';
-import {SettingsGroup,SectionHeading,SectionActions} from '../components/section-ui';
+import {SettingsGroup,SectionHeading,SectionActions,SectionBody} from '../components/section-ui';
 import {SideDrawer} from '../components/side-drawer';
 import {DrawingEditor} from '../components/drawing-editor';
 import App from '../App';
@@ -92,6 +92,16 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
    expect(header.findAllByType(ChatNavigation)).toHaveLength(0);
    expect(tree.root.findAllByType(SectionActions).some(footer=>footer.findAllByType(ChatNavigation).includes(visibleNavigation(tree)))).toBe(true);
    expect(tree.root.findAllByType(ChatNavigation).filter(node=>node.props.showTrigger!==false)).toHaveLength(1);check();
+   if(destination==='Notes'||destination==='Agents'||destination==='Settings'){
+    const root=tree.root.findByProps({testID:destination==='Notes'?'notes-screen':destination==='Agents'?'agents-screen':'section-overlay'});
+    const host=root.findByType(SectionBody),overlay=host.findByProps({testID:'section-footer-overlay'});
+    act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:184}}}));
+    expect(host.findByType(EdgeFade).props.height).toBe(196);
+    expect(StyleSheet.flatten(host.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+    if(destination==='Notes')expect(StyleSheet.flatten(root.findByType(require('react-native').FlatList).props.contentContainerStyle).paddingBottom).toBe(224);
+    if(destination==='Settings')expect(StyleSheet.flatten(root.findByProps({testID:'section-body'}).props.contentContainerStyle).paddingBottom).toBe(224);
+   }
+
    await navigateTo(tree,'Chat');expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);check();
   }
   await navigateTo(tree,'Settings');
@@ -107,7 +117,19 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
    expect(await AsyncStorage.getItem('appearance')).toBe(mode.toLowerCase());check();
    expect(tree.root.findAll(node=>node.props.accessibilityLabel===`${mode} theme`&&node.props.accessibilityRole==='radio')[0].props.accessibilityState.checked).toBe(true);
   }
+
   await navigateTo(tree,'Chat');check();
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Chat actions'}).props.onPress());
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'More'}).props.onPress());
+  const moreHeading=tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='More actions')!;
+  expect(moreHeading.props.title).toBe('More actions');
+  const more=tree.root.findAllByType(SectionBody).find(host=>host.findAllByProps({accessibilityLabel:'Close actions'}).length>0)!,moreScroll=more.findByType(ScrollView);
+  act(()=>more.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:168}}}));
+  expect(StyleSheet.flatten(moreScroll.props.contentContainerStyle).paddingBottom).toBe(200);
+  expect(more.findByType(EdgeFade).props.color).toBeUndefined(); // action sheet uses the default background token
+  expect(StyleSheet.flatten(more.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+  check();
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Close actions'}).props.onPress());check();
   expect(scroll).not.toHaveBeenCalled();
   expect(StyleSheet.flatten(tree.root.findByProps({testID:'chat-composer'}).props.style)).toMatchObject({paddingHorizontal:12,paddingBottom:12});
   const row=tree.root.findByProps({testID:'composer-row'});expect(StyleSheet.flatten(row.props.style)).toMatchObject({flexDirection:'row'});
@@ -120,6 +142,11 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Advanced modules'&&typeof node.props.onPress==='function')[0].props.onPress());
   const loading=tree.root.findByProps({testID:'section-loading-overlay'});
   expect(StyleSheet.flatten(loading.props.style).position).not.toBe('absolute');
+  const moduleHost=tree.root.findByProps({testID:'section-overlay'}).findByType(SectionBody),moduleScroll=moduleHost.findByProps({testID:'section-body'});
+  act(()=>moduleHost.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:176}}}));
+  expect(StyleSheet.flatten(moduleScroll.props.contentContainerStyle).paddingBottom).toBe(216);
+  expect(moduleHost.findByProps({testID:'section-body'})===moduleScroll).toBe(true);
+
   expect(tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='Modules')!.findAllByType(ChatNavigation)).toHaveLength(0);
   expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionActions).findAllByType(ChatNavigation)).toContain(visibleNavigation(tree));
   await navigateTo(tree,'Chat');check();
@@ -506,6 +533,18 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  await navigateTo(tree,'Agents');
  expect(tree.root.findByProps({testID:'agents-screen'})).toBeDefined();
  expect(tree.root.findByProps({testID:'child-history-list'})).toBeDefined();
+ const childList=tree.root.findByProps({testID:'child-history-list'}),agentHost=tree.root.findByProps({testID:'agents-screen'}).findByType(SectionBody);
+ expect(childList.props.inverted).toBe(true);
+ for(const height of [184,96]){
+  act(()=>agentHost.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height}}}));
+  // Inverted lists need physical-bottom clearance in paddingTop, not paddingBottom.
+  expect(StyleSheet.flatten(childList.props.contentContainerStyle).paddingTop).toBe(height+28);
+  expect(childList.props.scrollIndicatorInsets.bottom).toBe(height+12);
+  expect(tree.root.findByProps({testID:'child-history-list'})===childList).toBe(true);
+  expect(tree.root.findByProps({testID:'chat-history-list'})===list).toBe(true);
+  expect(draft.props.value).toBe('Draft stays here');
+ }
+
  expect(tree.root.findByProps({testID:'chat-history-list'})).toBe(list);
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'chat-composer'}).props.style).opacity).toBe(0);
  expect(tree.root.findByProps({accessibilityLabel:'View agent Audit helper'}).props.accessibilityState.selected).toBe(true);

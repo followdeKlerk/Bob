@@ -59,10 +59,11 @@ test('agent history and root Menu belong to the footer after the retained flexib
  try{
   const heading=tree.root.findByType(SectionHeading),footer=tree.root.findByType(SectionActions),host=heading.parent!;
   expect(heading.props).toEqual({title:'Agents',subtitle:'This conversation · view only'});
-  const body=host.children[1] as Renderer.ReactTestInstance;
+  const body=host.findByProps({testID:'section-scroll-host'});
   expect(StyleSheet.flatten(body.props.style)).toMatchObject({flex:1,minHeight:0});
-  expect(body.findAllByProps({accessibilityLabel:'Agent history'})).toHaveLength(0);
-  expect(host.children.indexOf(footer)).toBeGreaterThan(host.children.indexOf(body));
+  expect(footer.props.overlay).toBe(true);
+  expect(footer.parent!.props.testID).toBe('section-footer-overlay');
+  expect(body.findByType(SectionActions)===footer).toBe(true);
   expect(footer.findByProps({testID:'section-footer-actions'}).findAllByProps({accessibilityLabel:'Agent history'}).length).toBeGreaterThan(0);
   expect(footer.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'agents-menu-control'}).length).toBeGreaterThan(0);
  }finally{await act(async()=>tree.unmount());}

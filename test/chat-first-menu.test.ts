@@ -11,7 +11,7 @@ test('Bob menu replaces bottom tabs throughout the app; chat-managed configurati
  assert.match(app,/(?:label|title)="Advanced modules"/);
  assert.doesNotMatch(app,/<BottomTabs\b/);
  assert.match(app,/<ChatNavigation\b/);
- assert.match(app,/<SectionActions menu=\{sectionMenu\}/);
+ assert.match(app,/<SectionBody footer=\{<SectionActions overlay menu=\{sectionMenu\}/);
  assert.doesNotMatch(app,/<SectionHeading[^>]*menu=/);
  for(const section of ['AgentsScreen','NotesScreen','SchedulesScreen','SideDrawer'])assert.match(app,new RegExp(`<${section} menu=`));
 });

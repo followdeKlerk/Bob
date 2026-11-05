@@ -189,8 +189,13 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
  try{
   const list=tree.root.findByType(FlatList),rootFooter=tree.root.findByType(SectionActions);
   expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
-  expect(rootFooter.parent).toBe(list.parent);
-  expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(rootFooter));
+  expect(rootFooter.parent!.props.testID).toBe('section-footer-overlay');
+  const rootOverlay=tree.root.findByProps({testID:'section-footer-overlay'});
+  act(()=>rootOverlay.props.onLayout({nativeEvent:{layout:{height:184}}}));
+  expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(224);
+
+  expect(StyleSheet.flatten(rootFooter.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
+  expect(list.parent!.props.testID).toBe('section-scroll-host');
   expect(rootFooter.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'notes-menu-control'}).length).toBeGreaterThan(0);
   (useKeyboardInset as jest.Mock).mockReturnValue(300);
   await act(async()=>tree.update(<NotesScreen {...props}/>));
@@ -205,7 +210,15 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   expect(StyleSheet.flatten(categoryBody.props.style)).toMatchObject({flex:1,minHeight:0});
   expect(StyleSheet.flatten(categoryHost.props.style).paddingBottom).toBe(300);
   expect(categoryFooter.findByProps({testID:'section-footer-leading'}).findAllByProps({accessibilityLabel:'Close categories'}).length).toBeGreaterThan(0);
-  expect(categoryHost.children.indexOf(categoryBody)).toBeLessThan(categoryHost.children.indexOf(categoryFooter));
+  expect(categoryFooter.parent!.props.testID).toBe('section-footer-overlay');
+  const categoryOverlay=categoryHost.findByProps({testID:'section-footer-overlay'}),categoryInput=categoryHost.findByProps({accessibilityLabel:'Category name'});
+  act(()=>categoryInput.props.onChangeText('Unsent category'));
+  act(()=>categoryOverlay.props.onLayout({nativeEvent:{layout:{height:144}}}));
+  expect(StyleSheet.flatten(categoryBody.props.contentContainerStyle).paddingBottom).toBe(172);
+  expect(categoryHost.findByProps({accessibilityLabel:'Category name'})===categoryInput).toBe(true);
+  expect(categoryInput.props.value).toBe('Unsent category');
+
+  expect(categoryBody.parent!.props.testID).toBe('section-scroll-host');
   act(()=>press(tree,'Close categories'));act(()=>press(tree,'Create note'));act(()=>input(tree,'Note body','Keep my caret'));
   const body=tree.root.findByProps({accessibilityLabel:'Note body'});
   act(()=>body.props.onSelectionChange({nativeEvent:{selection:{start:5,end:7}}}));
@@ -217,7 +230,14 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({flex:1,minHeight:0});
   expect(scroll.findAllByProps({accessibilityLabel:'Discard unsaved draft'})).toHaveLength(0);
   expect(footer.findAllByProps({accessibilityLabel:'Discard unsaved draft'}).length).toBeGreaterThan(0);
-  expect(scroll.parent!.children.indexOf(scroll)).toBeLessThan(scroll.parent!.children.indexOf(footer));
+  expect(scroll.parent!.props.testID).toBe('section-scroll-host');
+  const editorOverlay=modal.findByProps({testID:'section-footer-overlay'});
+  act(()=>editorOverlay.props.onLayout({nativeEvent:{layout:{height:224}}}));
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(252);
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})===body).toBe(true);
+  expect(body.props.value).toBe('Keep my caret');
+  expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+
   act(()=>press(tree,'Bold'));expect(body.props.value).toBe('Keep **my** caret');
  }finally{await act(async()=>tree.unmount());}
 });

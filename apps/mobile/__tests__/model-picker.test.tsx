@@ -65,8 +65,8 @@ test('thinking and selected summary are independently scrollable while Apply sta
  expect(list.props.data).toHaveLength(catalog.length);
  expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
  expect(tree.root.findByType(SectionHeading).props.children).toBeUndefined();
- expect(tree.root.findByType(SectionActions).parent).toBe(list.parent);
- expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(tree.root.findByType(SectionActions)));
+ expect(StyleSheet.flatten(tree.root.findByType(SectionActions).parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
+ expect(list.parent!.props.testID).toBe('section-scroll-host');
  expect(list.findAllByProps({testID:'section-footer'})).toHaveLength(0);
  expect(list.props.ListFooterComponent).toBeUndefined();
  expect(list.findAll(n=>n.props.testID==='selected-model-panel')).toHaveLength(0);
@@ -80,6 +80,14 @@ test('thinking and selected summary are independently scrollable while Apply sta
  expect(StyleSheet.flatten(controls.props.style)).toMatchObject({flexShrink:1});
  expect(controls.props.keyboardShouldPersistTaps).toBe('handled');
  expect(controls.findAll(n=>n.props.accessibilityLabel==='Apply model selection')).toHaveLength(0);
+ const overlay=tree.root.findByProps({testID:'section-footer-overlay'});
+ act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:176}}}));
+ expect(StyleSheet.flatten(controls.props.contentContainerStyle).paddingBottom).toBe(196);
+ expect(tree.root.findByType(FlatList)===list).toBe(true);
+ expect(tree.root.findByProps({testID:'selected-model-controls'})===controls).toBe(true);
+ expect(textContent(controls)).toContain('Alpha');
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+
  for(const label of ['All providers','openai','Off thinking','Medium thinking']){
   const chip=StyleSheet.flatten(find(tree,label).props.style);
   expect(chip.minHeight).toBeGreaterThanOrEqual(48);

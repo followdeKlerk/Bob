@@ -1,6 +1,6 @@
 import {Text} from './app-text';
-import React,{useEffect,useState} from 'react';
-import {ActivityIndicator,NativeModules,Pressable,StyleSheet,View} from 'react-native';
+import React,{useEffect,useRef,useState} from 'react';
+import {ActivityIndicator,AppState,NativeModules,Pressable,StyleSheet,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {v4 as uuid} from 'uuid';
@@ -16,18 +16,50 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
  const [busy,setBusy]=useState(false),[note,setNote]=useState(''),[failure,setFailure]=useState(''),[details,setDetails]=useState(false),[collapsed,setCollapsed]=useState(false),[request,setRequest]=useState<Request>(),[installVersion,setInstallVersion]=useState<number>(),[dismissed,setDismissed]=useState('');
  const key=`bob.update-request.${backend.backendId}`,installed=Number(NativeModules.BobFiles.versionCode??0),apk=state?.apk,job=activeBuild(state),failed=!job&&state?.jobs?.[0]?.status==='failed'?state.jobs[0]:undefined;
  const ready=!!apk&&apk.versionCode>installed,success=!!installVersion&&installed>=installVersion&&!ready;
+ const [downloadState,setDownloadState]=useState('');
+ const downloadScope=JSON.stringify([backend.backendId,backend.endpoint,apk?.releaseId,apk?.sha256,apk?.size]),scopeRef=useRef(downloadScope),receipt=useRef(0),mounted=useRef(true),installingScope=useRef<string|null>(null);
+ scopeRef.current=downloadScope;
+ const downloading=downloadState==='downloading'||downloadState==='busy';
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;receipt.current++;};},[]);
+ useEffect(()=>{
+  let alive=true;setBusy(false);setDownloadState('');setNote('');setFailure('');receipt.current++;
+  async function refreshDownload(){
+   if(!ready||!apk||installingScope.current===downloadScope||typeof NativeModules.BobFiles.getUpdateStatus!=='function')return;
+   const ticket=++receipt.current;
+   try{const value=await NativeModules.BobFiles.getUpdateStatus(apk.sha256,apk.size);if(!alive||scopeRef.current!==downloadScope||ticket!==receipt.current)return;
+    setDownloadState(value.state);setNote(value.message??'');setFailure('');
+    if(value.state==='failed'){setFailure(value.message);setNote('');}
+    if(value.state==='ready'){setInstallVersion(apk.versionCode);void AsyncStorage.setItem(`pending-install:${backend.backendId}`,String(apk.versionCode)).catch(()=>{});}
+   }catch{if(alive&&scopeRef.current===downloadScope&&ticket===receipt.current){setDownloadState('');setNote('Update status unavailable. Tap Install to check or retry; no automatic download retry.');}}
+  }
+  let timer:ReturnType<typeof setInterval>|undefined;
+  function stopPolling(){if(timer!==undefined){clearInterval(timer);timer=undefined;}}
+  function startPolling(){stopPolling();void refreshDownload();timer=setInterval(()=>void refreshDownload(),1500);}
+  if(AppState.currentState!=='background'&&AppState.currentState!=='inactive')startPolling();
+  const listener=AppState.addEventListener('change',value=>{if(value==='active')startPolling();else stopPolling();});
+  return()=>{alive=false;stopPolling();listener.remove();};
+ },[downloadScope,ready]);
  useEffect(()=>{let alive=true;void Promise.all([AsyncStorage.getItem(key),AsyncStorage.getItem(`pending-install:${backend.backendId}`),AsyncStorage.getItem(`build-dismissed:${backend.backendId}`)]).then(([pending,version,hide])=>{if(!alive)return;try{if(pending){const saved=JSON.parse(pending);if(typeof saved.id==='string'&&['update','build','rollback'].includes(saved.action)&&['android','all','backend'].includes(saved.target))setRequest(saved);}}catch{}setInstallVersion(version?Number(version):undefined);setDismissed(hide??'');}).catch(()=>{});return()=>{alive=false;};},[key]);
  useEffect(()=>{if(request&&state?.jobs?.some(job=>job.id===request.id)){setRequest(undefined);void AsyncStorage.removeItem(key).catch(()=>{});}},[state,request,key]);
  useEffect(()=>{if(!job&&!request)setCollapsed(false);},[job?.id,job?.status,request]);
  useEffect(()=>{if(job)setNote('');},[job?.id]);
  async function credential(){const c=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});if(!c)throw Error('Pairing credential unavailable');return c.password;}
  async function install(){
-  if(!apk||busy)return;setBusy(true);setFailure('');setNote('Downloading and verifying…');
-  try{await NativeModules.BobFiles.installUpdate(`${backend.endpoint}/v1/updates/${apk.releaseId}/apk`,await credential(),backend.backendId,apk.sha256,apk.size);await AsyncStorage.setItem(`pending-install:${backend.backendId}`,String(apk.versionCode));setInstallVersion(apk.versionCode);setNote('Approve installation in Android.');}
-  catch(e){setNote('');setFailure(String((e as Error).message??e));}finally{setBusy(false);}
+  if(!apk||busy||downloading)return;const scope=downloadScope;const ticket=++receipt.current;
+  const current=()=>mounted.current&&scopeRef.current===scope&&ticket===receipt.current;
+  installingScope.current=scope;setBusy(true);setFailure('');setNote('Starting update…');
+  try{
+   const token=await credential();if(!current())return;
+   const value=await NativeModules.BobFiles.installUpdate(`${backend.endpoint}/v1/updates/${apk.releaseId}/apk`,token,backend.backendId,apk.sha256,apk.size);
+   if(!current())return;
+   const state=typeof value?.state==='string'?value.state:'ready';setDownloadState(state);setNote(value?.message??'Approve installation in Android.');
+   if(state==='failed'){setFailure(value.message);setNote('');}
+   if(state==='ready'){void AsyncStorage.setItem(`pending-install:${backend.backendId}`,String(apk.versionCode)).catch(()=>{});setInstallVersion(apk.versionCode);}
+  }catch(e){if(current()){setNote('');setFailure(String((e as Error).message??e));}}
+  finally{if(installingScope.current===scope)installingScope.current=null;if(mounted.current&&scopeRef.current===scope)setBusy(false);}
  }
  async function queue(target:'android'|'all'){
-  if(busy||request&&!retryable(request))return;setBusy(true);setFailure('');const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);
+  if(busy||downloading||request&&!retryable(request))return;setBusy(true);setFailure('');const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);
   try{
    const value=request??{id:'app-'+uuid(),action:'update' as const,target};await AsyncStorage.setItem(key,JSON.stringify(value));setRequest(value);
    const response=await fetch(`${backend.endpoint}/v1/updates`,{method:'POST',headers:{Authorization:'Bearer '+await credential(),'x-bob-backend':backend.backendId,'content-type':'application/json'},body:JSON.stringify(value),signal:controller.signal});
@@ -39,15 +71,15 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
  if(!visible)return null;
  const dismiss=()=>{if(job||request){setCollapsed(value=>!value);return;}setDismissed(identity);void AsyncStorage.setItem(`build-dismissed:${backend.backendId}`,identity).catch(()=>{});if(success)void AsyncStorage.removeItem(`pending-install:${backend.backendId}`).catch(()=>{});onDismiss();};
  return <View style={s.card}>
-  <View style={s.header}>{job||request||busy?<ActivityIndicator color={colors.accent}/>:success?<Check size={21} color={colors.accent}/>:<Download size={21} color={colors.muted}/>}<View style={{flex:1,gap:4}}><Text style={s.label}>App update · {backend.name}</Text><Text style={s.title}>{job?'Building update':request?'Build requested':failed?'Build needs attention':success?`App ${NativeModules.BobFiles.versionName} installed`:ready?`App ${apk!.versionName} ready`:state?.enabled===false?'Build service unavailable':'Build & install'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={job||request?(collapsed?'Expand build card':'Collapse build card'):'Dismiss build card'} onPress={dismiss} style={s.icon}>{job||request?(collapsed?<ChevronRight size={20} color={colors.muted}/>:<ChevronDown size={20} color={colors.muted}/>):<X size={20} color={colors.muted}/>}</Pressable></View>
+  <View style={s.header}>{job||request||busy||downloading?<ActivityIndicator color={colors.accent}/>:success?<Check size={21} color={colors.accent}/>:<Download size={21} color={colors.muted}/>}<View style={{flex:1,gap:4}}><Text style={s.label}>App update · {backend.name}</Text><Text style={s.title}>{job?'Building update':request?'Build requested':failed?'Build needs attention':success?`App ${NativeModules.BobFiles.versionName} installed`:ready?`App ${apk!.versionName} ready`:state?.enabled===false?'Build service unavailable':'Build & install'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={job||request?(collapsed?'Expand build card':'Collapse build card'):'Dismiss build card'} onPress={dismiss} style={s.icon}>{job||request?(collapsed?<ChevronRight size={20} color={colors.muted}/>:<ChevronDown size={20} color={colors.muted}/>):<X size={20} color={colors.muted}/>}</Pressable></View>
   {!collapsed&&<View style={s.body}>
    {!!job&&<Text accessibilityLiveRegion="polite" style={s.text}>{job.stage}</Text>}
    {!job&&!!failed&&<Text style={s.text}>{failed.error&&failed.error.length>260&&!details?failed.error.slice(0,260)+'…':failed.error??failed.stage}</Text>}
    {!!request&&!retryable(request)&&<Text style={s.text}>A previous {request.action} request is retained. Refresh to check its recorded result; it will not be resent from this card.</Text>}
    {!!note&&<Text style={s.text}>{note}</Text>}{!!failure&&<Text style={s.text}>{failure}</Text>}
    {!!error&&<Text style={s.text}>Status unavailable · {error}</Text>}
-   {ready&&!job&&!request&&<Pressable accessibilityRole="button" accessibilityLabel={`Install ${apk!.versionName}`} disabled={busy} onPress={()=>void install()} style={[s.primary,busy&&{opacity:0.5}]}><Download size={18} color={colors.onAccent}/><Text style={s.primaryText}>{busy?'Please wait…':`Install ${apk!.versionName}`}</Text></Pressable>}
-   {(focus||!!failed)&&<><Pressable accessibilityRole="button" accessibilityLabel="Build options" accessibilityState={{expanded:details}} onPress={()=>setDetails(value=>!value)} style={s.option}><Text style={s.text}>Build options</Text>{details?<ChevronDown size={17} color={colors.muted}/>:<ChevronRight size={17} color={colors.muted}/>}</Pressable>{details&&<View style={{gap:8}}><Pressable accessibilityRole="button" accessibilityLabel={request?'Retry same build request':'Build app'} disabled={busy||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('android')} style={s.secondary}><Text style={s.text}>{request?'Retry same build request':'Build app'}</Text></Pressable>{!request&&<Pressable accessibilityRole="button" accessibilityLabel="Build app and backend" disabled={busy||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('all')} style={s.secondary}><Text style={s.text}>Build app & backend</Text></Pressable>}</View>}</>}
+   {ready&&!job&&!request&&<Pressable accessibilityRole="button" accessibilityLabel={`Install ${apk!.versionName}`} disabled={busy||downloading} onPress={()=>void install()} style={[s.primary,(busy||downloading)&&{opacity:0.5}]}><Download size={18} color={colors.onAccent}/><Text style={s.primaryText}>{downloading?'Downloading…':busy?'Please wait…':`Install ${apk!.versionName}`}</Text></Pressable>}
+   {(focus||!!failed)&&<><Pressable accessibilityRole="button" accessibilityLabel="Build options" accessibilityState={{expanded:details}} onPress={()=>setDetails(value=>!value)} style={s.option}><Text style={s.text}>Build options</Text>{details?<ChevronDown size={17} color={colors.muted}/>:<ChevronRight size={17} color={colors.muted}/>}</Pressable>{details&&<View style={{gap:8}}><Pressable accessibilityRole="button" accessibilityLabel={request?'Retry same build request':'Build app'} disabled={busy||downloading||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('android')} style={s.secondary}><Text style={s.text}>{request?'Retry same build request':'Build app'}</Text></Pressable>{!request&&<Pressable accessibilityRole="button" accessibilityLabel="Build app and backend" disabled={busy||downloading||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('all')} style={s.secondary}><Text style={s.text}>Build app & backend</Text></Pressable>}</View>}</>}
    {(focus||!!failure||!!error)&&<Pressable accessibilityRole="button" accessibilityLabel="Refresh build status" onPress={onRefresh} style={s.option}><RefreshCw size={16} color={colors.muted}/><Text style={s.label}>Refresh</Text></Pressable>}
   </View>}
  </View>;

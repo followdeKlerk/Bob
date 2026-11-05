@@ -225,6 +225,11 @@ test('embedded session filters follow the measured heading without an extra scre
  expect(list.props.contentContainerStyle.paddingBottom).toBe(124);
  expect(tree.root.findByProps({testID:'drawer-header'}).findAllByProps({testID:'section-footer'})).toHaveLength(0);
  expect(footer.findAllByProps({testID:'section-footer'}).length).toBeGreaterThan(0);
+ expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+ expect(footer.findByProps({testID:'section-footer'}).props.pointerEvents).toBe('box-none');
+ const fade=tree.root.findAllByType(EdgeFade).find(node=>node.props.edge==='bottom')!;
+ expect(fade.props.height).toBe(124);
+ expect(tree.root.findByProps({testID:'drawer-scroll-region'}).props.style).toBe(StyleSheet.absoluteFill);
  act(()=>footer.props.onLayout({nativeEvent:{layout:{height:NaN}}}));
  expect(list.props.contentContainerStyle.paddingBottom).toBe(124);
  expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);

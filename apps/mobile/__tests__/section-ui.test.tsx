@@ -1,11 +1,13 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {ActivityIndicator,Pressable,StyleSheet,Text,View} from 'react-native';
+import {ActivityIndicator,Pressable,StyleSheet,Text,TextInput,ScrollView,View} from 'react-native';
 import {Bell,Plus} from 'lucide-react-native';
-import {RoundAction,SectionHeading,SectionActions,SectionSegments,SettingsGroup,SettingsRow} from '../components/section-ui';
+import {RoundAction,SectionHeading,SectionActions,SectionBody,SectionSegments,SettingsGroup,SettingsRow} from '../components/section-ui';
 import {Button} from '../components/ui/button';
 import {Tabs,TabsList,TabsTrigger} from '../components/ui/tabs';
 import {colors} from '../theme';
+import {EdgeFade} from '../components/edge-fade';
+import {ThemeContext,tokens} from '../theme-context';
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 test('settings toggles expose state with a full-size row and concise visible label',async()=>{
  const toggle=jest.fn();let tree!:Renderer.ReactTestRenderer;
@@ -137,4 +139,55 @@ test('empty conditional actions do not create a footer, while a menu-only footer
  expect(tree.root.findByProps({testID:'section-footer-menu'}).findAllByType(View).filter(node=>node.props.testID==='menu-only')).toHaveLength(1);
  expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer-actions')).toHaveLength(0);
  await act(async()=>tree.unmount());
+});
+
+
+test('overlay footers reveal the host gradient without changing normal footer chrome',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<SectionActions overlay onBack={()=>{}}/>);});
+ try{
+  const footer=tree.root.findByProps({testID:'section-footer'});
+  expect(StyleSheet.flatten(footer.props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+  expect(footer.props.pointerEvents).toBe('box-none');
+  const button=tree.root.findByType(Button);
+  expect(StyleSheet.flatten(button.props.style)).toMatchObject({minWidth:48,minHeight:48});
+  await act(async()=>tree.update(<SectionActions onBack={()=>{}}/>));
+  expect(tree.root.findByProps({testID:'section-footer'})).toBe(footer);
+  expect(StyleSheet.flatten(footer.props.style)).toMatchObject({backgroundColor:colors.background,borderTopWidth:StyleSheet.hairlineWidth});
+ }finally{await act(async()=>tree.unmount());}
+});
+
+
+test.each(['dark','light'] as const)('measured %s footer overlays keep the full scroll viewport, input identity and draft through wrapping/reflow',async scheme=>{
+ function Editor(){
+  const [draft,setDraft]=React.useState('Unsent draft');
+  return <SectionBody surfaceColor={tokens[scheme].colors.surface} footer={<SectionActions overlay onBack={()=>{}} menu={<View testID="retained-menu"/>}><RoundAction label="Save" icon={Plus} onPress={()=>{}}/></SectionActions>}>{clearance=>
+   <ScrollView testID="retained-scroll" style={{flex:1,minHeight:0}} contentContainerStyle={{paddingBottom:clearance+16}} keyboardShouldPersistTaps="handled"><TextInput testID="retained-input" value={draft} onChangeText={setDraft}/></ScrollView>
+  }</SectionBody>;
+ }
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ThemeContext.Provider value={tokens[scheme]}><Editor/></ThemeContext.Provider>);});
+ try{
+  const host=tree.root.findByProps({testID:'section-scroll-host'}),overlay=tree.root.findByProps({testID:'section-footer-overlay'});
+  const scroll=tree.root.findByProps({testID:'retained-scroll'}),input=tree.root.findByProps({testID:'retained-input'}),menu=tree.root.findByProps({testID:'retained-menu'});
+  act(()=>input.props.onChangeText('Keep the caret and draft'));
+  expect(StyleSheet.flatten(host.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(StyleSheet.flatten(overlay.props.style)).toEqual({position:'absolute',left:0,right:0,bottom:0});
+  expect(overlay.props.pointerEvents).toBe('box-none');
+  expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
+  expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({flex:1,minHeight:0});
+  // Includes multi-line text/actions, Menu, padding and any additional footer row.
+  for(const height of [64,184,96]){
+   act(()=>overlay.props.onLayout({nativeEvent:{layout:{height}}}));
+   expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(height+12+16);
+   expect(tree.root.findByType(EdgeFade).props).toMatchObject({edge:'bottom',height:height+12,color:tokens[scheme].colors.surface});
+   expect(tree.root.findByProps({testID:'retained-scroll'})===scroll).toBe(true);
+   expect(tree.root.findByProps({testID:'retained-input'})===input).toBe(true);
+   expect(tree.root.findByProps({testID:'retained-menu'})===menu).toBe(true);
+   expect(input.props.value).toBe('Keep the caret and draft');
+  }
+  for(const height of [0,-1,NaN,Infinity])act(()=>overlay.props.onLayout({nativeEvent:{layout:{height}}}));
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(124);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+ }finally{await act(async()=>tree.unmount());}
 });
