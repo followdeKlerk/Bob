@@ -4,10 +4,10 @@ import {Text} from './app-text';
 import {themed,useThemedValue} from '../theme';
 import {liveStatuses} from '../live-status';
 
-export function LiveStatus({live}:{live:unknown}){
+export function LiveStatus({live,showProgress=true}:{live:unknown;showProgress?:boolean}){
  const styles=useThemedValue(stylesTheme);
 
- const statuses=liveStatuses(live);
+ const statuses=liveStatuses(live,showProgress);
  if(!statuses.length)return null;
  return <View testID="native-run-status" style={styles.stack}>{statuses.map(status=><View key={status.key} style={styles.row}>
   <Text accessibilityLiveRegion="polite" style={styles.text}>{status.text}</Text>

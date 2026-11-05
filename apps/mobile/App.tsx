@@ -42,6 +42,7 @@ import {DraftInput,composerTransition} from './components/draft-input';
 import {SkillPicker} from './components/skill-picker';
 import {skillQuery,pickerRequest} from './skill-picker';
 import {ComposerStatus} from './components/composer-status';
+import {composerActivity} from './composer-activity';
 import {useBackNavigation} from './use-back-navigation';
 import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
 import {useUpdateNotifications} from './use-update-notifications';
@@ -783,6 +784,8 @@ function Main() {
   },[scope,screen,child,agentHistory,view?.docs['app.subagents']]);
   const busy = !!view?.docs['pi.live']?.run || !!view?.work?.some(t=>t.kind==='bob.mcp-ui-action'&&!t.background);
   const showStop=busy&&!hasDraft;
+  const waitingForAnswer=!!view?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===view.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted));
+  const activity=composerActivity({connection:status,hasConversation:!!chat,storageError:!!outboxError,sending:outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted),waitingForAnswer,live:view?.docs['pi.live'],work:view?.work});
   const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page)=>{
     const entries=page?Array.from(new Map([...(page.items as Entry[]),...(snapshot?.entries??[])].map(entry=>[entry.id,entry])).values()).sort((a,b)=>a.id-b.id):snapshot?.entries??[];
     const linked=linkToolResults(entries,snapshot?.docs['pi.live']),anchors=surfaceAnchors(entries,snapshot?.docs['pi.live']),surfaceEntries=new Set(anchors.values());
@@ -867,13 +870,13 @@ function Main() {
 
         ListHeaderComponent={<View style={{gap:CHAT_CONTENT_GAP}} onLayout={event=>{if(!isChild)setVisualWidth(event.nativeEvent.layout.width);}}>
           {!isChild && !!surfaceError && <Text style={styles.caption}>{surfaceError}</Text>}
-          <LiveStatus live={v?.docs['pi.live']}/>
+          <LiveStatus live={v?.docs['pi.live']} showProgress={isChild}/>
           {/* Live text streams here. Tool boxes render only in their recorded
               entry slot below, so they never migrate from this transient header. */}
           {v?.docs['pi.live']?.generation?.message && !isRecordedToolGeneration(linked.rawEntries,v.docs['pi.live'].generation.message.content) && <ModelContent bubbleText speakable={false} showTools={false} value={v.docs['pi.live'].generation.message.content} results={linked.results}/>}
           {!isChild&&backend&&<BuildCard key={backend.backendId} backend={backend} state={build.state} error={build.error} focus={updatesTarget?.backendId===backend.backendId} onDismiss={()=>setUpdatesTarget(undefined)} onRefresh={build.refresh}/>}
           {!isChild&&((v?.docs['bob.diagnostics']?.requests??[]) as DiagnosticRequest[]).filter(item=>['pending','approved'].includes(item.status)).map(item=><DiagnosticCard key={`${scope}:${item.id}`} request={item} respond={value=>request(`chats/${chat}/diagnostics`,'POST',value,backend!)}/>)}
-          {!isChild&&v?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===v.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted))&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
+          {!isChild&&waitingForAnswer&&v?.docs['bob.questions']?.pending&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
           {/* Inverted header is the physical bottom of the chat. Keep live
               replies and the composer clearance here, below stored messages. */}
           {!isChild&&<View pointerEvents="none" accessible={false} style={{height:composerHeight+8}}/>}
@@ -954,8 +957,8 @@ function Main() {
           </View>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
             <View testID="composer-heading" style={styles.composerHeading}>
-              <View style={{flex:1,minWidth:0}}>{!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:((!!outboxError||/pair again|identity|authorization|offline|disconnect|interrupted|reconnecting/i.test(status)||busy||outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)||parentLinked.rawEntries.length>0)&&(
-            <ComposerStatus animate={!outboxError&&!/pair again|identity|authorization/i.test(status)} text={outboxError?'Device storage issue • keep Bob open':/pair again|identity|authorization/i.test(status)?'Connection needs attention • pair again':/offline|disconnect|interrupted|reconnecting/i.test(status)?'Reconnecting…':/connecting|cached/i.test(status)?'Connecting…':outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)?'Sending • automatic retry':busy?'Bob is working':status==='Connected'?'Connected':chat?'Connecting…':'Select a conversation'}/>
+              <View style={{flex:1,minWidth:0}}>{!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:(((activity.phase!=='idle'&&activity.phase!=='connecting')||parentLinked.rawEntries.length>0)&&(
+            <ComposerStatus animate={activity.animate&&screen==='Chat'} text={activity.text}/>
             ))}</View>
               <ChatNavigation showTrigger={screen==='Chat'} open={navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length}/>
             </View>

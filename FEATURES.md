@@ -28,6 +28,10 @@ Your messages sit on the right in outgoing bubbles; Bob’s visible prose sits o
 
 Code and tables reclaim the full reading column; files, schedule cards and interactive surfaces keep their own presentation and source-entry anchors instead of being squeezed into message bubbles. Copy and read-aloud controls remain associated with their exact visible text. Delivery status is literal—not a fabricated read receipt or timestamp.
 
+The small animated line above the composer reports **response lifecycle**, not a second tool feed: connection/sending health, waiting for the model, Thinking when a non-redacted reasoning block is exposed, Writing response while answer text streams, retrying, blocking conversation summarization, waiting for your answer, stopping and finishing. During tool execution it says only Working; tool names, paths, counts, arguments, results and failures stay in their original chat rows. Active main-chat retry/compaction notices live in this strip rather than appearing twice; persistent failures remain in chat. Child-agent transcripts retain their progress notices because they have no dedicated composer strip.
+
+The initial label keeps its typewriter entrance. Later phase changes show complete words immediately and animate only the dots, so rapid updates do not repeatedly erase them. Reduced motion, screen readers, backgrounding and hidden chat screens stop the animation. Labels are derived from native state, never fabricated thought stages or completion percentages. This first iteration adds no elapsed counter or duplicate activity-details panel.
+
 With the keyboard open, the inline draft is capped at 156dp (or the smaller available space). Longer drafts scroll and can use the existing expanded editor; no font shrinking is applied. Keyboard/safe-area ownership, the native transcript list, drafts and tool execution semantics are unchanged.
 
 ## Choose the capability

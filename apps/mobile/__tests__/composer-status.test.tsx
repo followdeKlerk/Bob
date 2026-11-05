@@ -35,9 +35,9 @@ test('larger native status types without changing the full-label layout or acces
  act(()=>jest.advanceTimersByTime(200));expect(visible(tree)).toBe('Connected');
  act(()=>jest.advanceTimersByTime(1600));expect(visible(tree)).toBe('Connected . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
 });
-test('a real status change restarts immediately without retaining letters from the previous label',async()=>{
+test('a real phase change shows its full words immediately and restarts only the dot cycle',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connected . . .');
- await act(async()=>tree.update(<ComposerStatus text="Bob is working"/>));expect(visible(tree)).toBe('');expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Bob is working');
+ await act(async()=>tree.update(<ComposerStatus text="Bob is working"/>));expect(visible(tree)).toBe('Bob is working');expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Bob is working');
  act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Bob is working . . .');await act(async()=>tree.unmount());
 });
 test('actionable error labels are immediately complete and never animate',async()=>{
@@ -47,12 +47,12 @@ test('actionable error labels are immediately complete and never animate',async(
 test.each(['reduceMotionChanged','screenReaderChanged'])('%s switches to static full text and cancels the animation',async(event)=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Sending • automatic retry"/>);});
  act(()=>{jest.advanceTimersByTime(1000);preferences.get(event)!(true);});expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Sending • automatic retry . . .');expectNoAnimationTimers();
- act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('');await act(async()=>tree.unmount());expectNoAnimationTimers();
+ act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('Sending • automatic retry');await act(async()=>tree.unmount());expectNoAnimationTimers();
 });
-test('background pauses all typing/cursor timers; foreground resumes a new clean cycle',async()=>{
+test('background pauses timers; foreground resumes dots without erasing the full words',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connecting…"/>);});
  act(()=>{jest.advanceTimersByTime(1500);lifecycle('background');});expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Connecting . . .');expectNoAnimationTimers();
- act(()=>lifecycle('active'));expect(visible(tree)).toBe('');act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connecting . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
+ act(()=>lifecycle('active'));expect(visible(tree)).toBe('Connecting');act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connecting . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
 });
 
 test.each([
@@ -80,5 +80,39 @@ test('rendered words never disappear during repeated dot-only cycles',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
  act(()=>jest.advanceTimersByTime(1700));expect(visible(tree)).toBe('Connected . . .');
  for(let step=0;step<140;step++){act(()=>jest.advanceTimersByTime(100));expect(visible(tree).startsWith('Connected')).toBe(true);}
+ await act(async()=>tree.unmount());expectNoAnimationTimers();
+});
+
+
+test('rapid phase changes never retype or blank the words, keep scalable geometry and announce only the literal phase',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Waiting for model…"/>);});
+ const instance=tree.root.findByProps({testID:'connection-status'});
+ act(()=>jest.advanceTimersByTime(1700));
+ for(const text of ['Thinking…','Writing response…','Working…','Retrying response…','Waiting for model…']){
+  await act(async()=>tree.update(<ComposerStatus text={text}/>));
+  const base=text.replace(/…$/,'');expect(visible(tree)).toBe(base);
+  expect(tree.root.findByProps({testID:'connection-status'})).toBe(instance);
+  expect(instance.props.accessibilityLabel).toBe(text);
+  const reserve=tree.root.findByProps({testID:'status-layout-reservation'});
+  expect(reserve.props.numberOfLines).toBeUndefined();expect(reserve.props.allowFontScaling).not.toBe(false);
+  expect(StyleSheet.flatten(reserve.props.style).fontSize).toBe(13);
+  act(()=>jest.advanceTimersByTime(250));expect(visible(tree).startsWith(base)).toBe(true);
+ }
+ await act(async()=>tree.unmount());expectNoAnimationTimers();
+});
+
+
+test.each(['Waiting for your answer','Connection needs attention • pair again','Device storage issue • keep Bob open'])('static first phase (%s) never makes the next phase retype',async(text)=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text={text} animate={false}/>);});
+ expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(statusDisplayLabel(text));
+ await act(async()=>tree.update(<ComposerStatus text="Thinking…" animate/>));expect(visible(tree)).toBe('Thinking');
+ act(()=>jest.advanceTimersByTime(1600));expect(visible(tree)).toBe('Thinking . . .');
+ await act(async()=>tree.unmount());expectNoAnimationTimers();
+});
+
+test('phase changes while static remain remembered even after returning to the initial label',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Waiting for model…" animate={false}/>);});
+ await act(async()=>tree.update(<ComposerStatus text="Thinking…" animate={false}/>));
+ await act(async()=>tree.update(<ComposerStatus text="Waiting for model…" animate/>));expect(visible(tree)).toBe('Waiting for model');
  await act(async()=>tree.unmount());expectNoAnimationTimers();
 });

@@ -1,6 +1,6 @@
 import {APP_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
-import React,{memo,useEffect,useState} from 'react';
+import React,{memo,useEffect,useRef,useState} from 'react';
 import {AccessibilityInfo,AppState,StyleSheet,View} from 'react-native';
 import {themed,useTheme,useThemedValue} from '../theme';
 import {typewriterFrame,statusDisplayLabel} from '../typewriter-status';
@@ -18,6 +18,8 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
  // Default to static until platform preferences are known; no motion flash.
  const [reduceMotion,setReduceMotion]=useState(true),[screenReader,setScreenReader]=useState(true);
  const [frame,setFrame]=useState({text:'',count:0,cursor:true});
+ const hasAnimated=useRef(false),initialLabel=useRef(label),hasChangedLabel=useRef(false);
+ useEffect(()=>{if(label!==initialLabel.current)hasChangedLabel.current=true;},[label]);
  const running=animate&&active&&!reduceMotion&&!screenReader;
  useEffect(()=>{
   let alive=true,motionChanged=false,readerChanged=false;
@@ -31,7 +33,10 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
  useEffect(()=>{
   if(!running)return;
   let stopped=false,timer:ReturnType<typeof setTimeout>|undefined;
-  const start=performance.now(),length=Array.from(label).length;
+  // Type once on initial mount. Later phase changes show their full words
+  // immediately, then cycle dots only; frequent live updates must not blank them.
+  const offset=hasAnimated.current||hasChangedLabel.current||label!==initialLabel.current?3000:0;hasAnimated.current=true;
+  const start=performance.now()-offset,length=Array.from(label).length;
   const tick=()=>{
    if(stopped)return;
    const next=typewriterFrame(performance.now()-start,length,Math.max(0,length-' . . .'.length));
@@ -41,7 +46,8 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
   tick();
   return()=>{stopped=true;clearTimeout(timer);};
  },[label,running]);
- const visible=frame.text===label?Array.from(label).slice(0,frame.count).join(''):'';
+ const letters=Array.from(label),retainWords=hasAnimated.current||hasChangedLabel.current||label!==initialLabel.current;
+ const visible=frame.text===label?letters.slice(0,frame.count).join(''):retainWords?letters.slice(0,Math.max(0,letters.length-' . . .'.length)).join(''):'';
  return <View testID="connection-status" pointerEvents="none" accessible accessibilityRole="text" accessibilityLabel={text} accessibilityLiveRegion="polite" style={s.container}>
   {running?<View accessible={false} importantForAccessibility="no-hide-descendants">
    {/* Reserve the complete label, including large-font wrapping. Never animate layout width. */}

@@ -5,6 +5,7 @@ import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,
 import {CompactActivityRow} from '../components/compact-activity-row';
 import {ModelContent} from '../components/model-content';
 import {ChatBubble} from '../components/chat-bubble';
+import {ComposerStatus} from '../components/composer-status';
 import {CopyAction} from '../components/message-actions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
@@ -918,5 +919,45 @@ test('plain menu stays stable across native work, answers and failures without c
   stableMenu();
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Dismiss chat actions'}).props.onPress());
   stableMenu();
+ }finally{await act(async()=>tree.unmount());}
+});
+
+
+test('composer owns response phases, chat owns tool detail and errors, and SSE phase changes preserve draft/list/stop identity',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
+ let snapshot:((event:any)=>void)|undefined;
+ require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
+ const fetch=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const entries=[{id:1,kind:'bob.user',data:{text:'Keep actual tool activity in chat'}},{id:2,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'read-1',name:'read',arguments:{path:'example.txt'}}]}]}];
+ const publish=async(live:any,docs:any={},work:any[]=[])=>act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'pi.live':live,...docs},work}})}));
+ const native={taskId:99,first:1};
+ const status=()=>tree.root.findByType((ComposerStatus as unknown as {type:React.ComponentType<any>}).type).props;
+ const displayed=()=>tree.root.findAll(node=>typeof node.props.children==='string').map(node=>node.props.children).join('\n');
+ try{
+  await publish({run:native,generation:{}});expect(status().text).toBe('Waiting for model…');
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'}),list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  expect(tree.root.findByProps({accessibilityLabel:'Stop Bob'})).toBeDefined();act(()=>draft.props.onChangeText('Keep this draft'));
+  const stable=()=>{expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep this draft');expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);};
+  for(const [generation,label] of [
+   [{message:{content:[{type:'thinking',thinking:'private reasoning'}]}},'Thinking…'],
+   [{message:{content:[{type:'text',text:'A public response'}]}},'Writing response…'],
+   [{retry:{at:7,error:'private provider failure'}},'Retrying response…'],
+   [{deferred:{pollAt:7}},'Waiting for model…'],
+  ] as const){await publish({run:native,generation});expect(status().text).toBe(label);expect(tree.root.findAllByProps({testID:'native-run-status'})).toHaveLength(0);stable();}
+  expect(displayed()).not.toMatch(/private provider failure|Retrying the response|Waiting for the model provider/);
+  await publish({run:native,generation:{message:{content:[{type:'text',text:'Older commentary'}]}},tools:[{callId:'read-1',taskId:100,name:'read',status:'running',output:'Readable progress'}]});
+  expect(status().text).toBe('Working…');expect(status().text).not.toMatch(/read|example|1 tool/i);expect(tree.root.findAllByType(CompactActivityRow).some(row=>row.props.accessibilityLabel==='Tool details: read'&&row.props.title==='Read example.txt')).toBe(true);stable();
+  await publish({run:native,compactions:[{taskId:101}]});expect(status().text).toBe('Condensing conversation…');expect(tree.root.findAllByProps({testID:'native-run-status'})).toHaveLength(0);stable();
+  await publish({}, {'bob.questions':{pending:{id:'question-1',text:'Which option?',options:['One','Two']}}});expect(status().text).toBe('Waiting for your answer');expect(status().animate).toBe(false);expect(tree.root.findAllByProps({testID:'question-card'}).length).toBeGreaterThan(0);stable();
+  await publish({run:native}, {}, [{id:99,kind:'pi.run',background:false,abortRequested:true,state:'running'}]);expect(status().text).toBe('Stopping…');stable();
+  await publish({run:{...native,afterRun:{tasks:[100]}}});expect(status().text).toBe('Finishing up…');stable();
+  await publish({runFailure:{reason:'model_error',detail:'private provider failure'},compactionFailure:{error:'private compaction error'}});expect(status().text).toBe('Connected');expect(displayed()).toContain('Response failed. The model could not complete an answer.');expect(displayed()).toContain('Context compaction failed.');expect(displayed()).not.toContain('private provider failure');stable();
+  act(()=>draft.props.onChangeText(''));expect(tree.root.findAllByProps({accessibilityLabel:'Stop Bob'})).toHaveLength(0);
+  await navigateTo(tree,'Sessions');expect(status().animate).toBe(false);await navigateTo(tree,'Chat');
+  expect(fetch.mock.calls.every(([,options])=>!options?.method||options.method==='GET')).toBe(true);
  }finally{await act(async()=>tree.unmount());}
 });

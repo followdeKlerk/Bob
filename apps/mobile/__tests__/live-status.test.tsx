@@ -37,3 +37,17 @@ test('orphaned tool completion never looks successful and a real result wins by 
  const stored={id:5,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'lost',toolName:'read',content:'actual result',isError:false}]};
  expect(linkToolResults([stored],live).results.get('lost')).toMatchObject({content:'actual result',status:'done',isError:false});
 });
+
+
+test('main-chat progress moves to the composer, but terminal outcomes and compaction failures stay in chat',async()=>{
+ const live={run:{taskId:1},generation:{retry:{error:'private',at:5}},compactions:[{taskId:2}]};
+ expect(liveStatuses(live,false)).toEqual([]);
+ expect(liveStatuses(live,true)).toHaveLength(2); // Child transcripts have no dedicated phase strip.
+ for(const reason of ['model_error','aborted','reset','nothing_to_answer','turn_limit'])expect(liveStatuses({runFailure:{reason}},false)).toHaveLength(1);
+ expect(liveStatuses({compactionFailure:{error:'private'}},false)[0].text).toMatch(/compaction failed/);
+ expect(liveStatuses({...live,compactionFailure:{error:'old'}},false)).toEqual([]);
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<LiveStatus live={live} showProgress={false}/>);});expect(tree.toJSON()).toBeNull();
+ await act(async()=>tree.update(<LiveStatus live={live} showProgress/>));expect(tree.root.findAllByProps({testID:'native-run-status'}).length).toBeGreaterThan(0);
+ await act(async()=>tree.unmount());
+});

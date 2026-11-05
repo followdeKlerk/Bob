@@ -13,16 +13,16 @@ const failures:Record<string,string>={
  turn_limit:'Tool-turn limit reached before a final answer.',
 };
 /** Native lifecycle status, not assistant output. Never display raw provider errors or infer success from idleness. */
-export function liveStatuses(value:unknown):LiveStatus[]{
+export function liveStatuses(value:unknown,showProgress=true):LiveStatus[]{
  const live=object(value),statuses:LiveStatus[]=[],failure=object(live.runFailure),generation=object(live.generation);
  if(!live.run&&typeof failure.reason==='string'){
   const reason=failure.reason,text=Object.hasOwn(failures,reason)?failures[reason]:'The run ended without an answer.';
   statuses.push({key:'run',tone:['aborted','reset','nothing_to_answer','turn_limit'].includes(reason)?'neutral':'failure',text});
  }
- if(live.run&&generation.retry)statuses.push({key:'generation',tone:'neutral',text:'Retrying the response…'});
- else if(live.run&&generation.deferred)statuses.push({key:'generation',tone:'neutral',text:'Waiting for the model provider’s response…'});
+ if(showProgress&&live.run&&generation.retry)statuses.push({key:'generation',tone:'neutral',text:'Retrying the response…'});
+ else if(showProgress&&live.run&&generation.deferred)statuses.push({key:'generation',tone:'neutral',text:'Waiting for the model provider’s response…'});
  const compacting=Array.isArray(live.compactions)&&live.compactions.length>0;
- if(compacting)statuses.push({key:'compaction',tone:'neutral',text:(live.compactions as unknown[]).some(item=>object(item).retry)?'Retrying context compaction…':'Compacting conversation context…'});
+ if(compacting){if(showProgress)statuses.push({key:'compaction',tone:'neutral',text:(live.compactions as unknown[]).some(item=>object(item).retry)?'Retrying context compaction…':'Compacting conversation context…'});}
  else if(live.compactionFailure)statuses.push({key:'compaction',tone:'failure',text:'Context compaction failed. Earlier messages remain in stored history.'});
  return statuses;
 }
