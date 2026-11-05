@@ -239,7 +239,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
-   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Appearance','This conversation','Notifications','Voice','Phone tools','Location','Schedules','App','Advanced']);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Appearance','This conversation','Notifications','Keep connected','Voice','Phone tools','Location','Schedules','App','Advanced']);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
    expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'}).length).toBeGreaterThan(0);
    const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
@@ -1002,4 +1002,60 @@ test('real App wires source snapshot phone requests once and keeps controls in S
   await navigateTo(tree,'Settings');expect(tree.root.findAll(node=>node.props.accessibilityLabel==='Disable phone tools'&&typeof node.props.onPress==='function')).toHaveLength(1);
   await navigateTo(tree,'Chat');expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft intact');
  }finally{if(tree)await act(async()=>tree.unmount());if(previous===undefined)delete NativeModules.BobPhoneTools;else NativeModules.BobPhoneTools=previous;}
+});
+
+test('real App keeps the native connection separate from foreground-only phone tools and retains its draft/list',async()=>{
+ jest.replaceProperty(Platform,'OS','android');
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://keep-connected.test.ts.net',name:'Connection fixture'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-token'});
+ const listeners=new Set<(state:string)=>void>();(AppState as any).currentState='active';
+ jest.spyOn(AppState,'addEventListener').mockImplementation((event,listener)=>{if(event==='change')listeners.add(listener as (state:string)=>void);return{remove:()=>listeners.delete(listener as (state:string)=>void)};});
+ let connection={enabled:false,running:false,status:'off',batteryRestricted:true};
+ const native={select:jest.fn(async()=>{}),state:jest.fn(async()=>JSON.stringify(connection)),start:jest.fn(async(_endpoint:string,_backend:string,_token:string,_chat:number,_enable:boolean)=>{connection={...connection,enabled:true,running:true,status:'connected'};}),stop:jest.fn(async()=>{connection={...connection,enabled:false,running:false,status:'off'};}),openBatterySettings:jest.fn(async()=>{})};
+ const previous=NativeModules.BobConnection,previousPhone=NativeModules.BobPhoneTools;
+ NativeModules.BobConnection=native;NativeModules.BobPhoneTools={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>{}),execute:jest.fn(async()=>JSON.stringify({status:'ok'})),getResult:jest.fn(async()=>null)};
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ jest.spyOn(require('react-native').PermissionsAndroid,'check').mockResolvedValue(true);
+ const streams:{publish?:(event:any)=>void;close:jest.Mock}[]=[];
+ require('react-native-sse').mockImplementation(()=>{const stream={close:jest.fn(),publish:undefined as undefined|((event:any)=>void)};streams.push(stream);return{close:stream.close,addEventListener:(event:string,listener:any)=>{if(event==='snapshot')stream.publish=listener;}};});
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,init:any)=>{const url=String(input),data=url.endsWith('/phone-tools/availability')?{enabled:JSON.parse(init.body).enabled}:url.endsWith('/phone-tools')?{execute:true,accepted:true}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Connection'}}]}:url.endsWith('/updates')?{enabled:false}:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'}),list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  await act(async()=>draft.props.onChangeText('Keep this unsent draft'));
+  await navigateTo(tree,'Settings');await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Enable keep connected'&&typeof node.props.onPress==='function')[0].props.onPress());
+  expect(native.start).toHaveBeenCalledWith(backend.endpoint,backend.backendId,'paired-token',7,true);await navigateTo(tree,'Chat');
+  const old=streams[streams.length-1];
+  await act(async()=>{(AppState as any).currentState='background';for(const listener of listeners)listener('background');});
+  expect(old.close).toHaveBeenCalled();expect(native.stop).not.toHaveBeenCalled();expect(connection.running).toBe(true);
+  const snapshot={backendId:backend.backendId,conversationId:7,view:{entries:[],docs:{'bob.phone-tools':{requests:[{id:'ef'.repeat(32),action:'device_info',parameters:{},expiresAt:Date.now()+80000,status:'pending'}]}}}};
+  await act(async()=>old.publish!({data:JSON.stringify(snapshot)}));expect(NativeModules.BobPhoneTools.execute).not.toHaveBeenCalled();
+  expect((fetch as jest.Mock).mock.calls.some(([url,options])=>String(url).endsWith('/phone-tools/availability')&&JSON.parse(options.body).enabled===false)).toBe(true);
+  await act(async()=>{(AppState as any).currentState='active';for(const listener of listeners)listener('active');});
+  expect(streams.length).toBeGreaterThan(1);expect(native.stop).not.toHaveBeenCalled();expect(native.start.mock.calls.every(call=>call[1]===backend.backendId&&call[3]===7)).toBe(true);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep this unsent draft');expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+ }finally{if(tree)await act(async()=>tree.unmount());(AppState as any).currentState='active';if(previous===undefined)delete NativeModules.BobConnection;else NativeModules.BobConnection=previous;if(previousPhone===undefined)delete NativeModules.BobPhoneTools;else NativeModules.BobPhoneTools=previousPhone;}
+});
+
+test.each([false,true])('update notification respects workstation-scoped conversation selection (same workstation: %s)',async(same)=>{
+ jest.replaceProperty(Platform,'OS','android');(AppState as any).currentState='active';
+ const one={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://one.ts.net',name:'One'},two={backendId:'22222222-2222-4222-8222-222222222222',endpoint:'https://two.ts.net',name:'Two'};
+ await AsyncStorage.setItem('backends',JSON.stringify([one,two]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:one.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-token'});
+ let notice:any=null;
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>notice),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const native={select:jest.fn(async()=>{}),state:jest.fn(async()=>JSON.stringify({enabled:true,running:false,status:'off',batteryRestricted:true})),start:jest.fn(async()=>{}),stop:jest.fn(async()=>{})};NativeModules.BobConnection=native;
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:one.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[]}:url.endsWith('/updates')?{enabled:false}:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  expect(native.start).toHaveBeenCalledWith(one.endpoint,one.backendId,'paired-token',7,false);
+  notice={screen:'updates',backendId:same?one.backendId:two.backendId};
+  await act(async()=>DeviceEventEmitter.emit('BobNotificationOpen'));
+  expect(native.select).toHaveBeenLastCalledWith(same?one.backendId:'',same?7:0);
+  expect(native.start).toHaveBeenCalledTimes(1);
+  expect(native.start).toHaveBeenLastCalledWith(one.endpoint,one.backendId,'paired-token',7,false);
+ }finally{if(tree)await act(async()=>tree.unmount());delete NativeModules.BobConnection;}
 });

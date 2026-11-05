@@ -4,6 +4,7 @@ import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
 import {createConversationProjection} from './conversation-projection.js';
+import {connectionStream,connectionActivity} from './connection-stream.js';
 import {mobileTranscriptEntries} from './mobile-transcript.js';
 import {phoneToolsAvailability,phoneToolsView,claimPhoneTool} from './phone-tools.js';
 import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
@@ -546,6 +547,16 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
           await chat.commit(tx=>revokeDelegation(tx,id,'Owner stopped the conversation'),ctx);
           await chat.abort(ctx, { background: p.scope === "tree" });
           return send(res, 200, { status: "settled", scope: p.scope });
+        }
+        if(action==='connection'&&req.method==='GET'){
+          await connectionStream(res,{backendId:state.id,conversationId:id,streams,
+            authorized:()=>!!state.authenticate(token),
+            read:async()=>{
+              const [live,questions]=await Promise.all([h.snapshot(LiveDoc,id,ctx),h.snapshot(Questions,id,ctx)]);
+              return connectionActivity(!!live?.run,!!questions?.pending);
+            },
+          });
+          return;
         }
         if (action === "events" && req.method === "GET") {
           const watch = await chat.watch(ctx);

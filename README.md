@@ -33,6 +33,8 @@ These captures show a saved coding run. The [recorded app tour](assets/showcase/
 
 You can switch between machines without mixing up their conversations, send files back and forth, and keep notes alongside your work. When an agent delegates a task, you can follow that agent's conversation too, including after it's finished.
 
+Optional [Keep connected](FEATURES.md#keep-connected) maintains a small native Android connection while the phone is locked, with a persistent notification and automatic reconnection. The transcript catches up when you reopen Bob; Android and network/battery restrictions still apply. It does not enable locked-phone control.
+
 There are file, shell and web tools, native Android [phone tools](FEATURES.md#phone-tools), plus optional memory and interactive views. The [Android capability map](PHONE-CAPABILITIES.md) distinguishes the implemented controls from the notification, screen-control and other planned layers. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
 
 <details>

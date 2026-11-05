@@ -10,6 +10,8 @@ This change adds the `phone` tool, an authenticated source-phone request/result 
 
 For this first release, keep Bob **in the foreground on the conversation that sent the request**. Native phone work is not yet scheduled/background automation. Android may switch to the destination app when a hand-off opens it.
 
+The separate [Keep connected](FEATURES.md#keep-connected) mode can maintain a small read-only backend status connection while locked/backgrounded. Its opt-in and persistent notification do **not** relax this foreground-only phone-tool boundary or enable notification/accessibility control.
+
 | Action | What it does | What the result actually establishes |
 | --- | --- | --- |
 | `capabilities` | Inspect implemented actions, support and permissions | Current device availability, not future grants |

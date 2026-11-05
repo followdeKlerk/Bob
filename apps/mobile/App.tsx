@@ -46,6 +46,8 @@ import {composerActivity} from './composer-activity';
 import {useBackNavigation} from './use-back-navigation';
 import {usePhoneTools} from './phone-tools';
 import {PhoneToolsSettings} from './components/phone-tools-settings';
+import {useKeepConnected} from './keep-connected';
+import {KeepConnectedSettings} from './components/keep-connected-settings';
 import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
 import {useUpdateNotifications} from './use-update-notifications';
 import {usePhoneLocation} from './use-phone-location';
@@ -242,6 +244,7 @@ function Main() {
   });
   const build=useBuildStatus(backend);
   const phoneLocation=usePhoneLocation(backend);
+  const keepConnected=useKeepConnected(backend,chat,screen==='Settings');
   const selectedBackend = useRef('');
   selectedBackend.current = backend?.backendId ?? '';
   const identity = useRef(''),
@@ -262,7 +265,7 @@ function Main() {
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
   useEffect(()=>{if(!actions)setActionsMore(false);},[actions]);
   useEffect(()=>setNavigationOpen(false),[scope,screen]);
-  useEffect(()=>{if(updatesTarget){setBackend(updatesTarget);showChat();setDrawer(false);}},[updatesTarget]);
+  useEffect(()=>{if(updatesTarget){if(selectedBackend.current!==updatesTarget.backendId)setChat(undefined);setBackend(updatesTarget);showChat();setDrawer(false);}},[updatesTarget]);
   useEffect(()=>{NativeModules.BobNotifications.setReplyNotifications?.(notifyEnabled);},[notifyEnabled]);
   useEffect(()=>{NativeModules.BobNotifications.setAppContext?.(backend?.backendId??'',screen==='Chat'&&!drawer?chat??0:0);},[backend?.backendId,chat,screen,drawer]);
   const pendingOperations=useRef(new Map<string,string>());
@@ -1144,15 +1147,16 @@ function Main() {
                 {chat&&<ConversationSettings key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={value=>{settingsDrafts.edit(scope,'instructions',value);setChatInstructions(value);}} onFolderChange={value=>{settingsDrafts.edit(scope,'cwd',value);setWorkingDirectory(value);}} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
                 {!chat&&<Text style={[styles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
               </SettingsGroup>
-              <Text style={styles.caption}>Notification, voice and location settings apply to this phone. Phone tools are enabled separately for each workstation.</Text>
+              <Text style={styles.caption}>These settings apply to this phone. Keep connected and phone tools are enabled separately for each workstation.</Text>
               <SettingsGroup title="Notifications">
                 <SettingsRow title="Reply notifications" label={notifyEnabled?'Last reply notifications: on':'Last reply notifications: off'} checked={notifyEnabled} icon={Bell} onPress={()=>run(async()=>{
                   if(!notifyEnabled&&Number(Platform.Version)>=33){const permission=await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);if(permission!==PermissionsAndroid.RESULTS.GRANTED)throw Error('Notification permission was not granted');}
                   const enabled=!notifyEnabled;NativeModules.BobNotifications.setReplyNotifications?.(enabled);await AsyncStorage.setItem('notification-opt-in',String(enabled));setNotifyEnabled(enabled);
                 })}/>
                 <SettingsRow title="Notification settings" label="Android notification settings" icon={Bell} onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
-                <Disclosure label="About notifications"><Text style={styles.caption}>Replies, questions and schedule alerts, plus updates, share one generic attention alert without message previews or Reply actions. Tap it to open Bob. Existing reply input and delivery feedback stay separate until resolved. Android schedules background checks and may delay delivery; push delivery can also be delayed, and force-stop pauses both. Automatic location has its own visible service notification.</Text></Disclosure>
+                <Disclosure label="About notifications"><Text style={styles.caption}>Replies, questions and schedule alerts, plus updates, share one generic attention alert without message previews or Reply actions. Tap it to open Bob. Existing reply input and delivery feedback stay separate until resolved. Android schedules background checks and may delay delivery; push delivery can also be delayed, and force-stop pauses both. Automatic location has its own visible service notification. Keep connected has a separate opt-in service notification.</Text></Disclosure>
               </SettingsGroup>
+              <KeepConnectedSettings state={keepConnected}/>
               <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
                 <Disclosure label="About read aloud"><Text style={styles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>

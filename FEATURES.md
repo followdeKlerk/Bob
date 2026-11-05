@@ -256,6 +256,18 @@ The current backend has version **0.41.1** pinned in `~/.local/share/bob/tools/a
 
 Use the `bob` namespace and a unique named session per conversation/task, bounded output, and an inactivity timeout; close only the task's session afterward. Fresh browser profiles are the default workflow: do not attach a real browser, import authentication, enable persistent profiles or select a paid cloud provider without owner authorization. CLI access uses the backend OS account, not a sandbox; page text remains untrusted and uncertain side effects must be reconciled before retrying. A CLI does not guarantee access through website bot challenges.
 
+## Keep connected
+
+Open a conversation, then enable **Settings → Keep connected** for its workstation. Android shows a separate persistent notification with **Open** and **Turn off** controls. This optional mode is off by default, follows the selected workstation/conversation, and is independent of reply notifications, Automatic location and Phone tools. Turning it off disconnects this service; it does **not** stop backend work.
+
+The native Android service keeps an authenticated, read-only status stream open while the UI is backgrounded or the phone is locked. It receives only backend/conversation identity, idle/working/waiting state and a heartbeat—not transcripts, question text, tool arguments or phone-action requests. The full chat display still pauses in the background and catches up from an authoritative snapshot when you reopen it. Pending owner actions are not automatically resent by this connection.
+
+Network loss triggers bounded reconnection. Authentication/identity rejection or an incompatible backend stops retries and shows an attention state. Bearer credentials stay in service memory, not preferences, notifications, service intents or logs. After Android kills the process, reopen Bob to unlock the credential store and resume a saved opt-in; no boot receiver or headless phone-control path is installed.
+
+**Battery and Android limits:** this can use more battery. Allow notifications and consider unrestricted background use for Bob **and Tailscale**, if used. The battery-settings link opens Android settings; Bob does not silently grant an exemption. Android Doze, manufacturer restrictions, a stopped VPN, offline networks, revoked permissions and force-stop can still interrupt it. No perpetual wake lock or 24/7 guarantee. On Android 14+, the foreground service declares the specific `specialUse` private-agent connection purpose; it does not borrow location permission or pretend an ongoing connection is a timed data-sync job. Personal sideloading avoids Play distribution review, not Android runtime rules.
+
+**Connection is not control:** Phone tools still require foreground Bob on the source conversation. Keep connected neither enables those tools nor permits locked-phone actions. Automatic location remains a separately enabled visible service. Test the installed release by locking/unlocking, briefly dropping/restoring the network, changing workstation/conversation, and turning the notification's connection off; automated tests and compilation alone do not prove a particular phone's long-idle/OEM behavior.
+
 ## Phone tools
 
 Enable **Settings → Phone tools** for the selected workstation, then grant the Android calendar/contact/camera permissions you want. Routine owner-authorized commands do not require another Bob confirmation. Denying one permission does not disable unrelated controls. Keep Bob foregrounded on the source conversation for this first release; no continuous monitoring, notification listener or accessibility service is enabled by this switch.
@@ -312,7 +324,7 @@ Replies, questions, schedule alerts and completed/failed builds share **one “B
 
 The phone renders a received push immediately, without fetching chat content first. Backend sends are bounded and retried for transient failures; pending hints expire after five minutes and coalesce rather than replaying a history of messages. Provider acceptance is not confirmation of display or phone delivery. Offline conditions, Doze/provider policy, device restrictions and force-stop can still delay or prevent alerts.
 
-Existing **WorkManager** polling remains a fallback and uses the same generic notification. Idle checks have a 15-minute minimum interval. Without Firebase configuration, polling is the only delivery path. Existing unresolved notification Reply drafts and outbox feedback are preserved during migration; these legacy feedback notices and Android's separate automatic-location foreground-service notification are exceptions to the single-attention-notice rule. Pi Durable remains the conversation/task authority.
+Existing **WorkManager** polling remains a fallback and uses the same generic notification. Idle checks have a 15-minute minimum interval. Without Firebase configuration, polling is the only delivery path. Existing unresolved notification Reply drafts and outbox feedback are preserved during migration; these legacy feedback notices and Android's separate Automatic location and Keep connected foreground-service notifications are exceptions to the single-attention-notice rule. Pi Durable remains the conversation/task authority.
 
 ## Scheduling
 

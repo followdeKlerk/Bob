@@ -5,7 +5,8 @@ test('generic monitoring is not a foreground service; location retains its requi
  const native=source('src/main/java/com/bobmobile/BobNotifications.kt'),manifest=source('src/main/AndroidManifest.xml');
  expect(native).toContain('OneTimeWorkRequestBuilder<BobNotificationWorker>');expect(native).toContain('PeriodicWorkRequestBuilder<BobNotificationWorker>(15, TimeUnit.MINUTES)');
  expect(native).not.toMatch(/\b(startForeground|startForegroundService|setForeground|setForegroundAsync)\s*\(/);
- expect(manifest).not.toContain('.BobNotificationService');expect(manifest).not.toContain('FOREGROUND_SERVICE_SPECIAL_USE');expect(manifest).toContain('.BobLocationService');expect(manifest).toContain('FOREGROUND_SERVICE_LOCATION');
+ expect(manifest).not.toContain('.BobNotificationService');expect(native).not.toContain('FOREGROUND_SERVICE_SPECIAL_USE');
+ const connectionServices=manifest.match(/<service[^>]*android:foregroundServiceType="specialUse"[^>]*>/g)??[];expect(connectionServices).toHaveLength(1);expect(connectionServices[0]).toContain('.BobConnectionService');expect(manifest).toContain('.BobLocationService');expect(manifest).toContain('FOREGROUND_SERVICE_LOCATION');
 });
 test('scheduled job payloads contain an identity, not a bearer; stored watch records use authenticated encrypted bytes',()=>{
  const native=source('src/main/java/com/bobmobile/BobNotifications.kt'),store=source('src/main/java/com/bobmobile/NotificationWatchStore.kt');
