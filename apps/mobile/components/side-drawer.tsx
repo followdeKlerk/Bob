@@ -6,7 +6,7 @@ import {Clock3,Archive,ArchiveRestore,ChevronDown,ChevronRight,Check,Edit3,Ellip
 import {EdgeFade} from './edge-fade';
 import {ActionIcon} from './message-actions';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,RoundAction,SectionSegments} from './section-ui';
+import {SectionHeading,SectionActions,RoundAction,SectionSegments} from './section-ui';
 import {useKeyboardInset} from '../keyboard-inset';
 export type SessionAction='rename'|'pin'|'unpin'|'archive'|'unarchive'|'delete'|'restore';
 type Row={id:string;label:string;selected?:boolean;disabled?:boolean;onPress:()=>void;pinned?:boolean;archived?:boolean;trashed?:boolean;working?:boolean};
@@ -27,7 +27,7 @@ export function SideDrawer({menu:sectionMenu,onSchedules,visible,onClose,navigat
  const keyboard=useKeyboardInset(),insets=useSafeAreaInsets();
  const [headerHeight,setHeaderHeight]=useState(72),[footerHeight,setFooterHeight]=useState(80);
  const bottomInset=embedded||keyboard>0?0:insets.bottom;
- const topClearance=(embedded?0:insets.top)+headerHeight+(embedded?(mode==='sessions'?0:20):36),bottomClearance=embedded||mode==='workstations'?24:bottomInset+footerHeight+44;
+ const topClearance=(embedded?0:insets.top)+headerHeight+(embedded?(mode==='sessions'?0:20):36),bottomClearance=embedded?footerHeight+12:mode==='workstations'?24:bottomInset+footerHeight+44;
  const {width,height}=useWindowDimensions(),[searching,setSearching]=useState(false),[query,setQuery]=useState(''),[pairingOpen,setPairingOpen]=useState(false),[tab,setTab]=useState<'chats'|'archived'|'trash'>('chats');
  const [menu,setMenu]=useState<{row:Row;y:number}>(),[renaming,setRenaming]=useState<Row>(),[title,setTitle]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const filtered=useMemo(()=>conversations.filter(row=>(tab==='trash'?row.trashed:tab==='archived'?row.archived&&!row.trashed:!row.archived&&!row.trashed)&&row.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a,b)=>Number(!!b.pinned)-Number(!!a.pinned)||Number(b.id)-Number(a.id)),[conversations,tab,query]);
@@ -71,14 +71,15 @@ export function SideDrawer({menu:sectionMenu,onSchedules,visible,onClose,navigat
     <EdgeFade edge="top" height={topClearance}/><EdgeFade edge="bottom" height={bottomClearance}/>
    </View>
    <View testID="drawer-header" pointerEvents="box-none" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setHeaderHeight(height);}} style={[s.headerOverlay,{top:embedded?0:insets.top}]}>
-    {embedded?<SectionHeading menu={sectionMenu} title={mode==='workstations'?'Workstations':'Sessions'} subtitle={mode==='sessions'?workspaceLabel:undefined}>
+    {embedded?<SectionHeading title={mode==='workstations'?'Workstations':'Sessions'} subtitle={mode==='sessions'?workspaceLabel:undefined}/>:<View pointerEvents="box-none" style={s.heading}><View pointerEvents="none" style={{flex:1}}><Image accessibilityLabel="Bob logo" accessible source={require('../assets/bob-wordmark.png')} resizeMode="contain" style={s.brand}/></View><View style={s.control}><ActionIcon icon={searching?X:Search} label={searching?'Close loaded session search':'Search loaded sessions'} onPress={()=>{setSearching(value=>!value);setQuery('');Keyboard.dismiss();}}/></View></View>}
+    {searching&&<TextInput autoFocus value={query} onChangeText={setQuery} accessibilityLabel="Search loaded sessions" placeholder="Search loaded sessions" placeholderTextColor={colors.muted} style={s.search}/>}
+   </View>
+   {embedded&&<View testID="drawer-footer" pointerEvents="box-none" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setFooterHeight(height);}} style={{position:'absolute',left:0,right:0,bottom:0}}><SectionActions menu={sectionMenu}>
      {mode==='sessions'&&onSchedules&&<RoundAction label="Schedules" icon={Clock3} disabled={disabled} onPress={onSchedules}/>}
      {mode!=='workstations'&&<RoundAction icon={searching?X:Search} label={searching?'Close loaded session search':'Search loaded sessions'} onPress={()=>{setSearching(value=>!value);setQuery('');Keyboard.dismiss();}}/>}
      {mode==='sessions'&&<RoundAction label="New conversation" icon={SquarePen} disabled={disabled} primary onPress={()=>{Keyboard.dismiss();onNew();}}/>}
      {mode==='workstations'&&<RoundAction label="Add workstation" icon={QrCode} primary onPress={()=>setPairingOpen(value=>!value)}/>}
-    </SectionHeading>:<View pointerEvents="box-none" style={s.heading}><View pointerEvents="none" style={{flex:1}}><Image accessibilityLabel="Bob logo" accessible source={require('../assets/bob-wordmark.png')} resizeMode="contain" style={s.brand}/></View><View style={s.control}><ActionIcon icon={searching?X:Search} label={searching?'Close loaded session search':'Search loaded sessions'} onPress={()=>{setSearching(value=>!value);setQuery('');Keyboard.dismiss();}}/></View></View>}
-    {searching&&<TextInput autoFocus value={query} onChangeText={setQuery} accessibilityLabel="Search loaded sessions" placeholder="Search loaded sessions" placeholderTextColor={colors.muted} style={s.search}/>}
-   </View>
+   </SectionActions></View>}
    {!embedded&&mode!=='workstations'&&<View testID="drawer-footer" pointerEvents="box-none" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setFooterHeight(height);}} style={[s.footer,{bottom:bottomInset}]}><Pressable disabled={disabled} accessibilityRole="button" accessibilityLabel="New conversation" onPress={()=>{Keyboard.dismiss();onNew();}} style={s.new}><SquarePen size={21} color={colors.foreground}/><Text style={s.newText}>New chat</Text></Pressable>{!embedded&&<View style={s.control}><ActionIcon icon={Settings} label="Settings" disabled={disabled} onPress={()=>{Keyboard.dismiss();onSettings();}}/></View>}</View>}
    </View>
   </View>

@@ -5,7 +5,7 @@ import {Menu as NavigationMenu,MessagesSquare,NotebookPen,Monitor,Users,Settings
 import {Text} from './app-text';
 import type {BottomDestination} from './bottom-tabs';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,RoundAction} from './section-ui';
+import {SectionHeading,SectionActions,RoundAction} from './section-ui';
 
 const destinations:{id:BottomDestination;icon:LucideIcon}[]=[
  {id:'Sessions',icon:MessagesSquare},
@@ -32,14 +32,15 @@ export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,
    <View style={[s.overlay,{paddingTop:insets.top+12}]}>
     <Pressable accessibilityRole="button" accessibilityLabel="Dismiss navigation menu" onPress={onClose} style={StyleSheet.absoluteFill}/>
     <SafeAreaView edges={['left','right','bottom']} testID="chat-navigation-sheet" accessibilityViewIsModal onAccessibilityEscape={onClose} style={s.sheet}>
+     <SectionHeading title="Menu"/>
      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} style={s.scroll}>
-      <SectionHeading title="Menu" leading={<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/>}/>
       {destinations.map(({id,icon:Icon})=><Pressable key={id} accessibilityRole="button" accessibilityLabel={id} accessibilityValue={id==='Agents'?{text:agentActivity}:undefined} accessibilityState={{selected:id==='Chat'}} onPress={()=>onSelect(id)} style={s.row}>
        <Icon size={23} color={colors.foreground}/>
        <Text style={s.label}>{id}</Text>
        {id==='Agents'&&count>0&&<Text accessible={false} style={s.count}>{count}</Text>}
       </Pressable>)}
      </ScrollView>
+     <SectionActions leading={<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/>}/>
     </SafeAreaView>
    </View>
   </Modal>
@@ -52,7 +53,7 @@ const sTheme=themed(({colors})=>StyleSheet.create({
  badgeText:{color:colors.foreground,fontSize:11,lineHeight:15,fontWeight:'700'},
  overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
  sheet:{width:'100%',maxWidth:760,maxHeight:'85%',alignSelf:'center',backgroundColor:colors.surface,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card},
- scroll:{flexGrow:0,flexShrink:1},
+ scroll:{flexGrow:0,flexShrink:1,minHeight:0},
  content:{paddingBottom:12,gap:4},
  row:{marginHorizontal:8,minHeight:56,paddingHorizontal:12,paddingVertical:14,flexDirection:'row',alignItems:'center',gap:16},
  label:{flex:1,flexShrink:1,color:colors.foreground,fontSize:17,lineHeight:25},

@@ -3,7 +3,7 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {View,StyleSheet} from 'react-native';
 import {AgentsScreen} from '../components/agents-screen';
-import {SectionHeading} from '../components/section-ui';
+import {SectionHeading,SectionActions} from '../components/section-ui';
 import {colors} from '../theme';
 const text=(tree:Renderer.ReactTestRenderer)=>tree.root.findAll(n=>typeof n.props.children==='string').map(n=>n.props.children).join(' ');
 test.each([true,false])('empty agent viewer explains conversation availability: %s',async hasConversation=>{
@@ -43,10 +43,27 @@ test('agent viewer shares heading alignment and outlined controls without outlin
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props).toMatchObject({title:'Agents',subtitle:'This conversation · view only'});
-  const history=heading.findByProps({accessibilityLabel:'Agent history'});
+  expect(heading.findAllByProps({accessibilityLabel:'Agent history'})).toHaveLength(0);
+  const history=tree.root.findByType(SectionActions).findByProps({accessibilityLabel:'Agent history'});
   expect(StyleSheet.flatten(history.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border,minHeight:48});
   const agent=tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(agent.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
   expect(tree.root.findByProps({testID:'plain-transcript'}).props.style).toBeUndefined();
+ }finally{await act(async()=>tree.unmount());}
+});
+
+
+test('agent history and root Menu belong to the footer after the retained flexible viewer',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<AgentsScreen menu={<View testID="agents-menu-control"/>} agents={[]} onSelect={()=>{}} status="" hasConversation historyCount={2} onHistoryChange={()=>{}}>{null}</AgentsScreen>);});
+ try{
+  const heading=tree.root.findByType(SectionHeading),footer=tree.root.findByType(SectionActions),host=heading.parent!;
+  expect(heading.props).toEqual({title:'Agents',subtitle:'This conversation · view only'});
+  const body=host.children[1] as Renderer.ReactTestInstance;
+  expect(StyleSheet.flatten(body.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(body.findAllByProps({accessibilityLabel:'Agent history'})).toHaveLength(0);
+  expect(host.children.indexOf(footer)).toBeGreaterThan(host.children.indexOf(body));
+  expect(footer.findByProps({testID:'section-footer-actions'}).findAllByProps({accessibilityLabel:'Agent history'}).length).toBeGreaterThan(0);
+  expect(footer.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'agents-menu-control'}).length).toBeGreaterThan(0);
  }finally{await act(async()=>tree.unmount());}
 });

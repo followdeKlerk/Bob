@@ -2,6 +2,7 @@ jest.mock('react-native/Libraries/AppState/AppState',()=>({__esModule:true,defau
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {AppState,Modal,ScrollView,StyleSheet,Text} from 'react-native';
+import {SectionHeading,SectionActions} from '../components/section-ui';
 import {ChatNavigation} from '../components/chat-navigation';
 import {Menu as NavigationMenu} from 'lucide-react-native';
 jest.mock('lucide-react-native',()=>new Proxy({Menu:()=>null},{get:(icons,name)=>name==='__esModule'?true:icons[name as keyof typeof icons]??(()=>null)}));
@@ -29,8 +30,17 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
  expect(modal.props.visible).toBe(true);expect(modal.props.transparent).toBe(true);
  expect(sheet.props.accessibilityViewIsModal).toBe(true);
  expect(StyleSheet.flatten(sheet.props.style).maxHeight).toBe('85%');
+ expect(StyleSheet.flatten(sheet.props.style).height).toBeUndefined();
  const scroll=sheet.findByType(ScrollView);
  expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
+ expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({flexGrow:0,flexShrink:1,minHeight:0});
+ const heading=sheet.findByType(SectionHeading),footer=sheet.findByType(SectionActions);
+ expect(heading.props).toEqual({title:'Menu'});
+ expect(scroll.findAllByType(SectionHeading)).toHaveLength(0);
+ expect(scroll.findAllByType(SectionActions)).toHaveLength(0);
+ expect(footer.findByProps({testID:'section-footer-leading'}).findAllByProps({accessibilityLabel:'Close navigation menu'}).length).toBeGreaterThan(0);
+ expect(footer.parent).toBe(scroll.parent);
+ expect(scroll.parent!.children.indexOf(scroll)).toBeLessThan(scroll.parent!.children.indexOf(footer));
  const destinations=['Sessions','Notes','Workstations','Agents','Settings','Chat'];
  for(const destination of destinations){
   const row=scroll.findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0];

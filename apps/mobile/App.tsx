@@ -21,7 +21,7 @@ import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {ThemeProvider} from './theme-provider';
 import {AppearanceSettings} from './components/appearance-settings';
-import {SettingsGroup,SettingsRow,SectionHeading,RoundAction} from './components/section-ui';
+import {SettingsGroup,SettingsRow,SectionHeading,SectionActions,RoundAction} from './components/section-ui';
 import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks,Users,Settings as SettingsIcon} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {type BottomDestination} from './components/bottom-tabs';
@@ -994,7 +994,7 @@ function Main() {
       {backend&&<SchedulesScreen menu={screen==='Schedules'?sectionMenu:undefined} key={'schedules:'+backend.backendId} visible={screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
       {screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Sessions'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <View testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>
-          <SectionHeading menu={sectionMenu} title={screen} onBack={screen!=='Settings'?backSection:undefined}/>
+          <SectionHeading title={screen}/>
           <ScrollView testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:0,paddingHorizontal:20,paddingBottom:28,gap:18}]}>
 
           {sectionLoading?<View testID="section-loading-overlay" style={{minHeight:160,alignItems:'center',justifyContent:'center',gap:12}}><ActivityIndicator color={colors.accent}/><Text style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>:<>
@@ -1218,13 +1218,14 @@ function Main() {
           )}
           </>}
           </ScrollView>
+          <SectionActions menu={sectionMenu} onBack={screen!=='Settings'?backSection:undefined}/>
         </View>
       )}
       <Modal visible={actions} transparent animationType="none" onRequestClose={()=>setActions(false)}>
         <View style={styles.actionOverlay}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
           {!actionsMore?<PlusMenu bottom={Math.max(insets.bottom+12,keyboardInset+composerHeight+8)} maxHeight={Math.max(140,windowSize.height-Math.max(insets.bottom+12,keyboardInset+composerHeight+8)-insets.top-20)} disabled={!chat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>:<SafeAreaView edges={['bottom']} style={styles.actionSheet}>
-            <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions" leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/></View>
+            <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"/></View>
             <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text accessibilityLiveRegion="polite" style={[styles.caption,{marginBottom:12}]}>{backend?.name??'Workstation'} · {busy?'Working':status}</Text>
               <SettingsGroup title="Messages">
@@ -1253,6 +1254,7 @@ function Main() {
                 <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
               </SettingsGroup>}
             </ScrollView>
+            <View style={{marginHorizontal:-20,marginBottom:-20}}><SectionActions leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/></View>
           </SafeAreaView>}
         </View>
       </Modal>

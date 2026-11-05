@@ -1,7 +1,7 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {AppState,StyleSheet,View} from 'react-native';
-import {SectionHeading,RoundAction,SectionSegments} from '../components/section-ui';
+import {SectionHeading,SectionActions,RoundAction,SectionSegments} from '../components/section-ui';
 import {colors} from '../theme';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert,scheduleFrequency,type ScheduleJob} from '../components/schedules-screen';
 jest.mock('uuid',()=>({v4:()=> '11111111-1111-4111-8111-111111111111'}));
@@ -64,14 +64,22 @@ test('hide/reopen cancels the old read and starts a fresh scoped read without wa
 });
 
 
-test('schedule heading has return left and Refresh/Create right; cards and controls share menu chrome',async()=>{
+test('schedule footer has return left and Refresh/Create right below a separate heading; cards and controls share menu chrome',async()=>{
  const back=jest.fn(),compose=jest.fn(),request=jest.fn(async()=>({jobs:[job]}));let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<SchedulesScreen visible request={request} onBack={back} onCompose={compose} onOpenChat={()=>{}}/>);});
+ await act(async()=>{tree=Renderer.create(<SchedulesScreen menu={<View testID="schedules-menu-control"/>} visible request={request} onBack={back} onCompose={compose} onOpenChat={()=>{}}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
-  expect(heading.props).toMatchObject({title:'Schedules',subtitle:'This workstation',onBack:back});
-  expect(heading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules','Create a schedule in chat']);
-  const actions=heading.findByProps({testID:'section-heading-actions'});
+  expect(heading.props).toMatchObject({title:'Schedules',subtitle:'This workstation'});
+  expect(heading.findAllByType(RoundAction)).toHaveLength(0);
+  const footer=tree.root.findByType(SectionActions);expect(footer.props.onBack).toBe(back);
+  const body=heading.parent!.children[1] as Renderer.ReactTestInstance;
+  expect(StyleSheet.flatten(body.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(StyleSheet.flatten(body.findByType(require('react-native').FlatList).props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(body.findAllByType(SectionActions)).toHaveLength(0);
+  expect(heading.parent!.children.indexOf(body)).toBeLessThan(heading.parent!.children.indexOf(footer));
+  expect(footer.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'schedules-menu-control'}).length).toBeGreaterThan(0);
+  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules','Create a schedule in chat']);
+  const actions=footer.findByProps({testID:'section-footer-actions'});
   expect(actions.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Refresh schedules','Create a schedule in chat']);
   expect(actions.findAllByType(RoundAction)[1].props.primary).toBe(true);
   act(()=>press(tree,'Back to previous menu'));expect(back).toHaveBeenCalledTimes(1);

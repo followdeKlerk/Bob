@@ -9,33 +9,42 @@ import {Text as ControlText} from './ui/text';
 
 /** Shared chrome for non-chat destinations. Keep content readable as text grows. */
 export const sectionStylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
- heading:{paddingHorizontal:20,paddingTop:20,paddingBottom:16},
- headingRow:{flexDirection:'row',alignItems:'flex-start',gap:12,minHeight:48},
+ heading:{paddingHorizontal:20,paddingTop:16,paddingBottom:12,flexShrink:0},
+ footer:{paddingHorizontal:16,paddingVertical:8,flexDirection:'row',alignItems:'flex-end',gap:8,flexShrink:0,backgroundColor:colors.background,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:colors.subtle},
+ headingRow:{flexDirection:'row',alignItems:'flex-start',minHeight:35},
  menu:{flexShrink:0,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},
- toolbar:{flexDirection:'row',flexWrap:'wrap',alignItems:'flex-start',gap:8,marginTop:8},
+ toolbar:{flex:1,minWidth:0,flexDirection:'row',flexWrap:'wrap',alignItems:'flex-end',gap:8},
  leading:{flexShrink:0,maxWidth:'100%'},
  actions:{flexDirection:'row',flexWrap:'wrap',flexGrow:1,flexShrink:1,maxWidth:'100%',justifyContent:'flex-end',alignItems:'flex-start',gap:8,marginLeft:'auto'},
- titleBox:{flex:1,minWidth:0,minHeight:48,justifyContent:'center'},
+ titleBox:{flex:1,minWidth:0,minHeight:35,justifyContent:'center'},
  title:{color:colors.foreground,fontSize:27,lineHeight:35,fontWeight:'600',letterSpacing:-.5,flexShrink:1},
  subtitle:{color:colors.muted,fontSize:12,lineHeight:20,marginTop:3},
 }));
-/** Titles and navigation never compete with page actions for the same line.
- * Return/dismiss stays left, utilities and the primary action stay right.
- * Subtitles come last so long workspace names cannot displace controls. */
-export function SectionHeading({title,subtitle,onBack,leading,children,menu}:{title:string;subtitle?:string;onBack?:()=>void;leading?:React.ReactNode;children?:React.ReactNode;menu?:React.ReactNode}){
+/** Orientation stays at the top; thumb-reachable controls live in SectionActions. */
+export function SectionHeading({title,subtitle}:{title:string;subtitle?:string}){
+ const s=useThemedValue(sectionStylesTheme);
+ return <View pointerEvents="box-none" testID="section-heading" style={s.heading}>
+  <View pointerEvents="box-none" testID="section-heading-row" style={s.headingRow}>
+   <View pointerEvents="none" style={s.titleBox}><Text accessibilityRole="header" style={s.title}>{title}</Text></View>
+  </View>
+  {!!subtitle&&<Text testID="section-heading-subtitle" style={s.subtitle}>{subtitle}</Text>}
+ </View>;
+}
+/** Controls use natural flow, including wrapped large text. Normal screen hosts
+ * reserve this below an expanding body; floating hosts must reserve its measured
+ * height in scroll clearance. The host owns safe-area/IME insets once.
+ * Return stays left, page actions follow, and Menu stays at the bottom right. */
+export function SectionActions({onBack,leading,children,menu}:{onBack?:()=>void;leading?:React.ReactNode;children?:React.ReactNode;menu?:React.ReactNode}){
  const s=useThemedValue(sectionStylesTheme);
  const hasActions=React.Children.toArray(children).length>0;
  const returnControl=leading??(onBack?<RoundAction label="Back to previous menu" icon={ArrowLeft} onPress={onBack}/>:undefined);
- return <View pointerEvents="box-none" style={s.heading}>
-  <View pointerEvents="box-none" testID="section-heading-row" style={s.headingRow}>
-   <View pointerEvents="none" style={s.titleBox}><Text accessibilityRole="header" style={s.title}>{title}</Text></View>
-   {!!menu&&<View pointerEvents="box-none" testID="section-heading-menu" style={s.menu}>{menu}</View>}
+ if(!returnControl&&!hasActions&&!menu)return null;
+ return <View pointerEvents="box-none" testID="section-footer" style={s.footer}>
+  <View pointerEvents="box-none" testID="section-footer-toolbar" style={s.toolbar}>
+   {!!returnControl&&<View pointerEvents="box-none" testID="section-footer-leading" style={s.leading}>{returnControl}</View>}
+   {hasActions&&<View pointerEvents="box-none" testID="section-footer-actions" style={s.actions}>{children}</View>}
   </View>
-  {(returnControl||hasActions)&&<View pointerEvents="box-none" testID="section-heading-toolbar" style={s.toolbar}>
-   {!!returnControl&&<View pointerEvents="box-none" testID="section-heading-leading" style={s.leading}>{returnControl}</View>}
-   {hasActions&&<View pointerEvents="box-none" testID="section-heading-actions" style={s.actions}>{children}</View>}
-  </View>}
-  {!!subtitle&&<Text testID="section-heading-subtitle" style={s.subtitle}>{subtitle}</Text>}
+  {!!menu&&<View pointerEvents="box-none" testID="section-footer-menu" style={s.menu}>{menu}</View>}
  </View>;
 }
 /** Use the licensed React Native Reusables asset, not bespoke boxed buttons.

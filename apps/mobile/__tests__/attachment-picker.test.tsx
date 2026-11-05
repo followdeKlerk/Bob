@@ -1,7 +1,7 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Modal,NativeModules,PermissionsAndroid,Platform,StyleSheet,TextInput,View} from 'react-native';
-import {SectionHeading,RoundAction} from '../components/section-ui';
+import {SectionHeading,SectionActions,RoundAction} from '../components/section-ui';
 import {colors} from '../theme';
 import {AttachmentPicker,requestGalleryAccess} from '../components/attachment-picker';
 import {PlusMenu} from '../components/plus-menu';
@@ -135,21 +135,47 @@ test('small picker controls are at least 48dp and selected files have checked st
 });
 
 
-test('attachment modal keeps Close left and Add right beneath the shared title and standardizes cards, input and Add with consistent selected borders',async()=>{
+test('attachment modal keeps Close left and Add right in a separate bottom footer and standardizes cards, input and Add with consistent selected borders',async()=>{
  const close=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<AttachmentPicker initialTab="files" limit={1000} onClose={close} onAdd={()=>{}}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props.title).toBe('Add files');expect(heading.props.onBack).toBeUndefined();
-  expect(heading.findByProps({testID:'section-heading-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
-  expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
+  expect(heading.findAllByType(RoundAction)).toHaveLength(0);
+  const footer=tree.root.findByType(SectionActions);
+  const list=tree.root.findByType(require('react-native').FlatList);
+  expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(heading.props.children).toBeUndefined();
+  expect(footer.parent).toBe(list.parent);
+  expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(footer));
+  expect(list.findAllByProps({testID:'section-footer'})).toHaveLength(0);
+  expect(footer.findByProps({testID:'section-footer-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
+  expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
   expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
   expect(StyleSheet.flatten(find(tree,'Gallery tab').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
-  expect(heading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Add 0 attachments').length).toBeGreaterThan(0);
+  expect(footer.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Add 0 attachments').length).toBeGreaterThan(0);
   expect(StyleSheet.flatten(find(tree,'Add 0 attachments').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.accent,backgroundColor:colors.accent});
   expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===14&&style.borderColor===colors.border&&style.borderWidth===1&&style.marginTop===14;})).toBe(true);
   await act(async()=>find(tree,'report.pdf').props.onPress());
   expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
   await act(async()=>find(tree,'Close add files').props.onPress());expect(close).toHaveBeenCalledTimes(1);
  }finally{await act(async()=>tree.unmount());}
+});
+
+
+test('attachment input dialog preserves native Android resize without adding Activity keyboard clearance',async()=>{
+ const originalOS=Object.getOwnPropertyDescriptor(Platform,'OS')!;
+ Object.defineProperty(Platform,'OS',{configurable:true,value:'android'});
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<AttachmentPicker initialTab="files" limit={1000} onClose={()=>{}} onAdd={()=>{}}/>);});
+  const modal=tree.root.findByType(Modal),host=modal.findByType(SectionHeading).parent!;
+  expect(modal.props.statusBarTranslucent).not.toBe(true);
+  expect(modal.props.navigationBarTranslucent).not.toBe(true);
+  expect(StyleSheet.flatten(host.props.style).paddingBottom).toBeUndefined();
+  expect(modal.findAllByType(require('react-native').KeyboardAvoidingView)).toHaveLength(0);
+ }finally{
+  if(tree)await act(async()=>tree.unmount());
+  Object.defineProperty(Platform,'OS',originalOS);
+ }
 });

@@ -5,7 +5,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import Svg,{Path} from 'react-native-svg';
 import {RotateCcw,RotateCw} from 'lucide-react-native';
 import {themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,SectionAction} from './section-ui';
+import {SectionHeading,SectionActions,SectionAction} from './section-ui';
 
 type Size={width:number;height:number};
 type Stroke={color:string;width:number;points:{x:number;y:number}[]};
@@ -87,7 +87,7 @@ export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel
  const size=paper??canvas,fit=fitPaper(canvas,size);
  return <Modal visible={visible} animationType="slide" onRequestClose={requestCancel} statusBarTranslucent>
   <SafeAreaView style={s.root}>
-   <View style={{marginHorizontal:-12}}><SectionHeading title="Drawing" leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionHeading></View>
+   <View style={{marginHorizontal:-12}}><SectionHeading title="Drawing"/></View>
    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.toolbar}><View style={s.tools}><Pressable accessibilityRole="button" accessibilityLabel="Undo" accessibilityState={{disabled:undoDisabled}} disabled={undoDisabled} onPress={undo} style={[s.tool,undoDisabled&&s.disabled]}><RotateCcw size={21} color={colors.foreground}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Redo" accessibilityState={{disabled:redoDisabled}} disabled={redoDisabled} onPress={redoLast} style={[s.tool,redoDisabled&&s.disabled]}><RotateCw size={21} color={colors.foreground}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Eraser" accessibilityState={{selected:erasing,disabled:saving}} disabled={saving} onPress={()=>setErasing(!erasing)} style={[s.pill,erasing&&s.selected]}><Text style={s.toolText}>Eraser</Text></Pressable>{palette.map(item=><Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{selected:color===item.value&&!erasing,disabled:saving}} disabled={saving} onPress={()=>{setColor(item.value);setErasing(false);}} style={[s.pill,color===item.value&&!erasing&&s.selected]}><Text style={s.toolText}>{item.label}</Text></Pressable>)}</View></ScrollView>
    <View style={s.widthRow}><Text style={s.widthLabel}>Width</Text>{[3,5,8].map(value=><Pressable key={value} accessibilityRole="button" accessibilityLabel={`Pen width ${value}`} accessibilityState={{selected:penWidth===value,disabled:saving}} disabled={saving} onPress={()=>setPenWidth(value)} style={[s.widthChoice,penWidth===value&&s.selected]}><View style={{width:value+5,height:value+5,borderRadius:12,backgroundColor:colors.foreground}}/></Pressable>)}</View>
    {saving&&<Text accessibilityLiveRegion="polite" style={s.feedback}>Adding drawing…</Text>}
@@ -98,6 +98,7 @@ export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel
      {strokes.map((stroke,index)=><Path key={index} d={pathFor(stroke)} stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
     </Svg>
    </View>
+   <View style={{marginHorizontal:-12}}><SectionActions leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionActions></View>
   </SafeAreaView>
  </Modal>;
 }

@@ -6,7 +6,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Check,Search,Star,X} from 'lucide-react-native';
 import {Button} from './ui/button';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
-import {SectionHeading,RoundAction,SectionAction} from './section-ui';
+import {SectionHeading,SectionActions,RoundAction,SectionAction} from './section-ui';
 export type ModelOption={provider:string;modelId:string;name:string;available?:boolean;thinkingLevels?:string[]};
 export type ModelChoice={model?:{provider:string;modelId:string};thinkingLevel?:string};
 const favoriteKey='model-favorites:v1';
@@ -35,10 +35,11 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
   try{await AsyncStorage.setItem(favoriteKey,JSON.stringify(next));setFavorites(next);setError('');}catch{setError('Could not save favourites. Please try again.');}finally{favoriteBusy.current=false;setFavoriteSaving(false);}
  }
  return <Modal visible={visible} transparent animationType="slide" onRequestClose={()=>{if(!saving)onClose();}}>
-  <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS==='ios'?'padding':'height'}>
+  {/* Android RN Modal already resizes its dialog for the IME; only iOS needs JS avoidance. */}
+  <KeyboardAvoidingView style={s.overlay} enabled={Platform.OS==='ios'} behavior="padding">
    <Pressable style={StyleSheet.absoluteFill} onPress={()=>{if(!saving)onClose();}} accessibilityLabel="Close model selection"/>
    <SafeAreaView edges={['top','bottom']} style={s.sheet}>
-    <SectionHeading title="Model & thinking" leading={<RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionHeading>
+    <SectionHeading title="Model & thinking"/>
     <FlatList data={rows} keyExtractor={key} style={s.models} keyboardShouldPersistTaps="handled" extraData={[selected,favorites,favoriteSaving,saving,loading]} ListHeaderComponent={<View style={s.header}>
      <View testID="current-model-summary" style={s.summary}><Text style={s.label}>Current model</Text><Text selectable style={s.text}>{loading?'Loading…':currentModel?.name??current.model?.modelId??'Not configured'}</Text><Text style={s.caption}>{current.model?.provider}{current.thinkingLevel?` · ${labels[current.thinkingLevel]??current.thinkingLevel} thinking`:''}</Text></View>
      <View style={s.search}><Search size={19} color={colors.muted}/><TextInput style={s.input} value={query} onChangeText={setQuery} editable={!saving} placeholder="Search models" placeholderTextColor={colors.muted} accessibilityLabel="Search models" autoCapitalize="none"/></View>
@@ -61,6 +62,7 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
      </ScrollView>
 
     </View>
+    <SectionActions leading={<RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionActions>
    </SafeAreaView>
   </KeyboardAvoidingView>
  </Modal>;

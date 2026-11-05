@@ -6,7 +6,8 @@ import {Button} from '../components/ui/button';
 import {SectionSegments} from '../components/section-ui';
 import {EdgeFade} from '../components/edge-fade';
 import {SideDrawer} from '../components/side-drawer';
-jest.mock('../keyboard-inset',()=>({useKeyboardInset:()=>0}));
+import {useKeyboardInset} from '../keyboard-inset';
+jest.mock('../keyboard-inset',()=>({useKeyboardInset:jest.fn(()=>0)}));
 jest.mock('../components/message-actions',()=>({ActionIcon:({label,onPress}:any)=>require('react').createElement(require('react-native').Pressable,{accessibilityLabel:label,onPress})}));
 jest.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:jest.fn(()=>({top:24,bottom:20,left:0,right:0}))}));
 jest.mock('lucide-react-native',()=>{const {View}=require('react-native');return new Proxy({},{get:(_,name)=>name==='__esModule'?true:View});});
@@ -14,7 +15,7 @@ const action=jest.fn(async()=>{}),open=jest.fn(),close=jest.fn(),newChat=jest.fn
 const rows=[{id:'1',label:'First',onPress:open},{id:'2',label:'Archived session',archived:true,onPress:open},{id:'3',label:'Deleted session',trashed:true,onPress:open}];
 let tree!:Renderer.ReactTestRenderer;
 const button=(label:string)=>tree.root.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityLabel===label)[0];
-beforeEach(async()=>{action.mockClear();newChat.mockClear();open.mockClear();close.mockClear();await act(async()=>{tree=Renderer.create(<SideDrawer visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>);});});
+beforeEach(async()=>{jest.mocked(useKeyboardInset).mockReturnValue(0);action.mockClear();newChat.mockClear();open.mockClear();close.mockClear();await act(async()=>{tree=Renderer.create(<SideDrawer visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>);});});
 afterEach(async()=>{await act(async()=>tree.unmount());jest.restoreAllMocks();});
 test('long press opens compact controls and rename saves without starting another chat',async()=>{
  act(()=>button('First').props.onLongPress({nativeEvent:{pageY:350}}));expect(button('Pin to top')).toBeDefined();act(()=>button('Rename').props.onPress());act(()=>tree.root.findByProps({accessibilityLabel:'Conversation name'}).props.onChangeText('Renamed'));
@@ -200,10 +201,10 @@ test('session overflow respects disabled rows while backend switching stays a se
  act(()=>button('Another backend').props.onPress());expect(switchBackend).toHaveBeenCalledTimes(1);expect(open).not.toHaveBeenCalled();
 });
 
-test('global session actions share the right header group with New rightmost; workstation Add is in the same location',async()=>{
+test('global session actions sit in the measured bottom footer with New before Menu; workstation Add shares its location',async()=>{
  const props={embedded:true,visible:true,onClose:close,navigation:[],workspaces:[],conversations:rows,onNew:newChat,onSettings:()=>{},onSchedules:()=>{},disabled:false,pairing:null,onSessionAction:action};
  await act(async()=>tree.update(<SideDrawer {...props} mode="sessions"/>));
- const labels=()=>tree.root.findByProps({testID:'section-heading-actions'}).findAllByType(Button).map(node=>node.props.accessibilityLabel);
+ const labels=()=>tree.root.findByProps({testID:'section-footer-actions'}).findAllByType(Button).map(node=>node.props.accessibilityLabel);
  expect(labels()).toEqual(['Schedules','Search loaded sessions','New conversation']);
  await act(async()=>tree.update(<SideDrawer {...props} mode="workstations"/>));
  expect(labels()).toEqual(['Add workstation']);
@@ -215,3 +216,20 @@ test('embedded session filters follow the measured heading without an extra scre
  expect(tree.root.findByProps({testID:'drawer-scroll-list'}).props.contentContainerStyle.paddingTop).toBe(107);
  expect(tree.root.findByType(SectionSegments).props.label).toBe('Session filters');
 });
+
+ test('embedded footer reserves measured clearance and stays above IME without replacing the list',async()=>{
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ const list=tree.root.findByProps({testID:'drawer-scroll-list'}),footer=tree.root.findByProps({testID:'drawer-footer'});
+ expect(StyleSheet.flatten(footer.props.style)).toMatchObject({position:'absolute',bottom:0});
+ act(()=>footer.props.onLayout({nativeEvent:{layout:{height:112}}}));
+ expect(list.props.contentContainerStyle.paddingBottom).toBe(124);
+ expect(tree.root.findByProps({testID:'drawer-header'}).findAllByProps({testID:'section-footer'})).toHaveLength(0);
+ expect(footer.findAllByProps({testID:'section-footer'}).length).toBeGreaterThan(0);
+ act(()=>footer.props.onLayout({nativeEvent:{layout:{height:NaN}}}));
+ expect(list.props.contentContainerStyle.paddingBottom).toBe(124);
+ expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
+ jest.mocked(useKeyboardInset).mockReturnValue(280);
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-viewport'}).props.style).marginBottom).toBe(260);
+ expect(tree.root.findByProps({testID:'drawer-footer'})).toBe(footer);expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
+ });

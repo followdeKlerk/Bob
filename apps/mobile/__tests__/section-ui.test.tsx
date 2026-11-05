@@ -2,7 +2,7 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {ActivityIndicator,Pressable,StyleSheet,Text,View} from 'react-native';
 import {Bell,Plus} from 'lucide-react-native';
-import {RoundAction,SectionHeading,SectionSegments,SettingsGroup,SettingsRow} from '../components/section-ui';
+import {RoundAction,SectionHeading,SectionActions,SectionSegments,SettingsGroup,SettingsRow} from '../components/section-ui';
 import {Button} from '../components/ui/button';
 import {Tabs,TabsList,TabsTrigger} from '../components/ui/tabs';
 import {colors} from '../theme';
@@ -20,7 +20,7 @@ test('settings toggles expose state with a full-size row and concise visible lab
 });
 test('shared headings wrap text and icon actions keep accessible labels and 48-point targets',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<SectionHeading title="Notes"><RoundAction label="Create note" icon={Plus} primary onPress={()=>{}}/></SectionHeading>);});
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Notes"/><SectionActions><RoundAction label="Create note" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
  const heading=tree.root.findAllByType(Text).find(node=>node.props.accessibilityRole==='header')!;
  expect(heading.props.numberOfLines).toBeUndefined();
  const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Create note'&&typeof node.props.onPress==='function')[0];expect(button.props.accessibilityLabel).toBe('Create note');
@@ -51,8 +51,8 @@ test('legacy compact flag cannot introduce inconsistent header control geometry'
 
 test('headers use the Reusables Button asset and keep return separate from right actions; cards retain menu chrome',async()=>{
  const {menuChrome}=require('../theme');let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Schedules" subtitle="This workstation" onBack={()=>{}}><RoundAction label="Refresh" icon={Plus} onPress={()=>{}}/><RoundAction label="Create" icon={Plus} primary onPress={()=>{}}/></SectionHeading><SettingsGroup title="Group"><Text>Information</Text></SettingsGroup></View>);});
- const actions=tree.root.findByProps({testID:'section-heading-actions'});
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Schedules" subtitle="This workstation"/><SectionActions onBack={()=>{}}><RoundAction label="Refresh" icon={Plus} onPress={()=>{}}/><RoundAction label="Create" icon={Plus} primary onPress={()=>{}}/></SectionActions><SettingsGroup title="Group"><Text>Information</Text></SettingsGroup></View>);});
+ const actions=tree.root.findByProps({testID:'section-footer-actions'});
  expect(StyleSheet.flatten(actions.props.style)).toMatchObject({justifyContent:'flex-end',gap:8,marginLeft:'auto'});
  expect(actions.findAllByType(Button).map(node=>node.props.accessibilityLabel)).toEqual(['Refresh','Create']);
  expect(actions.findAllByProps({accessibilityLabel:'Back to previous menu'})).toHaveLength(0);
@@ -100,10 +100,10 @@ test.each(filterSets.map(options=>[options] as const))('Reusables filters keep s
 });
 test('long workstation subtitles cannot vertically shift header actions and share the full content width',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<SectionHeading title="Sessions" subtitle="nathan-omarchy.tail7d5b8e.ts.net"><RoundAction label="Schedules" icon={Bell} onPress={()=>{}}/><RoundAction label="Search" icon={Bell} onPress={()=>{}}/><RoundAction label="New" icon={Plus} primary onPress={()=>{}}/></SectionHeading>);});
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Sessions" subtitle="nathan-omarchy.tail7d5b8e.ts.net"/><SectionActions><RoundAction label="Schedules" icon={Bell} onPress={()=>{}}/><RoundAction label="Search" icon={Bell} onPress={()=>{}}/><RoundAction label="New" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
  try{
   const row=tree.root.findByProps({testID:'section-heading-row'}),subtitle=tree.root.findAllByType(Text).find(node=>node.props.testID==='section-heading-subtitle')!;
-  expect(StyleSheet.flatten(row.props.style)).toMatchObject({alignItems:'flex-start',minHeight:48,flexDirection:'row'});
+  expect(StyleSheet.flatten(row.props.style)).toMatchObject({alignItems:'flex-start',minHeight:35,flexDirection:'row'});
   expect(row.findAllByProps({testID:'section-heading-subtitle'})).toHaveLength(0);
   expect(subtitle.props.numberOfLines).toBeUndefined();
   expect(tree.root.findAllByType(Button)).toHaveLength(3);
@@ -111,19 +111,30 @@ test('long workstation subtitles cannot vertically shift header actions and shar
 });
 
 
-test.each([0,1,3])('title/menu stay on their own line with %i utility actions, independent of Back and subtitle',async(count)=>{
+test.each([0,1,3])('title stays top while %i utilities, Back and Menu remain in a separate wrapping footer',async(count)=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<SectionHeading title="A long submenu title that must wrap rather than move the buttons" subtitle="A long workstation subtitle" onBack={()=>{}} menu={<View testID="menu-slot"/>}>{Array.from({length:count},(_,index)=><RoundAction key={index} label={`Action ${index}`} icon={Plus} onPress={()=>{}}/>)}</SectionHeading>);});
- const row=tree.root.findByProps({testID:'section-heading-row'}),toolbar=tree.root.findByProps({testID:'section-heading-toolbar'});
- expect(row.findAllByType(RoundAction)).toHaveLength(0);
- expect(row.findByProps({testID:'section-heading-menu'}).findAllByType(View).filter(node=>node.props.testID==='menu-slot')).toHaveLength(1);
- expect(StyleSheet.flatten(row.props.style).flexWrap).toBeUndefined();
- expect(StyleSheet.flatten(row.findByProps({pointerEvents:'none'}).props.style)).toMatchObject({flex:1,minWidth:0,minHeight:48});
- expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-heading-menu'}).props.style)).toMatchObject({flexShrink:0,minWidth:48,minHeight:48});
- expect(toolbar.findByProps({testID:'section-heading-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu']);
- expect(toolbar.findAllByProps({testID:'section-heading-subtitle'})).toHaveLength(0);
- const title=row.findAllByType(Text).find(node=>node.props.accessibilityRole==='header')!;
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="A long submenu title that must wrap rather than move the buttons" subtitle="A long workstation subtitle"/><View testID="body" style={{flex:1,minHeight:0}}/><SectionActions onBack={()=>{}} menu={<View testID="menu-slot"/>}>{Array.from({length:count},(_,index)=><RoundAction key={index} label={`Action ${index}`} icon={Plus} onPress={()=>{}}/>)}</SectionActions></View>);});
+ const heading=tree.root.findByType(SectionHeading),footer=tree.root.findByType(SectionActions),toolbar=footer.findByProps({testID:'section-footer-toolbar'});
+ expect(heading.findAllByType(RoundAction)).toHaveLength(0);expect(heading.findAllByProps({testID:'menu-slot'})).toHaveLength(0);
+ expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({flexShrink:0,flexDirection:'row',alignItems:'flex-end',paddingHorizontal:16});
+ expect(StyleSheet.flatten(toolbar.props.style)).toMatchObject({flex:1,minWidth:0,flexWrap:'wrap'});
+ const menu=footer.findByProps({testID:'section-footer-menu'});expect(menu.findAllByType(View).filter(node=>node.props.testID==='menu-slot')).toHaveLength(1);
+ expect(StyleSheet.flatten(menu.props.style)).toMatchObject({flexShrink:0,minWidth:48,minHeight:48});
+ expect(toolbar.findByProps({testID:'section-footer-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu']);
+ expect(footer.findAllByProps({testID:'section-heading-subtitle'})).toHaveLength(0);
+ expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer-actions')).toHaveLength(count?1:0);
+ const title=heading.findAllByType(Text).find(node=>node.props.accessibilityRole==='header')!;
  expect(title.props.numberOfLines).toBeUndefined();expect(title.props.allowFontScaling).not.toBe(false);
  expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:27,lineHeight:35});
+ await act(async()=>tree.unmount());
+});
+
+test('empty conditional actions do not create a footer, while a menu-only footer stays right-aligned',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<SectionActions>{false&&<View/>}{null}</SectionActions>);});
+ expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer')).toHaveLength(0);
+ await act(async()=>tree.update(<SectionActions menu={<View testID="menu-only"/>}/>));
+ expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer')).toHaveLength(1);
+ expect(tree.root.findByProps({testID:'section-footer-menu'}).findAllByType(View).filter(node=>node.props.testID==='menu-only')).toHaveLength(1);
+ expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer-actions')).toHaveLength(0);
  await act(async()=>tree.unmount());
 });

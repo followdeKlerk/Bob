@@ -1,12 +1,13 @@
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions',()=>({__esModule:true,default:jest.fn(()=>({width:361,height:754,scale:1,fontScale:1}))}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,Modal,FlatList,Text,View,StyleSheet,useWindowDimensions} from 'react-native';
+import {Alert,Modal,Platform,FlatList,Text,View,StyleSheet,useWindowDimensions} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {useKeyboardInset} from '../keyboard-inset';
 import {NotesScreen} from '../components/notes-screen';
-import {SectionHeading,RoundAction} from '../components/section-ui';
+import {SectionHeading,SectionActions,RoundAction} from '../components/section-ui';
 import {colors} from '../theme';
-jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:24,bottom:20,left:0,right:0})}));
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),removeItem:jest.fn(async(key:string)=>{values.delete(key);}),clear:jest.fn(async()=>values.clear())};});
@@ -15,7 +16,8 @@ const backend='11111111-1111-4111-8111-111111111111';
 const press=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
 const input=(tree:Renderer.ReactTestRenderer,label:string,text:string)=>tree.root.findByProps({accessibilityLabel:label}).props.onChangeText(text);
 const offline=async()=>{throw Error('Offline');};
-beforeEach(async()=>{await AsyncStorage.clear();});
+jest.mock('../keyboard-inset',()=>({useKeyboardInset:jest.fn(()=>0)}));
+beforeEach(async()=>{(useKeyboardInset as jest.Mock).mockReturnValue(0);await AsyncStorage.clear();});
 test('real Notes UI creates a category and formatted checklist offline, saves once, and reopens from cache',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  const mount=async()=>{await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={72} onBack={()=>{}}/>);});};
@@ -144,14 +146,16 @@ test('failed local autosave keeps the editor open and retains text for retry',as
 });
 
 
-test('Notes keeps Sync before primary Create in the shared header and uses semantic card/control/input chrome',async()=>{
+test('Notes keeps Sync before primary Create in a separate bottom footer and uses semantic card/control/input chrome',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props.title).toBe('Notes');
-  expect(heading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Categories','Sync notes','Create note']);
-  expect(heading.findAllByType(RoundAction)[2].props.primary).toBe(true);
+  const footer=tree.root.findByType(SectionActions);
+  expect(heading.findAllByType(RoundAction)).toHaveLength(0);
+  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Categories','Sync notes','Create note']);
+  expect(footer.findAllByType(RoundAction)[2].props.primary).toBe(true);
   expect(tree.root.findByType(FlatList).findAll(node=>node.props.accessibilityLabel==='Sync notes')).toHaveLength(0);
   const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Categories'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
@@ -164,8 +168,10 @@ test('Notes keeps Sync before primary Create in the shared header and uses seman
   act(()=>press(tree,'Create note'));
   expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
   const editorHeading=tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='New note')!;
-  expect(editorHeading.findByProps({testID:'section-heading-leading'}).findAll(node=>node.props.accessibilityLabel==='Save note and go back').length).toBeGreaterThan(0);
-  expect(editorHeading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Save note').length).toBeGreaterThan(0);
+  expect(editorHeading.findAllByType(RoundAction)).toHaveLength(0);
+  const editorFooter=tree.root.findAllByType(SectionActions).find(node=>!!node.props.leading)!;
+  expect(editorFooter.findByProps({testID:'section-footer-leading'}).findAll(node=>node.props.accessibilityLabel==='Save note and go back').length).toBeGreaterThan(0);
+  expect(editorFooter.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Save note').length).toBeGreaterThan(0);
   const save=tree.root.findAll(node=>node.props.accessibilityLabel==='Save note'&&typeof node.props.onPress==='function')[0];
   expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.accent&&style.borderColor===colors.accent&&style.borderWidth===1;})).toBe(true);
   const shade=tree.root.findByProps({accessibilityLabel:'Note shade: Standard gray'});
@@ -173,4 +179,70 @@ test('Notes keeps Sync before primary Create in the shared header and uses seman
   act(()=>input(tree,'Note title','Outlined card'));await act(async()=>press(tree,'Save note'));
   expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.overflow==='hidden'&&style.borderRadius===20&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
  }finally{await act(async()=>tree.unmount());}
+});
+
+
+test('Notes root, category and editor footers stay after shrinking bodies with one host-owned keyboard inset and retained editor identity',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const props={backendId:backend,request:offline,visible:true,topInset:0,menu:<View testID="notes-menu-control"/>};
+ await act(async()=>{tree=Renderer.create(<NotesScreen {...props}/>);});
+ try{
+  const list=tree.root.findByType(FlatList),rootFooter=tree.root.findByType(SectionActions);
+  expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(rootFooter.parent).toBe(list.parent);
+  expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(rootFooter));
+  expect(rootFooter.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'notes-menu-control'}).length).toBeGreaterThan(0);
+  (useKeyboardInset as jest.Mock).mockReturnValue(300);
+  await act(async()=>tree.update(<NotesScreen {...props}/>));
+  expect(tree.root.findByType(FlatList)).toBe(list);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'notes-screen'}).props.style).paddingBottom).toBe(280);
+  act(()=>press(tree,'Categories'));
+  const categoryHost=tree.root.findByType(Modal).findByType(SectionHeading).parent!;
+  const categoryBody=categoryHost.findByType(require('react-native').ScrollView),categoryFooter=categoryHost.findByType(SectionActions);
+  expect(categoryHost.findByType(SectionHeading).props).toEqual({title:'Categories'});
+  expect(categoryBody.findAllByProps({accessibilityLabel:'Close categories'})).toHaveLength(0);
+  expect(categoryBody.findAllByProps({accessibilityLabel:'Create category'}).length).toBeGreaterThan(0);
+  expect(StyleSheet.flatten(categoryBody.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(StyleSheet.flatten(categoryHost.props.style).paddingBottom).toBe(300);
+  expect(categoryFooter.findByProps({testID:'section-footer-leading'}).findAllByProps({accessibilityLabel:'Close categories'}).length).toBeGreaterThan(0);
+  expect(categoryHost.children.indexOf(categoryBody)).toBeLessThan(categoryHost.children.indexOf(categoryFooter));
+  act(()=>press(tree,'Close categories'));act(()=>press(tree,'Create note'));act(()=>input(tree,'Note body','Keep my caret'));
+  const body=tree.root.findByProps({accessibilityLabel:'Note body'});
+  act(()=>body.props.onSelectionChange({nativeEvent:{selection:{start:5,end:7}}}));
+  (useKeyboardInset as jest.Mock).mockReturnValue(0);
+  await act(async()=>tree.update(<NotesScreen {...props}/>));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBe(body);
+  expect(body.props.value).toBe('Keep my caret');
+  const modal=tree.root.findByType(Modal),footer=modal.findByType(SectionActions),scroll=modal.findByType(require('react-native').ScrollView);
+  expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(scroll.findAllByProps({accessibilityLabel:'Discard unsaved draft'})).toHaveLength(0);
+  expect(footer.findAllByProps({accessibilityLabel:'Discard unsaved draft'}).length).toBeGreaterThan(0);
+  expect(scroll.parent!.children.indexOf(scroll)).toBeLessThan(scroll.parent!.children.indexOf(footer));
+  act(()=>press(tree,'Bold'));expect(body.props.value).toBe('Keep **my** caret');
+ }finally{await act(async()=>tree.unmount());}
+});
+
+
+test.each(['android','ios'])('Notes input dialogs use one platform keyboard owner (%s)',async os=>{
+ const originalOS=Object.getOwnPropertyDescriptor(Platform,'OS')!;
+ Object.defineProperty(Platform,'OS',{configurable:true,value:os});
+ (useKeyboardInset as jest.Mock).mockReturnValue(300);
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'notes-screen'}).props.style).paddingBottom).toBe(280);
+  for(const open of ['Categories','Create note']){
+   act(()=>press(tree,open));
+   const modal=tree.root.findByType(Modal),host=modal.findByType(SectionHeading).parent!;
+   expect(modal.props.statusBarTranslucent).not.toBe(true);
+   expect(modal.props.navigationBarTranslucent).not.toBe(true);
+   expect(StyleSheet.flatten(host.props.style).paddingBottom).toBe(os==='android'?0:300);
+   expect(modal.findAllByType(require('react-native').KeyboardAvoidingView)).toHaveLength(0);
+   expect(modal.findByType(SectionActions).findAllByProps({testID:'section-footer'}).length).toBeGreaterThan(0);
+   if(open==='Categories')act(()=>press(tree,'Close categories'));
+  }
+ }finally{
+  if(tree)await act(async()=>tree.unmount());
+  Object.defineProperty(Platform,'OS',originalOS);
+ }
 });

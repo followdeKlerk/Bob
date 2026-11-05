@@ -1,8 +1,8 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {FlatList,Modal,StyleSheet,View} from 'react-native';
-import {SectionHeading,RoundAction} from '../components/section-ui';
+import {FlatList,Modal,StyleSheet,View,Platform,KeyboardAvoidingView} from 'react-native';
+import {SectionHeading,SectionActions,RoundAction} from '../components/section-ui';
 import {colors} from '../theme';
 import {ModelPicker,type ModelOption} from '../components/model-picker';
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
@@ -55,7 +55,7 @@ test('favourites obey search and provider filters without losing their saved ide
 // Read text once from the native leaves, including mixed provider/status captions.
 const textContent=(node:Renderer.ReactTestInstance):string=>node.children.map(child=>typeof child==='string'?child:textContent(child)).join(' ');
 
-test('thinking and selected summary are independently scrollable while Apply stays in the header, never in the catalog footer',async()=>{
+test('thinking and selected summary are independently scrollable while Apply stays in a persistent bottom footer, never in the catalog footer',async()=>{
  const catalog=[...models,...Array.from({length:80},(_,i)=>({provider:'other',modelId:`extra-${i}`,name:`Extra ${i}`,thinkingLevels:['medium']}))];
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelPicker visible models={catalog} current={current} onClose={()=>{}} onApply={jest.fn()}/>);});
@@ -63,13 +63,18 @@ test('thinking and selected summary are independently scrollable while Apply sta
  const panel=tree.root.findByProps({testID:'selected-model-panel'});
  const controls=tree.root.findByProps({testID:'selected-model-controls'});
  expect(list.props.data).toHaveLength(catalog.length);
+ expect(StyleSheet.flatten(list.props.style)).toMatchObject({flex:1,minHeight:0});
+ expect(tree.root.findByType(SectionHeading).props.children).toBeUndefined();
+ expect(tree.root.findByType(SectionActions).parent).toBe(list.parent);
+ expect(list.parent!.children.indexOf(list)).toBeLessThan(list.parent!.children.indexOf(tree.root.findByType(SectionActions)));
+ expect(list.findAllByProps({testID:'section-footer'})).toHaveLength(0);
  expect(list.props.ListFooterComponent).toBeUndefined();
  expect(list.findAll(n=>n.props.testID==='selected-model-panel')).toHaveLength(0);
  expect(textContent(controls)).toContain('Selected model');
  expect(textContent(controls)).toContain('Alpha');
  expect(textContent(controls)).toContain('Thinking effort');
  expect(panel.findAll(n=>n.props.accessibilityLabel==='Apply model selection')).toHaveLength(0);
- expect(tree.root.findByType(SectionHeading).findByProps({testID:'section-heading-actions'}).findAll(n=>n.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
+ expect(tree.root.findByType(SectionActions).findByProps({testID:'section-footer-actions'}).findAll(n=>n.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
  // The bounded panel can shrink with the keyboard; its controls scroll while Apply stays outside that scroll.
  expect(StyleSheet.flatten(panel.props.style)).toMatchObject({maxHeight:'55%',flexShrink:1,minHeight:0});
  expect(StyleSheet.flatten(controls.props.style)).toMatchObject({flexShrink:1});
@@ -174,18 +179,20 @@ test('Apply locks editing and dismissal while the authoritative callback is pend
 });
 
 
-test('model modal keeps Close left and Apply right beneath the shared title with outlined summaries, input and controls, not every model row',async()=>{
+test('model modal keeps Close left and Apply right in a separate bottom footer with outlined summaries, input and controls, not every model row',async()=>{
  const close=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelPicker visible models={models} current={current} onClose={close} onApply={jest.fn()}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props.title).toBe('Model & thinking');
   expect(heading.props.onBack).toBeUndefined();
-  const leading=heading.findByProps({testID:'section-heading-leading'});
+  expect(heading.findAllByType(RoundAction)).toHaveLength(0);
+  const footer=tree.root.findByType(SectionActions);
+  const leading=footer.findByProps({testID:'section-footer-leading'});
   expect(leading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close model selection']);
-  expect(heading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
+  expect(footer.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
   const headerView=heading.findAllByType(View)[0];
-  expect(StyleSheet.flatten(headerView.props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
+  expect(StyleSheet.flatten(headerView.props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
   expect(StyleSheet.flatten(tree.root.findByProps({testID:'current-model-summary'}).props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
   expect(StyleSheet.flatten(find(tree,'openai').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
   for(const label of ['All providers','Medium thinking'])expect(StyleSheet.flatten(find(tree,label).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
@@ -195,4 +202,23 @@ test('model modal keeps Close left and Apply right beneath the shared title with
   expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flexDirection==='row'&&style.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
   await act(async()=>find(tree,'Close model selection').props.onPress());expect(close).toHaveBeenCalledTimes(1);
  }finally{await act(async()=>tree.unmount());}
+});
+
+
+test.each(['android','ios'])('model dialog uses native Android resize or iOS avoidance, never both (%s)',async os=>{
+ const originalOS=Object.getOwnPropertyDescriptor(Platform,'OS')!;
+ Object.defineProperty(Platform,'OS',{configurable:true,value:os});
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<ModelPicker visible models={models} current={current} onClose={()=>{}} onApply={jest.fn()}/>);});
+  const modal=tree.root.findByType(Modal),avoidance=tree.root.findByType(KeyboardAvoidingView);
+  expect(modal.props.statusBarTranslucent).not.toBe(true);
+  expect(modal.props.navigationBarTranslucent).not.toBe(true);
+  expect(avoidance.props.enabled).toBe(os==='ios');
+  expect(avoidance.props.behavior).toBe('padding');
+  expect(StyleSheet.flatten(avoidance.props.style).paddingBottom).toBeUndefined();
+ }finally{
+  if(tree)await act(async()=>tree.unmount());
+  Object.defineProperty(Platform,'OS',originalOS);
+ }
 });

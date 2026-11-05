@@ -2,7 +2,7 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Alert,Modal,PanResponder,StyleSheet} from 'react-native';
 import {DrawingEditor} from '../components/drawing-editor';
-import {SectionHeading} from '../components/section-ui';
+import {SectionHeading,SectionActions} from '../components/section-ui';
 import {colors} from '../theme';
 
 const mockExport=jest.fn();
@@ -162,14 +162,24 @@ test('feedback shrink, failed save and rotation preserve logical paper, bottom s
 });
 
 
-test('drawing keeps Cancel left and primary Add right with standard control chrome while paper stays unoutlined',async()=>{
+test('drawing keeps Cancel left and primary Add right in a separate bottom footer with standard control chrome while paper stays unoutlined',async()=>{
  await mount();
  const cancel=find(tree,'Cancel drawing'),add=find(tree,'Add drawing');
  const header=tree.root.findByType(SectionHeading);
  expect(header.props.title).toBe('Drawing');
- expect(header.findByProps({testID:'section-heading-leading'}).findAll(node=>node.props.accessibilityLabel==='Cancel drawing').length).toBeGreaterThan(0);
- expect(header.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Add drawing').length).toBeGreaterThan(0);
- expect(StyleSheet.flatten(header.findAllByType(require('react-native').View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
+ expect(header.findAllByProps({accessibilityLabel:'Cancel drawing'})).toHaveLength(0);
+ const footer=tree.root.findByType(SectionActions);
+ expect(header.props.children).toBeUndefined();
+ expect(canvas(tree).findAllByProps({testID:'section-footer'})).toHaveLength(0);
+ expect(StyleSheet.flatten(canvas(tree).props.style)).toMatchObject({flex:1,minHeight:0});
+ const host=canvas(tree).parent!;
+ let footerBranch=footer;while(footerBranch.parent&&footerBranch.parent!==host)footerBranch=footerBranch.parent;
+ expect(footerBranch.parent).toBe(host);
+ expect(host.children.indexOf(canvas(tree))).toBeLessThan(host.children.indexOf(footerBranch));
+ for(const label of ['Undo','Redo','Eraser','Pen width 3'])expect(footer.findAllByProps({accessibilityLabel:label})).toHaveLength(0);
+ expect(footer.findByProps({testID:'section-footer-leading'}).findAll(node=>node.props.accessibilityLabel==='Cancel drawing').length).toBeGreaterThan(0);
+ expect(footer.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Add drawing').length).toBeGreaterThan(0);
+ expect(StyleSheet.flatten(header.findAllByType(require('react-native').View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
  for(const label of ['Cancel drawing','Undo','Redo','Eraser','Red','Pen width 3']){
   expect(StyleSheet.flatten(find(tree,label).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
  }

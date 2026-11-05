@@ -17,7 +17,7 @@ import {InlineSurface} from '../components/inline-surface';
 import {BottomTabs,type BottomDestination} from '../components/bottom-tabs';
 import {ChatNavigation} from '../components/chat-navigation';
 import {SkillPicker} from '../components/skill-picker';
-import {SettingsGroup,SectionHeading} from '../components/section-ui';
+import {SettingsGroup,SectionHeading,SectionActions} from '../components/section-ui';
 import {SideDrawer} from '../components/side-drawer';
 import {DrawingEditor} from '../components/drawing-editor';
 import App from '../App';
@@ -89,13 +89,19 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
    await navigateTo(tree,destination);expect(visibleNavigation(tree).props.open).toBe(false);
    expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);
    const header=tree.root.findAllByType(SectionHeading).find(node=>node.props.title===destination)!;
-   expect(header.findAllByType(ChatNavigation)).toContain(visibleNavigation(tree));
+   expect(header.findAllByType(ChatNavigation)).toHaveLength(0);
+   expect(tree.root.findAllByType(SectionActions).some(footer=>footer.findAllByType(ChatNavigation).includes(visibleNavigation(tree)))).toBe(true);
    expect(tree.root.findAllByType(ChatNavigation).filter(node=>node.props.showTrigger!==false)).toHaveLength(1);check();
    await navigateTo(tree,'Chat');expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);check();
   }
   await navigateTo(tree,'Settings');
   expect(tree.root.findByProps({testID:'section-body'}).findAllByType(SectionHeading)).toHaveLength(0);
   expect(tree.root.findByProps({testID:'section-overlay'}).findAllByType(SectionHeading).map(node=>node.props.title)).toEqual(['Settings']);
+  const settingsFooter=tree.root.findByProps({testID:'section-overlay'}).findByType(SectionActions);
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280}));
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-overlay'}).props.style).bottom).toBe(280);
+  expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionActions)).toBe(settingsFooter);
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:0}));
   for(const mode of ['Dark','Light','System'] as const){
    await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel===`${mode} theme`&&typeof node.props.onPress==='function')[0].props.onPress());
    expect(await AsyncStorage.getItem('appearance')).toBe(mode.toLowerCase());check();
@@ -114,7 +120,8 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Advanced modules'&&typeof node.props.onPress==='function')[0].props.onPress());
   const loading=tree.root.findByProps({testID:'section-loading-overlay'});
   expect(StyleSheet.flatten(loading.props.style).position).not.toBe('absolute');
-  expect(tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='Modules')!.findAllByType(ChatNavigation)).toContain(visibleNavigation(tree));
+  expect(tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='Modules')!.findAllByType(ChatNavigation)).toHaveLength(0);
+  expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionActions).findAllByType(ChatNavigation)).toContain(visibleNavigation(tree));
   await navigateTo(tree,'Chat');check();
   await act(async()=>releaseModules({ok:true,json:async()=>[]}));
   // Chat no longer reserves a (hidden) tab bar in slash-picker geometry.
