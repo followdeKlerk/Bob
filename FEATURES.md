@@ -178,6 +178,33 @@ Route names and descriptions appear in the tool's choices. Profiles define a mod
 
 Use `/delegation` for a mode picker followed by **Next session** or **Now**, or `/delegation show` for a listing. An already-active question stays intact; the command shows alternatives instead. `/delegation models` (or `profiles` / `default`) sets the mode for new chats and retains inactive route lists. Add `--now` to refresh this chat once it and its background work are settled; this can break the prompt cache. These commands run without model inference. Chats retain their choices across restarts; stale or unsupported routes return an error for you to resolve.
 
+### Custom per-spawn specialists
+
+In `profile_routes` mode, `profile:"custom"` plus a `custom` object selects a different model and thinking level **for that new helper only**. The researcher, worker and reviewer presets remain the defaults and are never rewritten. Custom inherits an allowlisted `baseProfile`’s exact tool policy, modules, selected skills and working directory; optional instructions augment its existing instructions, not its permissions.
+
+First call `subagent` with `action:"models"` to discover configured authenticated chat models and their supported thinking levels. Optional `modelQuery:{provider,offset}` filters/paginates the catalog (50 rows per page; follow `nextOffset`). This is a catalog/auth check, not a live inference probe or a guarantee that a provider will accept a future request. It is distinct from the `/delegation models` command, which selects named model-route mode.
+
+Then spawn, for example:
+```json
+{
+  "action": "spawn",
+  "name": "specialist",
+  "message": "Review this bounded question and return evidence; do not edit files.",
+  "profile": "custom",
+  "custom": {
+    "baseProfile": "reviewer",
+    "provider": "<provider returned by models>",
+    "model": "<model returned by models>",
+    "reasoning_effort": "<supported thinking level returned by models>",
+    "instructions": "Focus on the specific failure mode assigned by the coordinator."
+  }
+}
+```
+
+Model, thinking effort and base profile are required. Only regular configured provider authentication and normal service tier are used: Custom accepts no endpoints, credentials, secrets, module changes or tier overrides. Unsupported/unavailable combinations fail without fallback. Status and completed answers record the selected provider/model/effort and base profile. Settings stay fixed through sends, restarts and child forks; select a new helper name for a different route. An existing owner-defined preset named `custom` still resolves normally when no `custom` object is supplied.
+
+Custom shares the same owner authorization, active-helper/dispatch limits, stop/revoke behavior and recursion prohibition as presets. It is not an OS sandbox. No Android update is needed for this backend capability.
+
 ### Adaptive delegation
 
 Adaptive delegation is **off by default**. Configure the profiles you want, then use `/delegation auto on` to let Bob select helpers for suitable tasks. For an existing settled chat, apply `/delegation profiles --now`, or start a new chat. Bob should handle simple or tightly sequential work directly and delegate separable research, implementation or review tasks with clear scope. Stale/default profile snapshots must be refreshed before profile-based work can start.

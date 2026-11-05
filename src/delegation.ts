@@ -11,6 +11,7 @@ import {Subagents,SubagentTools} from './subagents.js';
 import type {State} from './state.js';
 import {DEFAULT_DELEGATION,DelegationConfig,readDelegationConfig,fingerprint,validateRoute,type DelegationRoute,type DelegationProfile} from './delegation-config.js';
 import {createDelegationModels} from './delegation-providers.js';
+import {customSelection,hasCustomDelegation,customDelegationSchema,customDelegationModels,type DelegationSelection} from './delegation-custom.js';
 
 export const DelegationSession=defineDoc<{config?:DelegationConfig}>({kind:'bob.delegation-session',version:1,scope:'conversation',history:'rewindable',fork:'asOf',checkpointWhen:()=>true,initial:()=>({})});
 export type RouteObservation={label:string;provider:string;model:string;reasoning_effort:ModelThinkingLevel;service_tier:string;profile?:string};
@@ -21,7 +22,8 @@ const childExtensionName='bob.delegation.child';
 const isSnapshot=(name:string)=>name.startsWith('bob.delegation.session.');
 const refresh='Delegation settings changed or this chat’s tool snapshot is unavailable. Use /delegation <mode> --now in a settled chat, or start a new chat; no alternate route was used.';
 const native=SubagentTools.tools![0] as ToolRegistration;
-function currentRoute(config:DelegationConfig,args:{option?:string;profile?:string}){
+function currentRoute(config:DelegationConfig,args:DelegationSelection){
+ const custom=customSelection(config,args);if(custom)return custom;
  if(args.option&&config.mode!=='model_map'||args.profile&&config.mode!=='profile_routes'||args.option&&args.profile)throw Error(refresh);
  if(config.mode==='default')return {label:'default',route:config.defaultRoute??undefined};
  if(config.mode==='model_map'){
@@ -42,7 +44,13 @@ export function delegationSchema(config:DelegationConfig){
  // Builder optional markers do not survive into properties. Keep the native required list
  // when extending its already-built JSON Schema; route selectors remain optional.
  const base=native.parameters as {properties:Record<string,schema.Schema>;required?:string[]};
- return {...base,properties:{...base.properties,...(field&&choices.length?{[field]:schema.union(choices.map(c=>schema.lit(c.name)),{description:'Spawn only: choose a configured route, or omit for the mode default / parent.\n'+choices.map(c=>`${c.name}: ${c.description}`).join('\n')})}: {})},additionalProperties:false};
+ const custom=hasCustomDelegation(config);
+ const selectors=[...choices.map(c=>schema.lit(c.name)),...(custom&&!choices.some(c=>c.name==='custom')?[schema.lit('custom')]:[])];
+ return {...base,properties:{...base.properties,...(field&&choices.length?{[field]:schema.union(selectors,{description:'Spawn only: choose a configured route, or omit for the mode default / parent.\n'+choices.map(c=>`${c.name}: ${c.description}`).join('\n')+(custom?'\ncustom: Exceptional per-spawn catalog model/effort with an existing base profile’s unchanged permissions. Discover supported selections with action=models.':'')})}: {}),...(custom?{
+  action:schema.union([base.properties.action,schema.lit('models')]),
+  custom:customDelegationSchema(config),
+  modelQuery:schema.obj({provider:schema.opt(schema.str({minLength:1,maxLength:64})),offset:schema.opt(schema.int({minimum:0,maximum:100000}))},{description:'action=models only. Returns up to 50 configured authenticated model/effort choices; follow nextOffset or filter provider. No inference.'}),
+ }: {})},additionalProperties:false};
 }
 export function formatDelegationRoute(route:RouteObservation){return `${route.label}: ${route.provider}/${route.model} · effort ${route.reasoning_effort} · tier ${route.service_tier}${route.profile?' · profile '+route.profile:''}`;}
 /** Native transactional check, called before any table writes. */
@@ -78,11 +86,11 @@ export function createDelegation(state:State,baseModels:Models,registry:Registry
  registry.install(childExtension);
  function installSnapshot(config:DelegationConfig){
   const name=delegationSnapshotName(config);let extension=registry.snapshot().extension(name);
-  if(!extension){extension=defineExtension({name,wraps:[wrapTool(native,tool=>({...tool,parameters:delegationSchema(config)}))]});registry.install(extension);}
+  if(!extension){extension=defineExtension({name,wraps:[wrapTool(native,tool=>({...tool,description:tool.description+(hasCustomDelegation(config)?' Custom specialists: action=models lists configured supported model/effort choices; spawn with profile=custom and custom settings while retaining an existing base profile’s permissions.':''),parameters:delegationSchema(config)}))]});registry.install(extension);}
   return extension;
  }
  async function installChild(child:Readonly<ChildState>){if(child.route)providerRoutes.install(child.route);}
- function prepare(config:DelegationConfig,args:{option?:string;profile?:string}){
+ function prepare(config:DelegationConfig,args:DelegationSelection){
   const selected=currentRoute(config,args),current=readDelegationConfig(state);
   if(readDelegationBehavior(state).enabled&&current.mode==='profile_routes'&&(config.mode!=='profile_routes'||!selected.profile))throw Error('Adaptive profile delegation requires a profiled snapshot; inherited-parent fallback is blocked. '+refresh);
   if(selected.route||args.option||args.profile){
@@ -93,9 +101,17 @@ export function createDelegation(state:State,baseModels:Models,registry:Registry
   return selected;
  }
  const tool:ToolRegistration={...native,execute:async(raw,api,context)=>{
-  const args=raw as {action:string;name?:string;message?:string;option?:string;profile?:string};
+  const args=raw as DelegationSelection&{action:string;name?:string;message?:string;modelQuery?:unknown};
+  if(args.modelQuery!==undefined&&args.action!=='models')throw Error('modelQuery applies to action=models only.');
+  if(args.action==='models'){
+   if(args.name!==undefined||args.message!==undefined||args.option!==undefined||args.profile!==undefined||args.custom!==undefined||Object.hasOwn(raw as object,'followUp'))throw Error('models accepts only action and optional modelQuery.');
+   const snapshot=await api.snapshot(DelegationSession,api.conversationId,context),agent=await api.agent(context);
+   if(!snapshot?.config||!hasCustomDelegation(snapshot.config)||!hasCustomDelegation(readDelegationConfig(state))||!agent.extensions.some(e=>e.name===delegationSnapshotName(snapshot.config!)))throw Error(refresh);
+   const catalog=await customDelegationModels(baseModels,args.modelQuery);
+   return {output:[{type:'text',text:JSON.stringify(catalog)}],details:catalog};
+  }
   if((args.action==='spawn'||args.action==='send')&&args.name!==undefined&&(!args.name.trim()||['__proto__','prototype','constructor'].includes(args.name)))throw Error('Choose a non-empty, non-reserved helper name');
-  if(args.action!=='spawn'&&(args.option!==undefined||args.profile!==undefined))throw Error('option/profile apply to spawn only; existing subagents keep their original route');
+  if(args.action!=='spawn'&&(args.option!==undefined||args.profile!==undefined||args.custom!==undefined))throw Error('option/profile/custom apply to spawn only; existing subagents keep their original route');
   let selected:ReturnType<typeof currentRoute>|undefined,parent:Agent|undefined,effort:ModelThinkingLevel|undefined;
   if(args.action==='spawn'){
    const snapshot=await api.snapshot(DelegationSession,api.conversationId,context);parent=await api.agent(context);
@@ -132,7 +148,7 @@ export function createDelegation(state:State,baseModels:Models,registry:Registry
     const profile=selected.profile;
     const extensions=profile?profile.modules.map(id=>getModules()[id]):parent!.extensions.filter(e=>e.name!==SubagentTools.name&&!isSnapshot(e.name)&&e.name!==childExtensionName);
     if(extensions.some(e=>e.tools?.some(t=>t.name==='subagent')))throw Error('Profile or inherited modules would permit recursive delegation');
-    await configure(tx,childId,{model:target,thinkingLevel:effort!,extensions:[...extensions,childExtension],...(profile?{instructions:`${profile.instructions}\n\nYou are the subagent ${JSON.stringify(args.name)}. Answer the main agent’s requests.`,cwd:profile.cwd}: {})});
+    await configure(tx,childId,{model:target,thinkingLevel:effort!,extensions:[...extensions,childExtension],...(profile?{instructions:`${profile.instructions}${'instructions' in selected&&selected.instructions?`\n\nCustom assignment (base profile permissions remain unchanged):\n${selected.instructions}`:''}\n\nYou are the subagent ${JSON.stringify(args.name)}. Answer the main agent’s requests.`,cwd:profile.cwd}: {})});
     if(profile)await applyDelegationTools(state,tx,api.conversationId,childId,profile,extensions);
     const child=await tx.doc(DelegationChild,childId);
     const observation:RouteObservation={label:selected.label,provider:selected.route?.provider??parent!.model!.provider,model:selected.route?.model??parent!.model!.modelId,reasoning_effort:effort!,service_tier:selected.route?.service_tier??'normal',...(profile?{profile:profile.name}:{})};

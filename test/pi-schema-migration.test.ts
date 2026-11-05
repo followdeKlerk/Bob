@@ -40,7 +40,23 @@ function outcome(parameters:any,args:any){
  try{return {ok:true,value:validateToolArguments({name:'fixture',description:'Migration boundary',parameters},{type:'toolCall',id:'fixture',name:'fixture',arguments:args})};}
  catch{return {ok:false};}
 }
-test('pi-schema builders preserve every published tool schema and native parsing behavior',async()=>{
+// The captured conversion fixture stays immutable. Custom delegation is an explicit
+// additive post-conversion feature, not builder drift: strip ONLY its exact additions
+// for structural comparison, and still validate all historical inputs on the real schema.
+function historicalSchema(name:string,parameters:any){
+ if(name!=='delegation:profile_routes')return parameters;
+ const result=structuredClone(parameters),properties=result.properties;
+ assert.deepEqual(properties.action.anyOf[1],{const:'models'});assert.equal(properties.action.anyOf.length,2);
+ properties.action=properties.action.anyOf[0];
+ assert.deepEqual(properties.profile.anyOf.at(-1),{const:'custom'});properties.profile.anyOf.pop();
+ const suffix='\ncustom: Exceptional per-spawn catalog model/effort with an existing base profile’s unchanged permissions. Discover supported selections with action=models.';
+ assert.ok(properties.profile.description.endsWith(suffix));properties.profile.description=properties.profile.description.slice(0,-suffix.length);
+ assert.deepEqual(properties.custom.required,['baseProfile','provider','model','reasoning_effort']);assert.equal(properties.custom.additionalProperties,false);
+ assert.equal(properties.modelQuery.additionalProperties,false);
+ delete properties.custom;delete properties.modelQuery;
+ return result;
+}
+test('pi-schema builders preserve historical schemas and parsing, with explicit additive Custom delegation',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'bob-schema-parity-')),state=new State(dir),runtime=await openRuntime(state);
  try{
   const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
@@ -51,7 +67,7 @@ test('pi-schema builders preserve every published tool schema and native parsing
   assert.deepEqual(Object.keys(current).sort(),Object.keys(baseline).sort());
   let comparisons=0;
   for(const [name,before] of Object.entries<any>(baseline)){
-   const after=current[name];assert.deepEqual(canonical(after),canonical(before),`${name}: schema changed`);
+   const after=current[name];assert.deepEqual(canonical(historicalSchema(name,after)),canonical(before),`${name}: schema changed`);
    const seed=sample(before),cases:any[]=[{},seed,{...seed,unexpected:true},JSON.parse('{"__proto__":{"polluted":true}}')];
    for(const [key,property] of Object.entries<any>(before.properties??{})){
     const absent={...seed};delete absent[key];cases.push(absent);
