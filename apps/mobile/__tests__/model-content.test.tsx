@@ -1,6 +1,7 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {ModelContent} from '../components/model-content';
+import {ChatBubble} from '../components/chat-bubble';
 import {SpeechAction} from '../components/speech-action';
 import {CopyAction} from '../components/message-actions';
 jest.mock('../components/chat-markdown',()=>({ChatMarkdown:({text}:{text:string})=>require('react').createElement(require('react-native').Text,null,text)}));
@@ -58,3 +59,29 @@ test('read aloud only receives visible text and is absent from streaming or non-
  expect(tree.root.findByProps({testID:'model-group-4'}).props.style.paddingTop).toBe(16);
  await act(async()=>tree.unmount());
  });
+
+
+test('messenger mode bubbles only visible prose, with tool activity and copy actions outside',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const value=[{type:'text',text:'Before'},{type:'toolCall',id:'exact-call',name:'read',arguments:{path:'a.txt'}},{type:'text',text:'```js\nconst a=1\n```'},{type:'thinking',thinking:'private'}];
+ await act(async()=>{tree=Renderer.create(<ModelContent bubbleText value={value}/>);});
+ const bubbles=tree.root.findAllByType(ChatBubble);
+ expect(bubbles).toHaveLength(2);expect(bubbles.map(b=>b.props.wide)).toEqual([false,true]);
+ for(const bubble of bubbles){expect(bubble.findAll(node=>typeof node.props.children==='string'&&node.props.children.startsWith('TOOL:'))).toHaveLength(0);expect(bubble.findAllByType(CopyAction)).toHaveLength(0);}
+ expect(tree.root.findByProps({testID:'model-group-exact-call'}).findAllByType(ChatBubble)).toHaveLength(0);
+ expect(flatten(tree.toJSON())).not.toContain('private');
+ expect(tree.root.findAllByType(CopyAction).map(copy=>copy.props.text)).toEqual(['Before','```js\nconst a=1\n```']);
+ await act(async()=>tree.update(<ModelContent value={value}/>));
+ expect(tree.root.findAllByType(ChatBubble)).toHaveLength(0);
+ await act(async()=>tree.unmount());
+});
+
+test('streaming and recorded prose share bubbles without hiding recorded tools',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const value=[{type:'text',text:'Working reply'},{type:'toolCall',id:'call',name:'read',arguments:{}}];
+ await act(async()=>{tree=Renderer.create(<ModelContent bubbleText speakable={false} showTools={false} value={value}/>);});
+ expect(tree.root.findAllByType(ChatBubble)).toHaveLength(1);expect(flatten(tree.toJSON())).not.toContain('TOOL:');
+ await act(async()=>tree.update(<ModelContent bubbleText value={value}/>));
+ expect(tree.root.findAllByType(ChatBubble)).toHaveLength(1);expect(flatten(tree.toJSON())).toContain('TOOL:read');
+ await act(async()=>tree.unmount());
+});

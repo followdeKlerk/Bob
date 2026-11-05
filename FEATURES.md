@@ -4,13 +4,13 @@ A practical reference for using Bob and its tools. Start with the workflow you n
 
 ## App navigation
 
-The six bottom tabs are **Notes · Workstations · Chat · Agents · Sessions · Settings**. The compact 52dp bar is icon-only, without destination captions; long-press an icon for its label. Accessible names and 48dp minimum target heights are retained. Workstations selects a paired machine; Sessions opens its conversations; Chat returns to the current conversation. Nested menus return to their opening section and retain its bottom-tab selection. The chat keeps its draft and reading position when switching tabs. The bottom bar hides while typing.
+Open **Menu** using Bob above the composer to reach **Notes · Workstations · Chat · Agents · Sessions · Settings**. Root sections retain their own Menu control; there is no permanent bottom tab bar. Workstations selects a paired machine; Sessions opens its conversations; Chat returns to the current conversation. Nested menus return to their opening section. Switching sections preserves the chat draft and reading position.
 
 Sessions includes search of loaded conversations, New chat, pin, rename, Archive and recoverable Trash. Each session has a visible overflow button; long press remains available. Owned helper conversations appear in Agents rather than the regular Sessions list. A row spinner shows unfinished foreground work while Sessions is visible.
 
 Open **Model & thinking** from the composer's **+** menu or **Settings → This conversation** to change the current conversation's model and effort. The selected model and thinking controls remain outside the scrolling model catalogue, beside Apply; on short screens the selected-model controls can scroll independently. GPT-6.1 Terra is supported through the existing OpenAI API-key or ChatGPT subscription authentication. Star models to pin favourites; these are saved on the phone and follow the picker's search/provider filters. Apply confirms the backend selection. Unavailable models keep their saved favourite status for when they return.
 
-**Agents** provides a full-height, view-only transcript. A monochrome count badge on its tab shows working/stopping helpers in the current conversation and disappears at zero. Its selector shows working/stopping helpers; **History** switches to inactive helpers while keeping their records. Switching conversations or returning to Agents resets the view to active work. Viewing or leaving a transcript does not start or stop an agent.
+**Agents** provides a full-height, view-only transcript. A count badge on Bob’s Menu shows working/stopping helpers in the current conversation and disappears at zero. Its selector shows working/stopping helpers; **History** switches to inactive helpers while keeping their records. Switching conversations or returning to Agents resets the view to active work. Viewing or leaving a transcript does not start or stop an agent.
 
 **Settings** identifies the active conversation/workstation and distinguishes conversation settings from phone permissions and workstation configuration. Expand **Instructions & folder** to load this conversation's settings. The two fields save independently and show save/error feedback. Unsaved edits survive leaving and reopening Settings or switching conversations while the app stays open; they are scoped by workstation and conversation, not persisted across process termination. Static settings remain accessible while conversation settings load.
 
@@ -20,7 +20,15 @@ Menu headers use the same title/action alignment: utilities on the right, the pr
 
 Bob uses locally bundled **Nordwand Mono**, a monochrome palette and Android text scaling. Notes adapts to a single column at larger text sizes. System dialogs, keyboards, document content and third-party views use their own presentation; MCP apps can adopt the host font preference.
 
-Android navigation stays available on the edge-to-edge surface, including owned modals and previews. The device may display a gesture handle or navigation buttons. Reduced-motion settings make tab changes static, and screen-reader labels identify the icon-only tabs.
+Android navigation stays available on the edge-to-edge surface, including owned modals and previews. The device may display a gesture handle or navigation buttons. Reduced-motion settings suppress ongoing mascot animation, and navigation controls retain screen-reader labels.
+
+## Messenger-style chat
+
+Your messages sit on the right in outgoing bubbles; Bob’s visible prose sits on the left in incoming bubbles, in both light and dark themes. Tool activity stays visible as compact expandable rows **outside** those prose bubbles, including mixed commentary/tool messages. Arguments, results, errors and nested calls remain available through the existing controls. Passive receipts and helper reports keep their own attribution rather than becoming owner messages.
+
+Code and tables reclaim the full reading column; files, schedule cards and interactive surfaces keep their own presentation and source-entry anchors instead of being squeezed into message bubbles. Copy and read-aloud controls remain associated with their exact visible text. Delivery status is literal—not a fabricated read receipt or timestamp.
+
+With the keyboard open, the inline draft is capped at 156dp (or the smaller available space). Longer drafts scroll and can use the existing expanded editor; no font shrinking is applied. Keyboard/safe-area ownership, the native transcript list, drafts and tool execution semantics are unchanged.
 
 ## Choose the capability
 
