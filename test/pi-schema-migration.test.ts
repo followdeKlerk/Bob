@@ -64,6 +64,11 @@ test('pi-schema builders preserve historical schemas and parsing, with explicit 
   const maintenance=createResources(()=>chat.id,undefined,{describe:()=>'',request:()=>{throw Error('Parity test must never execute maintenance');}});
   current.self_update=maintenance.tools!.find(tool=>tool.name==='self_update')!.parameters;
   for(const mode of ['default','model_map','profile_routes'] as const)current['delegation:'+mode]=delegationSchema({...DEFAULT_DELEGATION,mode,modelMap:{options:[{name:'fast',description:'Fast',provider:'openai',model:'fixture',reasoning_effort:'high',service_tier:'normal'}],default:'fast'},profileRoutes:{profiles:[{name:'researcher',description:'Read-only research'},{name:'reviewer',description:'Independent review'}],default:'researcher'}});
+  // Native phone control is an explicit additive feature, not historical builder drift.
+  // Keep the captured baseline immutable; its new strict action contract has dedicated tests.
+  assert.ok(current.phone);assert.equal(current.phone.additionalProperties,false);
+  assert.deepEqual(current.phone.required,['action']);assert.equal(current.phone.properties.action.anyOf.length,20);
+  delete current.phone;
   assert.deepEqual(Object.keys(current).sort(),Object.keys(baseline).sort());
   let comparisons=0;
   for(const [name,before] of Object.entries<any>(baseline)){

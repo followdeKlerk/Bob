@@ -127,6 +127,6 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
     }
 }
 class BobPlatformPackage : ReactPackage {
-    override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> = listOf(BobPlatform(context), BobFiles(context), BobLocation(context), BobNotifications(context), BobInteractive(context), BobKeyboard(context), BobSpeech(context))
+    override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> = listOf(BobPlatform(context), BobFiles(context), BobLocation(context), BobPhoneTools(context), BobNotifications(context), BobInteractive(context), BobKeyboard(context), BobSpeech(context))
     override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> = listOf(BobInlineSurfaceManager())
 }

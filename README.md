@@ -33,7 +33,7 @@ These captures show a saved coding run. The [recorded app tour](assets/showcase/
 
 You can switch between machines without mixing up their conversations, send files back and forth, and keep notes alongside your work. When an agent delegates a task, you can follow that agent's conversation too, including after it's finished.
 
-There are file, shell and web tools, plus optional memory and interactive views. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
+There are file, shell and web tools, native Android [phone tools](FEATURES.md#phone-tools), plus optional memory and interactive views. The [Android capability map](PHONE-CAPABILITIES.md) distinguishes the implemented controls from the notification, screen-control and other planned layers. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
 
 <details>
   <summary>Around the app</summary>

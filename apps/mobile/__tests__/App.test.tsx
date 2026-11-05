@@ -239,7 +239,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
-   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Appearance','This conversation','Notifications','Voice','Location','Schedules','App','Advanced']);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Appearance','This conversation','Notifications','Voice','Phone tools','Location','Schedules','App','Advanced']);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
    expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'}).length).toBeGreaterThan(0);
    const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
@@ -967,4 +967,39 @@ test('composer owns response phases, chat owns tool detail and errors, and SSE p
   await navigateTo(tree,'Sessions');expect(status().animate).toBe(false);await navigateTo(tree,'Chat');
   expect(fetch.mock.calls.every(([,options])=>!options?.method||options.method==='GET')).toBe(true);
  }finally{await act(async()=>tree.unmount());}
+});
+
+test('real App wires source snapshot phone requests once and keeps controls in Settings without disturbing the draft',async()=>{
+ jest.replaceProperty(Platform,'OS','android');
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://phone-tools.test.ts.net',name:'Phone tools fixture'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-device-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const previous=NativeModules.BobPhoneTools;
+ const phoneNative={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>true),execute:jest.fn(async(_backendId:string,_json:string)=>JSON.stringify({status:'ok',data:{sdkInt:35}})),getResult:jest.fn(async()=>null)};NativeModules.BobPhoneTools=phoneNative;
+ jest.spyOn(require('react-native').PermissionsAndroid,'check').mockResolvedValue(true);
+ const snapshots=new Map<string,(event:any)=>void>();
+ require('react-native-sse').mockImplementation((url:string)=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshots.set(url,callback);}),close:jest.fn(),open:jest.fn()}));
+ const posts:any[]=[];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,init:any)=>{
+  const url=String(input);if(init?.method==='POST'&&url.includes('/phone-tools'))posts.push({url,body:JSON.parse(init.body),headers:init.headers});
+  const data=url.endsWith('/phone-tools/availability')?{enabled:true}:url.endsWith('/phone-tools')?JSON.parse(init.body).action==='claim'?{execute:true,status:'executing'}:{accepted:true,status:'completed'}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Phone tools'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});await act(async()=>draft.props.onChangeText('Keep my draft intact'));
+  const publish=snapshots.get(`${backend.endpoint}/v1/chats/7/events`)!;expect(publish).toBeDefined();
+  const request={id:'ab'.repeat(32),action:'device_info',parameters:{},expiresAt:Date.now()+90000,status:'pending'};
+  const snapshot={backendId:backend.backendId,conversationId:7,view:{entries:[],docs:{'bob.phone-tools':{requests:[request]}}}};
+  await act(async()=>publish({data:JSON.stringify(snapshot)}));await act(async()=>publish({data:JSON.stringify(snapshot)}));
+  expect(phoneNative.execute).toHaveBeenCalledTimes(1);expect(phoneNative.execute.mock.calls[0][0]).toBe(backend.backendId);
+  expect(posts.filter(post=>post.body.action==='claim')).toHaveLength(1);expect(posts.filter(post=>post.body.action==='result')).toHaveLength(1);
+  expect(posts.find(post=>post.body.action==='claim').headers.Authorization).toBe('Bearer paired-device-token');
+  await act(async()=>publish({data:JSON.stringify({...snapshot,conversationId:8,view:{entries:[],docs:{'bob.phone-tools':{requests:[{...request,id:'cd'.repeat(32)}]}}}})}));expect(phoneNative.execute).toHaveBeenCalledTimes(1);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft intact');
+  await navigateTo(tree,'Settings');expect(tree.root.findAll(node=>node.props.accessibilityLabel==='Disable phone tools'&&typeof node.props.onPress==='function')).toHaveLength(1);
+  await navigateTo(tree,'Chat');expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft intact');
+ }finally{if(tree)await act(async()=>tree.unmount());if(previous===undefined)delete NativeModules.BobPhoneTools;else NativeModules.BobPhoneTools=previous;}
 });

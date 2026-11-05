@@ -7,6 +7,7 @@ import {createSchedules} from './schedules.js';
 import {withDelegationPeerPolicy} from './peer-policy.js';
 import {createDelegation} from './delegation.js';
 import {recoverDelegationCommands} from './delegation-command.js';
+import {createPhoneTools} from './phone-tools.js';
 import {createDiagnosticExtension} from './app-diagnostics.js';
 import {defineExtension} from '@earendil-works/pi-durable';
 import {sendFile} from './send-file.js';
@@ -116,10 +117,11 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const scheduling=createSchedules(()=>harness);
     const learning=createLearning(()=>harness,()=>libraryId);
     const email=createEmailRead(()=>harness);
+    const phone=createPhoneTools(state,async(id,context)=>{const library=await harness.conversation(libraryId,context),chat=await harness.conversation(id,context);return library&&chat?{h:harness,library,chat}:undefined;});
     const diagnostics=createDiagnosticExtension(state,async(id,context)=>(await harness.conversation(id as ConversationId,context))??undefined);
     // Host-composed custom extension: existing resources selections gain the tool,
     // without changing persisted module identities or any existing task definition.
-    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[],...scheduling.extension.tools??[],...email.tools??[],...learning.extension.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[],...scheduling.extension.sections??[],...email.sections??[],...learning.extension.sections??[]],tasks:[...resources.tasks??[],...scheduling.extension.tasks??[],...learning.extension.tasks??[]],hooks:[...resources.hooks??[],...learning.extension.hooks??[]]});
+    const diagnosticResources=defineExtension({...resources,tools:[...resources.tools??[],...diagnostics.tools??[],...phone.tools??[],...scheduling.extension.tools??[],...email.tools??[],...learning.extension.tools??[]],sections:[...resources.sections??[],...diagnostics.sections??[],...phone.sections??[],...scheduling.extension.sections??[],...email.sections??[],...learning.extension.sections??[]],tasks:[...resources.tasks??[],...scheduling.extension.tasks??[],...learning.extension.tasks??[]],hooks:[...resources.hooks??[],...learning.extension.hooks??[]]});
     const modules:Record<string,import('@earendil-works/pi-durable').Extension>={coding:coding.extension,resources:diagnosticResources,subagents:delegation.extension,web:web.extension,interactive:interactive.extension,peers,memory:memory.extension,...custom.instances};
     // An explicit owner-managed config provisions this newly bundled module once.
     if(memory.config.enabled&&!state.get<boolean>('hindsightProvisioned')){

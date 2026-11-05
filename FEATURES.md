@@ -47,6 +47,7 @@ With the keyboard open, the inline draft is capped at 156dp (or the smaller avai
 | Ask a necessary clarification | `ask_user` | [Questions](#questions) |
 | Find an older chat or contact an existing agent | `conversation_history`, `peer` | [History and connected agents](#history-and-connected-agents) |
 | Create/manage an authorized helper; opt into bounded adaptive delegation | `subagent` | [Subagents](#subagents) |
+| Control the paired Android phone | `phone` | [Phone tools](#phone-tools) |
 | Find something near the owner | `phone_location` | [Phone location](#phone-location) |
 | Read an assistant reply aloud | Android **Read aloud** button; no agent tool | [Read aloud](#read-aloud) |
 | Discover/call ordinary MCP tools | `mcp_tool` | [Interactive views](#interactive-views) |
@@ -254,6 +255,18 @@ An independently installed [agent-browser](https://github.com/vercel-labs/agent-
 The current backend has version **0.41.1** pinned in `~/.local/share/bob/tools/agent-browser` with a lockfile, exposed as `~/.local/bin/bob-agent-browser`, using `/usr/bin/chromium`. The on-demand native `browser-cli` skill records the workflow. This machine-local installation and the Durable skill are not included in Git and must be provisioned separately on another backend.
 
 Use the `bob` namespace and a unique named session per conversation/task, bounded output, and an inactivity timeout; close only the task's session afterward. Fresh browser profiles are the default workflow: do not attach a real browser, import authentication, enable persistent profiles or select a paid cloud provider without owner authorization. CLI access uses the backend OS account, not a sandbox; page text remains untrusted and uncertain side effects must be reconciled before retrying. A CLI does not guarantee access through website bot challenges.
+
+## Phone tools
+
+Enable **Settings → Phone tools** for the selected workstation, then grant the Android calendar/contact/camera permissions you want. Routine owner-authorized commands do not require another Bob confirmation. Denying one permission does not disable unrelated controls. Keep Bob foregrounded on the source conversation for this first release; no continuous monitoring, notification listener or accessibility service is enabled by this switch.
+
+The `phone` tool can list calendars and events, create/update/delete supported non-recurring events directly, look up contacts, list/launch launcher-visible apps, hand alarms/timers to the installed clock, report basic device/battery information, change music volume, toggle the flashlight and write the clipboard. It can also open a dialer, SMS composer, share chooser or named Android settings page. Contacts are read-only in this first batch. Use `capabilities` to inspect actual availability and permissions.
+
+Direct calendar writes return provider results. Clock/app/dial/SMS/share/settings intents return **launched**, not proof an alarm was saved, a call placed or a message sent. Calendar times require explicit ISO8601 offsets and a time zone; all-day ends are exclusive midnight UTC. Recurring-series edits need a later, explicit occurrence/series contract.
+
+The authenticated source phone, backend and conversation scope each request. A durable claim plus native receipts prevent duplicate effects after retries/restarts. If an acknowledged operation times out or reports **unknown**, use `operation_status` with its `requestId`; do not repeat the mutation to guess whether it worked. Stop prevents unclaimed requests but cannot undo an action already handed to Android. Returned phone data goes to the backend/model and stays in chat history. Old app builds without the native module show an update-required state.
+
+See the [full Android capability map and staged implementation plan](PHONE-CAPABILITIES.md), including notification actions/replies, accessibility screen control, capture, files, media, sensors, roles and optional privileged approaches. These roadmap capabilities are not all implemented by the first phone tool.
 
 ## Phone location
 

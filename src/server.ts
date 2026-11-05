@@ -5,6 +5,7 @@ import {handleDelegationCommand,delegationMenuCommand} from './delegation-comman
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
 import {createConversationProjection} from './conversation-projection.js';
 import {mobileTranscriptEntries} from './mobile-transcript.js';
+import {phoneToolsAvailability,phoneToolsView,claimPhoneTool} from './phone-tools.js';
 import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
 import {setTimeout as locationDelay} from 'node:timers/promises';
 import {bindLocationDevice,locationAvailability,pollLocations,pendingLocations,respondLocation} from './phone-location.js';
@@ -116,7 +117,7 @@ export async function serve(
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, entries:mobileTranscriptEntries(await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:mobileTranscriptEntries(await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.phone-tools': await phoneToolsView(h,(await h.conversation(id,ctx))!,deviceId,ctx), 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -161,6 +162,7 @@ export async function serve(
         if(req.method==='DELETE'){await runtime.push.unregister(deviceId);return send(res,200,{registered:false});}
         throw new HttpError(405,'Push registration supports POST or DELETE');
       }
+          if(path==='/v1/phone-tools/availability'&&req.method==='POST')return send(res,200,await phoneToolsAvailability(runtime.library,String(state.authenticate(token)!.id),await body(req,1024),ctx));
       if(path.startsWith('/v1/location/')){
         const deviceId=String(state.authenticate(token)!.id);
         if(path==='/v1/location/availability'&&req.method==='POST'){
@@ -375,6 +377,7 @@ export async function serve(
           throw new HttpError(403, "Reserved resource");
         const chat = await h.conversation(id, ctx);
         if (!chat) throw new HttpError(404, "Conversation not found");
+        if(action==='phone-tools'&&req.method==='POST')return send(res,200,await claimPhoneTool(h,runtime.library,chat,String(state.authenticate(token)!.id),await body(req,70000),ctx));
         if(action==='diagnostics'&&req.method==='POST')return send(res,200,await respondDiagnostics(state,chat,String(state.authenticate(token)!.id),await body(req,65536)));
         // Additive, versioned UI-only document; the existing ChatMeta and task
         // schemas stay unchanged. Trash never removes Durable history.

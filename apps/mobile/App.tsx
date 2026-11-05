@@ -44,6 +44,8 @@ import {skillQuery,pickerRequest} from './skill-picker';
 import {ComposerStatus} from './components/composer-status';
 import {composerActivity} from './composer-activity';
 import {useBackNavigation} from './use-back-navigation';
+import {usePhoneTools} from './phone-tools';
+import {PhoneToolsSettings} from './components/phone-tools-settings';
 import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
 import {useUpdateNotifications} from './use-update-notifications';
 import {usePhoneLocation} from './use-phone-location';
@@ -251,6 +253,7 @@ function Main() {
   useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,screen]);
   identity.current = scope;
   const [view,setView]=useScopedSnapshot<Snapshot>(scope),[childView,setChildView]=useScopedSnapshot<Snapshot>(`${scope}:child:${child}`);
+  const phoneTools=usePhoneTools({backend,chat,requests:view?.docs['bob.phone-tools']?.requests,request});
   const attachments=draftAttachments[scope]??[];
   const hasDraft=!!draft.trim()||attachments.length>0;
   const latestDraft=useRef(draft);latestDraft.current=draft;
@@ -1141,7 +1144,7 @@ function Main() {
                 {chat&&<ConversationSettings key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={value=>{settingsDrafts.edit(scope,'instructions',value);setChatInstructions(value);}} onFolderChange={value=>{settingsDrafts.edit(scope,'cwd',value);setWorkingDirectory(value);}} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
                 {!chat&&<Text style={[styles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
               </SettingsGroup>
-              <Text style={styles.caption}>The following notification, voice and location settings apply to this phone.</Text>
+              <Text style={styles.caption}>Notification, voice and location settings apply to this phone. Phone tools are enabled separately for each workstation.</Text>
               <SettingsGroup title="Notifications">
                 <SettingsRow title="Reply notifications" label={notifyEnabled?'Last reply notifications: on':'Last reply notifications: off'} checked={notifyEnabled} icon={Bell} onPress={()=>run(async()=>{
                   if(!notifyEnabled&&Number(Platform.Version)>=33){const permission=await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);if(permission!==PermissionsAndroid.RESULTS.GRANTED)throw Error('Notification permission was not granted');}
@@ -1154,6 +1157,7 @@ function Main() {
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
                 <Disclosure label="About read aloud"><Text style={styles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>
               </SettingsGroup>
+              <PhoneToolsSettings state={phoneTools}/>
               <SettingsGroup title="Location">
                 <SettingsRow title="Automatic location" label={phoneLocation.busy?'Updating location…':phoneLocation.enabled?'Disable automatic location':'Enable automatic location'} checked={phoneLocation.enabled} loading={phoneLocation.busy} icon={MapPin} disabled={!backend||!phoneLocation.supported||phoneLocation.busy} onPress={()=>run(phoneLocation.toggle)}/>
                 {!!phoneLocation.error&&<Text accessibilityLiveRegion="polite" style={styles.caption}>{phoneLocation.error}</Text>}
