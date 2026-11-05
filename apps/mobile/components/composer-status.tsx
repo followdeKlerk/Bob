@@ -1,25 +1,24 @@
 import {APP_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
-import React,{memo,useEffect,useRef,useState} from 'react';
-import {AccessibilityInfo,AppState,StyleSheet,View} from 'react-native';
-import {themed,useTheme,useThemedValue} from '../theme';
-import {typewriterFrame,statusDisplayLabel} from '../typewriter-status';
-// Hermes supplies this monotonic clock; the native-only TS lib omits its declaration.
-declare const performance:{now:()=>number};
+import React,{memo,useEffect,useMemo,useRef,useState} from 'react';
+import {AccessibilityInfo,Animated,AppState,Easing,StyleSheet,View} from 'react-native';
+import {themed,useThemedValue} from '../theme';
 
-/** Native status text, not a WebView. Full-label layout and accessibility stay
- * stable while only this small memoized component updates at stepped boundaries. */
+/** Native, indeterminate signal glide. The literal status remains separate from
+ * its decoration; only an actual label change briefly fades/slides the words. */
 export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{text:string;animate?:boolean}){
- const {colors}=useTheme();
  const s=useThemedValue(sTheme);
-
- const label=statusDisplayLabel(text);
  const [active,setActive]=useState(AppState.currentState==='active');
- // Default to static until platform preferences are known; no motion flash.
+ // Wait for platform preferences before starting any motion.
  const [reduceMotion,setReduceMotion]=useState(true),[screenReader,setScreenReader]=useState(true);
- const [frame,setFrame]=useState({text:'',count:0,cursor:true});
- const hasAnimated=useRef(false),initialLabel=useRef(label),hasChangedLabel=useRef(false);
- useEffect(()=>{if(label!==initialLabel.current)hasChangedLabel.current=true;},[label]);
+ const [displayedText,setDisplayedText]=useState(text);
+ const displayed=useRef(text);
+ const [glide]=useState(()=>new Animated.Value(0));
+ // A closed cosine path lets one native timing animation loop without a JS
+ // sequence callback or a jump when its input resets from 1 to 0.
+ const position=useMemo(()=>glide.interpolate({inputRange:Array.from({length:33},(_,i)=>i/32),outputRange:Array.from({length:33},(_,i)=>26*(1-Math.cos(2*Math.PI*i/32)))}),[glide]);
+ const [opacity]=useState(()=>new Animated.Value(1));
+ const [offset]=useState(()=>new Animated.Value(0));
  const running=animate&&active&&!reduceMotion&&!screenReader;
  useEffect(()=>{
   let alive=true,motionChanged=false,readerChanged=false;
@@ -31,33 +30,43 @@ export const ComposerStatus=memo(function ComposerStatus({text,animate=true}:{te
   return()=>{alive=false;motion.remove();reader.remove();lifecycle.remove();};
  },[]);
  useEffect(()=>{
+  glide.setValue(0);
   if(!running)return;
-  let stopped=false,timer:ReturnType<typeof setTimeout>|undefined;
-  // Type once on initial mount. Later phase changes show their full words
-  // immediately, then cycle dots only; frequent live updates must not blank them.
-  const offset=hasAnimated.current||hasChangedLabel.current||label!==initialLabel.current?3000:0;hasAnimated.current=true;
-  const start=performance.now()-offset,length=Array.from(label).length;
-  const tick=()=>{
-   if(stopped)return;
-   const next=typewriterFrame(performance.now()-start,length,Math.max(0,length-' . . .'.length));
-   setFrame(previous=>previous.text===label&&previous.count===next.count&&previous.cursor===next.cursor?previous:{text:label,count:next.count,cursor:next.cursor});
-   timer=setTimeout(tick,next.delay);
-  };
-  tick();
-  return()=>{stopped=true;clearTimeout(timer);};
- },[label,running]);
- const letters=Array.from(label),retainWords=hasAnimated.current||hasChangedLabel.current||label!==initialLabel.current;
- const visible=frame.text===label?letters.slice(0,frame.count).join(''):retainWords?letters.slice(0,Math.max(0,letters.length-' . . .'.length)).join(''):'';
+  const loop=Animated.loop(Animated.timing(glide,{toValue:1,duration:3800,easing:Easing.linear,useNativeDriver:true,isInteraction:false}));
+  loop.start();
+  return()=>{loop.stop();glide.stopAnimation();};
+ },[running,glide]);
+ useEffect(()=>{
+  let alive=true,incoming:Animated.CompositeAnimation|undefined;
+  if(!running||displayed.current===text){
+   displayed.current=text;setDisplayedText(text);opacity.setValue(1);offset.setValue(0);
+   return;
+  }
+  const move=(value:Animated.Value,toValue:number,duration:number)=>Animated.timing(value,{toValue,duration,easing:Easing.inOut(Easing.quad),useNativeDriver:true,isInteraction:false});
+  // A short sequential transition uses one naturally wrapping text node. There
+  // are no absolute old/new layers to overlap the rail or composer at large type.
+  const outgoing=Animated.parallel([move(opacity,0,90),move(offset,-3,90)]);
+  outgoing.start(({finished})=>{
+   if(!alive||!finished)return;
+   displayed.current=text;setDisplayedText(text);offset.setValue(3);
+   incoming=Animated.parallel([move(opacity,1,170),move(offset,0,170)]);
+   incoming.start();
+  });
+  // A newer phase wins; cancelled native callbacks cannot restore an old label.
+  return()=>{alive=false;outgoing.stop();incoming?.stop();opacity.stopAnimation();offset.stopAnimation();};
+ },[text,running,opacity,offset]);
  return <View testID="connection-status" pointerEvents="none" accessible accessibilityRole="text" accessibilityLabel={text} accessibilityLiveRegion="polite" style={s.container}>
-  {running?<View accessible={false} importantForAccessibility="no-hide-descendants">
-   {/* Reserve the complete label, including large-font wrapping. Never animate layout width. */}
-   <Text testID="status-layout-reservation" accessible={false} style={[s.text,s.reserve]}>{label}▏</Text>
-   <Text testID="status-animated-text" accessible={false} style={[s.text,s.overlay]}>{visible}<Text style={{color:frame.cursor?colors.foreground:'transparent'}}>▏</Text></Text>
-  </View>:<Text testID="status-static-text" accessible={false} importantForAccessibility="no-hide-descendants" style={s.text}>{label}</Text>}
+  <Animated.View testID="status-label-transition" accessible={false} importantForAccessibility="no-hide-descendants" style={{opacity:running?opacity:1,transform:[{translateY:running?offset:0}]}}>
+   <Text testID={running?'status-animated-text':'status-static-text'} accessible={false} style={s.text}>{running?displayedText:text}</Text>
+  </Animated.View>
+  <View testID="status-signal-track" accessible={false} importantForAccessibility="no-hide-descendants" style={s.track}>
+   <Animated.View testID="status-signal-glide" style={[s.signal,{transform:[{translateX:position}]}]}/>
+  </View>
  </View>;
 });
-const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({
+const sTheme=themed(({colors})=>StyleSheet.create({
  container:{minHeight:34,paddingHorizontal:8,paddingBottom:11},
  text:{color:colors.foreground,fontSize:13,lineHeight:22,fontWeight:'600',letterSpacing:0.3,fontFamily:APP_FONT_FAMILY,includeFontPadding:false},
- reserve:{opacity:0},overlay:{position:'absolute',top:0,left:0,right:0},
+ track:{width:70,maxWidth:'100%',height:2,marginTop:4,borderRadius:2,backgroundColor:colors.border},
+ signal:{width:18,height:2,borderRadius:2,backgroundColor:colors.foreground},
 }));

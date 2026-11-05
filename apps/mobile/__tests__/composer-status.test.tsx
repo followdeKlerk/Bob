@@ -1,118 +1,114 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AccessibilityInfo,AppState,StyleSheet} from 'react-native';
+import {AccessibilityInfo,Animated,AppState,StyleSheet} from 'react-native';
 import {ComposerStatus} from '../components/composer-status';
-import {typewriterFrame,statusDisplayLabel} from '../typewriter-status';
+
 jest.mock('react-native/Libraries/AppState/AppState',()=>({__esModule:true,default:{currentState:'active',addEventListener:jest.fn(()=>({remove:jest.fn()}))}}));
-let lifecycle:(state:any)=>void;const preferences=new Map<string,(value:boolean)=>void>();
+let lifecycle:(state:any)=>void;
+const preferences=new Map<string,(value:boolean)=>void>();
+type Motion={config:Animated.TimingAnimationConfig;start:jest.Mock;stop:jest.Mock;finish:()=>void;lateFinish:()=>void};
+let motions:Motion[],loops:{start:jest.Mock;stop:jest.Mock}[],subscriptions:jest.Mock[];
 beforeEach(()=>{
- jest.useFakeTimers();preferences.clear();
+ jest.useFakeTimers();preferences.clear();motions=[];loops=[];subscriptions=[];
  jest.spyOn(AccessibilityInfo,'isReduceMotionEnabled').mockResolvedValue(false);
  jest.spyOn(AccessibilityInfo,'isScreenReaderEnabled').mockResolvedValue(false);
- jest.spyOn(AccessibilityInfo,'addEventListener').mockImplementation((event,callback)=>{preferences.set(event,callback as any);return{remove:jest.fn()};});
- jest.spyOn(AppState,'addEventListener').mockImplementation((_event,callback)=>{lifecycle=callback;return{remove:jest.fn()};});
+ jest.spyOn(AccessibilityInfo,'addEventListener').mockImplementation((event,callback)=>{preferences.set(event,callback as any);const remove=jest.fn();subscriptions.push(remove);return{remove};});
+ jest.spyOn(AppState,'addEventListener').mockImplementation((_event,callback)=>{lifecycle=callback;const remove=jest.fn();subscriptions.push(remove);return{remove};});
+ // Drive native completion callbacks explicitly: this tests sequencing and
+ // cancellation without claiming that Jest renders Android animation frames.
+ jest.spyOn(Animated,'timing').mockImplementation((value,config)=>{
+  let done:((result:{finished:boolean})=>void)|undefined;
+  const motion:Motion={config,start:jest.fn(callback=>{done=callback;}),stop:jest.fn(()=>done?.({finished:false})),finish:()=>{(value as Animated.Value).setValue(config.toValue as number);done?.({finished:true});},lateFinish:()=>done?.({finished:true})};
+  motions.push(motion);return motion as unknown as Animated.CompositeAnimation;
+ });
+ jest.spyOn(Animated,'loop').mockImplementation(()=>{const loop={start:jest.fn(),stop:jest.fn(),reset:jest.fn()};loops.push(loop);return loop as unknown as Animated.CompositeAnimation;});
 });
 afterEach(()=>{jest.restoreAllMocks();jest.useRealTimers();});
-// React 19 act can leave a queued microtask; only animation timeouts must be absent.
-const expectNoAnimationTimers=()=>{jest.runAllTicks();expect(jest.getTimerCount()).toBe(0);};
-const visible=(tree:Renderer.ReactTestRenderer)=>tree.root.findByProps({testID:'status-animated-text'}).props.children[0];
-test('reference cycle types, holds, deletes, resets, and independently blinks the cursor',()=>{
- expect(typewriterFrame(0,10).count).toBe(0);expect(typewriterFrame(1000,10).count).toBeGreaterThan(0);
- expect(typewriterFrame(1540,10).count).toBe(10);expect(typewriterFrame(2400,10).count).toBe(10);
- expect(typewriterFrame(2600,10).count).toBeLessThan(10);expect(typewriterFrame(2860,10).count).toBe(0);expect(typewriterFrame(3000,10).count).toBe(0);
- expect(typewriterFrame(0,10).cursor).toBe(true);expect(typewriterFrame(325,10).cursor).toBe(false);expect(typewriterFrame(650,10).cursor).toBe(true);
- for(let time=0;time<8000;time+=13){const frame=typewriterFrame(time,100);expect(frame.count).toBeGreaterThanOrEqual(0);expect(frame.count).toBeLessThanOrEqual(100);expect(frame.delay).toBeGreaterThanOrEqual(16);}
-});
-test('larger native status types without changing the full-label layout or accessibility announcement',async()=>{
+const visible=(tree:Renderer.ReactTestRenderer)=>tree.root.findByProps({testID:'status-animated-text'}).props.children;
+const phase=(duration:number)=>motions.filter(m=>m.config.duration===duration);
+const finish=(motionsToFinish:Motion[])=>act(()=>motionsToFinish.forEach(m=>m.finish()));
+const noTimers=()=>{jest.runAllTicks();expect(jest.getTimerCount()).toBe(0);};
+
+test('signal glide keeps full literal text and scalable natural layout from the first frame',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
- expect(StyleSheet.flatten(tree.root.findByProps({testID:'connection-status'}).props.style)).toMatchObject({minHeight:34,paddingBottom:11});
- expect(visible(tree)).toBe('');const reserve=tree.root.findByProps({testID:'status-layout-reservation'}).props;
- expect(StyleSheet.flatten(reserve.style)).toMatchObject({fontSize:13,lineHeight:22,fontWeight:'600',letterSpacing:0.3,opacity:0});
- act(()=>jest.advanceTimersByTime(1000));expect(visible(tree).length).toBeGreaterThan(0);expect(visible(tree)).not.toBe('Connected . . .');
- act(()=>jest.advanceTimersByTime(700));expect(visible(tree)).toBe('Connected . . .');
- expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Connected');expect(tree.root.findByProps({testID:'status-layout-reservation'}).props.children).toEqual(reserve.children);
- act(()=>jest.advanceTimersByTime(1200));expect(visible(tree)).toBe('Connected');
- act(()=>jest.advanceTimersByTime(200));expect(visible(tree)).toBe('Connected');
- act(()=>jest.advanceTimersByTime(1600));expect(visible(tree)).toBe('Connected . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
-});
-test('a real phase change shows its full words immediately and restarts only the dot cycle',async()=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connected . . .');
- await act(async()=>tree.update(<ComposerStatus text="Bob is working"/>));expect(visible(tree)).toBe('Bob is working');expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe('Bob is working');
- act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Bob is working . . .');await act(async()=>tree.unmount());
-});
-test('actionable error labels are immediately complete and never animate',async()=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Device storage issue • keep Bob open" animate={false}/>);});
- expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Device storage issue • keep Bob open . . .');expect(tree.root.findAllByProps({testID:'status-animated-text'})).toHaveLength(0);expectNoAnimationTimers();await act(async()=>tree.unmount());
-});
-test.each(['reduceMotionChanged','screenReaderChanged'])('%s switches to static full text and cancels the animation',async(event)=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Sending • automatic retry"/>);});
- act(()=>{jest.advanceTimersByTime(1000);preferences.get(event)!(true);});expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Sending • automatic retry . . .');expectNoAnimationTimers();
- act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('Sending • automatic retry');await act(async()=>tree.unmount());expectNoAnimationTimers();
-});
-test('background pauses timers; foreground resumes dots without erasing the full words',async()=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connecting…"/>);});
- act(()=>{jest.advanceTimersByTime(1500);lifecycle('background');});expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Connecting . . .');expectNoAnimationTimers();
- act(()=>lifecycle('active'));expect(visible(tree)).toBe('Connecting');act(()=>jest.advanceTimersByTime(2300));expect(visible(tree)).toBe('Connecting . . .');await act(async()=>tree.unmount());expectNoAnimationTimers();
+ expect(visible(tree)).toBe('Connected');expect(loops).toHaveLength(1);expect(loops[0].start).toHaveBeenCalledTimes(1);
+ const status=tree.root.findByProps({testID:'connection-status'});
+ expect(status.props.accessibilityLabel).toBe('Connected');expect(status.props.accessibilityLiveRegion).toBe('polite');expect(status.props.pointerEvents).toBe('none');
+ expect(StyleSheet.flatten(status.props.style)).toMatchObject({minHeight:34,paddingBottom:11});
+ const text=tree.root.findByProps({testID:'status-animated-text'});
+ expect(StyleSheet.flatten(text.props.style)).toMatchObject({fontSize:13,lineHeight:22,fontWeight:'600',letterSpacing:0.3});
+ expect(text.props.numberOfLines).toBeUndefined();expect(text.props.allowFontScaling).not.toBe(false);
+ expect(StyleSheet.flatten(text.props.style).position).toBeUndefined();expect(StyleSheet.flatten(text.props.style).height).toBeUndefined();
+ const track=tree.root.findByProps({testID:'status-signal-track'});expect(track.props.accessible).toBe(false);expect(track.props.accessibilityRole).toBeUndefined();expect(track.props.importantForAccessibility).toBe('no-hide-descendants');
+ expect(StyleSheet.flatten(track.props.style)).toMatchObject({width:70,height:2,marginTop:4});
+ const glide=motions.find(m=>m.config.duration===3800)!;expect(glide.config).toMatchObject({toValue:1,useNativeDriver:true,isInteraction:false});
+ const position=StyleSheet.flatten(tree.root.findByProps({testID:'status-signal-glide'}).props.style).transform[0].translateX;
+ expect(position.__getValue()).toBe(0);
+ const interpolation=position.__getNativeConfig();expect(interpolation.outputRange[0]).toBe(0);expect(interpolation.outputRange[16]).toBe(52);expect(interpolation.outputRange[32]).toBe(0);
+ noTimers();await act(async()=>tree.unmount());expect(loops[0].stop).toHaveBeenCalledTimes(1);expect(subscriptions.every(remove=>remove.mock.calls.length===1)).toBe(true);noTimers();
 });
 
-test.each([
- ['Connected','Connected . . .'],
- ['Connecting…','Connecting . . .'],
- ['Sending...','Sending . . .'],
- ['Bob is working . . .','Bob is working . . .'],
- ['',''],
-])('status punctuation is spaced and never duplicated: %s',(input,expected)=>{
- expect(statusDisplayLabel(input)).toBe(expected);
-});
-
-test('return animation deletes only the three dots and preserves the complete status across every loop boundary',()=>{
- const label=statusDisplayLabel('Bob is working'),length=Array.from(label).length,base=Array.from('Bob is working').length;
- expect(label.slice(0,typewriterFrame(2440,length,base).count)).toBe('Bob is working . . .');
- expect(label.slice(0,typewriterFrame(2580,length,base).count)).toBe('Bob is working . .');
- expect(label.slice(0,typewriterFrame(2720,length,base).count)).toBe('Bob is working .');
- expect(label.slice(0,typewriterFrame(2860,length,base).count)).toBe('Bob is working');
- for(let time=2440;time<18000;time+=7)expect(typewriterFrame(time,length,base).count).toBeGreaterThanOrEqual(base);
- expect(typewriterFrame(3000,length,base).count).toBe(base);
- expect(typewriterFrame(4540,length,base).count).toBe(length);
-});
-
-test('rendered words never disappear during repeated dot-only cycles',async()=>{
+test('a real label change fades/slides out then in, without restarting the rail',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
- act(()=>jest.advanceTimersByTime(1700));expect(visible(tree)).toBe('Connected . . .');
- for(let step=0;step<140;step++){act(()=>jest.advanceTimersByTime(100));expect(visible(tree).startsWith('Connected')).toBe(true);}
- await act(async()=>tree.unmount());expectNoAnimationTimers();
+ const status=tree.root.findByProps({testID:'connection-status'});
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));
+ expect(visible(tree)).toBe('Connected');expect(status.props.accessibilityLabel).toBe('Reconnecting…');
+ expect(phase(90).map(m=>m.config.toValue)).toEqual([0,-3]);expect(phase(170)).toHaveLength(0);
+ finish(phase(90));expect(visible(tree)).toBe('Reconnecting…');expect(phase(170).map(m=>m.config.toValue)).toEqual([1,0]);finish(phase(170));
+ expect(tree.root.findByProps({testID:'connection-status'})).toBe(status);expect(loops).toHaveLength(1);
+ for(const motion of motions)expect(motion.config).toMatchObject({useNativeDriver:true,isInteraction:false});
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));expect(phase(90)).toHaveLength(2);expect(visible(tree)).toBe('Reconnecting…');
+ await act(async()=>tree.unmount());noTimers();
 });
 
-
-test('rapid phase changes never retype or blank the words, keep scalable geometry and announce only the literal phase',async()=>{
+test('rapid changes discard cancelled completions and transition only to the latest phase',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Waiting for model…"/>);});
- const instance=tree.root.findByProps({testID:'connection-status'});
- act(()=>jest.advanceTimersByTime(1700));
- for(const text of ['Thinking…','Writing response…','Working…','Retrying response…','Waiting for model…']){
-  await act(async()=>tree.update(<ComposerStatus text={text}/>));
-  const base=text.replace(/…$/,'');expect(visible(tree)).toBe(base);
-  expect(tree.root.findByProps({testID:'connection-status'})).toBe(instance);
-  expect(instance.props.accessibilityLabel).toBe(text);
-  const reserve=tree.root.findByProps({testID:'status-layout-reservation'});
-  expect(reserve.props.numberOfLines).toBeUndefined();expect(reserve.props.allowFontScaling).not.toBe(false);
-  expect(StyleSheet.flatten(reserve.props.style).fontSize).toBe(13);
-  act(()=>jest.advanceTimersByTime(250));expect(visible(tree).startsWith(base)).toBe(true);
- }
- await act(async()=>tree.unmount());expectNoAnimationTimers();
+ await act(async()=>tree.update(<ComposerStatus text="Thinking…"/>));const stale=phase(90).slice();
+ await act(async()=>tree.update(<ComposerStatus text="Writing response…"/>));
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(visible(tree)).toBe('Waiting for model…');expect(phase(170)).toHaveLength(0);
+ finish(phase(90).slice(2));expect(visible(tree)).toBe('Writing response…');const oldIncoming=phase(170).slice();
+ await act(async()=>tree.update(<ComposerStatus text="Working…"/>));expect(oldIncoming.every(m=>m.stop.mock.calls.length>0)).toBe(true);
+ finish(phase(90).slice(4));finish(phase(170).slice(2));expect(visible(tree)).toBe('Working…');expect(loops).toHaveLength(1);
+ await act(async()=>tree.unmount());act(()=>motions.forEach(m=>m.lateFinish()));noTimers();
 });
 
-
-test.each(['Waiting for your answer','Connection needs attention • pair again','Device storage issue • keep Bob open'])('static first phase (%s) never makes the next phase retype',async(text)=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text={text} animate={false}/>);});
- expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(statusDisplayLabel(text));
- await act(async()=>tree.update(<ComposerStatus text="Thinking…" animate/>));expect(visible(tree)).toBe('Thinking');
- act(()=>jest.advanceTimersByTime(1600));expect(visible(tree)).toBe('Thinking . . .');
- await act(async()=>tree.unmount());expectNoAnimationTimers();
+test.each(['reduceMotionChanged','screenReaderChanged'])('%s cancels both animations and renders the latest complete literal status',async(event)=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(90).slice();
+ act(()=>preferences.get(event)!(true));expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Reconnecting…');expect(loops[0].stop).toHaveBeenCalledTimes(1);expect(tree.root.findAllByProps({testID:'status-animated-text'})).toHaveLength(0);
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(170)).toHaveLength(0);noTimers();
+ act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('Reconnecting…');expect(loops).toHaveLength(2);expect(phase(90)).toHaveLength(2);
+ await act(async()=>tree.unmount());noTimers();
 });
 
-test('phase changes while static remain remembered even after returning to the initial label',async()=>{
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Waiting for model…" animate={false}/>);});
- await act(async()=>tree.update(<ComposerStatus text="Thinking…" animate={false}/>));
- await act(async()=>tree.update(<ComposerStatus text="Waiting for model…" animate/>));expect(visible(tree)).toBe('Waiting for model');
- await act(async()=>tree.unmount());expectNoAnimationTimers();
+test('background and off-chat animate=false stop motion immediately; return does not replay old phases',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
+ act(()=>lifecycle('background'));expect(loops[0].stop).toHaveBeenCalledTimes(1);
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Reconnecting…');
+ act(()=>lifecycle('active'));expect(visible(tree)).toBe('Reconnecting…');expect(phase(90)).toHaveLength(0);
+ await act(async()=>tree.update(<ComposerStatus text="Thinking…"/>));
+ await act(async()=>tree.update(<ComposerStatus text="Writing response…" animate={false}/>));expect(loops[1].stop).toHaveBeenCalledTimes(1);expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Writing response…');
+ await act(async()=>tree.update(<ComposerStatus text="Writing response…"/>));expect(visible(tree)).toBe('Writing response…');expect(phase(90)).toHaveLength(2);
+ await act(async()=>tree.unmount());noTimers();
+});
+
+test('actionable static labels bypass any pending transition and never acquire decorative punctuation',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(90).slice();
+ const error='Device storage issue • keep Bob open';await act(async()=>tree.update(<ComposerStatus text={error} animate={false}/>));
+ expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(error);expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe(error);
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(170)).toHaveLength(0);expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(error);
+ await act(async()=>tree.unmount());noTimers();
+});
+
+test('unknown preferences stay static; newer accessibility events beat delayed initial queries',async()=>{
+ let resolveMotion!:(value:boolean)=>void,resolveReader!:(value:boolean)=>void;
+ jest.mocked(AccessibilityInfo.isReduceMotionEnabled).mockReturnValue(new Promise(resolve=>{resolveMotion=resolve;}));
+ jest.mocked(AccessibilityInfo.isScreenReaderEnabled).mockReturnValue(new Promise(resolve=>{resolveReader=resolve;}));
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
+ expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Connected');expect(loops).toHaveLength(0);
+ act(()=>{preferences.get('reduceMotionChanged')!(true);preferences.get('screenReaderChanged')!(true);});
+ await act(async()=>{resolveMotion(false);resolveReader(false);});expect(loops).toHaveLength(0);
+ act(()=>{preferences.get('reduceMotionChanged')!(false);preferences.get('screenReaderChanged')!(false);});expect(loops).toHaveLength(1);
+ await act(async()=>tree.unmount());noTimers();
 });
