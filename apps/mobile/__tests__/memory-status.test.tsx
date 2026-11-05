@@ -1,5 +1,3 @@
-// Decorative SVG motion is tested independently; retain the real transcript and state wiring.
-jest.mock('../components/bob-mascot',()=>({BobMascot:()=>null}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {NativeModules,StyleSheet,Text} from 'react-native';

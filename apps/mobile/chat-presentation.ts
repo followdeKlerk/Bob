@@ -95,7 +95,7 @@ export function compactMemoryStatuses<T extends ToolEntry>(entries:readonly T[])
 
 /** Compact presentation only; visible prose and unknown blocks keep message spacing. */
 export function isCompactActivityEntry(entry:ToolEntry):boolean {
- if(memoryStatusText(entry)!==undefined||entry.kind==='bob.subagent-report')return true;
+ if(memoryStatusText(entry)!==undefined||learningStatusText(entry)!==undefined||entry.kind==='bob.subagent-report')return true;
  if(entry.kind==='bob.user'||entry.kind==='pi.user'||!entry.model?.length)return false;
  let hasTool=false;
  for(const message of entry.model){

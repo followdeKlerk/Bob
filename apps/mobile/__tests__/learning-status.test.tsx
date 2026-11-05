@@ -1,5 +1,3 @@
-// Decorative SVG motion is tested independently; retain the real transcript and state wiring.
-jest.mock('../components/bob-mascot',()=>({BobMascot:()=>null}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {NativeModules,StyleSheet,Text,Pressable,ScrollView,Linking} from 'react-native';
@@ -8,6 +6,7 @@ import * as Keychain from 'react-native-keychain';
 import App from '../App';
 import {ModelContent} from '../components/model-content';
 import {ToolContent} from '../components/tool-content';
+import {CompactActivityRow} from '../components/compact-activity-row';
 import {lightColors as colors} from '../theme';
 
 // Match the App regression's native boundaries; keep the real transcript path.
@@ -27,7 +26,7 @@ jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map(
 
 beforeEach(async()=>{await AsyncStorage.clear();});
 afterEach(()=>jest.restoreAllMocks());
-test('stored learning completions and partial outcomes are visible selectable literal text with no toggle or input attribution',async()=>{
+test('learning receipts use compact tool-style rows with expandable exact literal details and honest outcomes',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));
  await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
@@ -61,27 +60,35 @@ test('stored learning completions and partial outcomes are visible selectable li
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<App/>);});
  try{
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
+  act(()=>draft.props.onChangeText('Keep this draft'));
+  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
   for(const entry of entries.slice(0,5)){
    const row=tree.root.findByProps({testID:`history-entry-${entry.id}`});
-   const texts=row.findAllByType(Text);
-   expect(texts).toHaveLength(1);
-   const text=texts[0],style=StyleSheet.flatten(text.props.style);
+   const title=entry.id===2?'Skill update':'Learning review';
+   const activity=row.findByType(CompactActivityRow);
+   expect(activity.props).toMatchObject({title,status:entry.data.status,expanded:false});
+   const header=row.findAll(node=>node.props.accessibilityRole==='button'&&node.props.accessibilityLabel===`${title} · ${entry.data.status}`&&!!node.props.style)[0];
+   expect(StyleSheet.flatten(header.props.style)).toMatchObject({minHeight:48,paddingVertical:6});
+   expect(StyleSheet.flatten(header.props.style).backgroundColor).toBeUndefined();
+   expect(row.findAllByType(Text).filter(text=>text.props.selectable)).toHaveLength(0);
+   act(()=>header.props.onPress());
+   expect(activity.props.expanded).toBe(true);
+   const text=row.findAllByType(Text).find(text=>text.props.selectable)!;
+   const style=StyleSheet.flatten(text.props.style);
    expect(text.props.children).toBe(entry.data.text);
-   expect(text.props.selectable).toBe(true);
-   expect(style).toMatchObject({color:colors.body,fontSize:15,lineHeight:25});
+   expect(style).toMatchObject({color:colors.body,fontSize:12,lineHeight:20});
    for(const constraint of ['height','maxHeight','overflow'])expect(style[constraint]).toBeUndefined();
    expect(text.props.allowFontScaling).not.toBe(false);
-   expect(text.props.maxFontSizeMultiplier).toBeUndefined();
    expect(text.props.numberOfLines).toBeUndefined();
-   expect(text.props.accessibilityLiveRegion).toBeUndefined();
    expect(row.findAllByType(ScrollView)).toHaveLength(0);
-   expect(row.findAllByType(Pressable)).toHaveLength(0);
    expect(row.findAllByType(ModelContent)).toHaveLength(0);
    expect(row.findAllByType(ToolContent)).toHaveLength(0);
-   expect(row.findAll(node=>typeof node.props.onPress==='function'||node.props.accessibilityState?.expanded!==undefined)).toHaveLength(0);
-   // No owner bubble, delivery marker, speaker action or interactive text link.
    expect(row.findAll(node=>StyleSheet.flatten(node.props.style)?.alignSelf==='flex-end')).toHaveLength(0);
-   expect(texts.some(node=>['You','Sent','Input · source not identified'].includes(node.props.children))).toBe(false);
+   expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
+   expect(draft.props.value).toBe('Keep this draft');
+   expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+   act(()=>header.props.onPress());expect(activity.props.expanded).toBe(false);
   }
   const hindsight=tree.root.findByProps({testID:'history-entry-6'});
   expect(hindsight.findAllByType(Text).map(node=>node.props.children)).toEqual(['Hindsight','save queued','…']);

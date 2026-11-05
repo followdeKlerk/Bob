@@ -98,7 +98,7 @@ test('no app-owned white literals bypass the theme; drawing paper stays white',(
 });
 
 
-test('light palette has readable text, muted copy, primary labels and dark mascot strokes',()=>{
+test('light palette has readable text, muted copy, primary labels and dark navigation icons',()=>{
  const lum=(hex:string)=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
  const contrast=(a:string,b:string)=>{const [lo,hi]=[lum(a),lum(b)].sort((a,b)=>a-b);return(hi+.05)/(lo+.05);};
  for(const bg of [lightColors.background,lightColors.panel,lightColors.surface,lightColors.composer,lightColors.selectedSurface,lightColors.destructive]){

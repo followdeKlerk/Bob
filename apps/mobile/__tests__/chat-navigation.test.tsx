@@ -1,11 +1,10 @@
 jest.mock('react-native/Libraries/AppState/AppState',()=>({__esModule:true,default:{currentState:'active',addEventListener:jest.fn(()=>({remove:jest.fn()}))}}));
-jest.mock('../components/bob-mascot',()=>({BobMascot:({state,animated}:any)=>require('react').createElement(require('react-native').View,{testID:'bob-mascot',state,animated})}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,Modal,Platform,ScrollView,StyleSheet,Text} from 'react-native';
+import {AppState,Modal,ScrollView,StyleSheet,Text} from 'react-native';
 import {ChatNavigation} from '../components/chat-navigation';
-import {BobMascot} from '../components/bob-mascot';
-jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
+import {Menu as NavigationMenu} from 'lucide-react-native';
+jest.mock('lucide-react-native',()=>new Proxy({Menu:()=>null},{get:(icons,name)=>name==='__esModule'?true:icons[name as keyof typeof icons]??(()=>null)}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:24,bottom:20,left:0,right:0})}));
 
 test.each([0,1,4,100,-1,NaN])('icon-only menu announces active agents and remains enabled (%s)',async(count)=>{
@@ -49,87 +48,73 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
  await act(async()=>tree.unmount());
 });
 
-test('mascot tap is one-shot; open pose is visible inside sheet; finish expires without replay',async()=>{
- jest.useFakeTimers();let tree!:Renderer.ReactTestRenderer;const onOpen=jest.fn();
- const props={open:false,onOpen,onClose:jest.fn(),onSelect:jest.fn(),scope:'chat-a',activity:'working' as const};
+test('menu uses one static icon in the existing trigger with no decorative modal header copy',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const onOpen=jest.fn(),props={open:false,onOpen,onClose:jest.fn(),onSelect:jest.fn(),activeAgentCount:100};
  try{
   await act(async()=>{tree=Renderer.create(<ChatNavigation {...props}/>);});
-  const trigger=()=>tree.root.findByProps({accessibilityLabel:'Menu'});
-  const mascot=()=>trigger().findByType(BobMascot);
-  expect(mascot().props.state).toBe('working');
-  expect(StyleSheet.flatten(trigger().props.style)).toMatchObject({height:48,width:48});
-  act(()=>trigger().props.onPress());expect(mascot().props.state).toBe('tap');
+  const trigger=tree.root.findByProps({accessibilityLabel:'Menu'});
+  expect(StyleSheet.flatten(trigger.props.style)).toMatchObject({height:48,width:48,minHeight:48,minWidth:48});
+  const icon=trigger.findByType(NavigationMenu);
+  expect(icon.props).toMatchObject({size:24,color:expect.any(String)});
+  expect(icon.parent?.props).toMatchObject({accessible:false,accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+  expect(trigger.findByProps({testID:'chat-menu-agent-badge'}).findByType(Text).props.children).toBe('99+');
+  act(()=>trigger.props.onPress());expect(onOpen).toHaveBeenCalledTimes(1);
   await act(async()=>tree.update(<ChatNavigation {...props} open/>));
-  const header=()=>tree.root.findByProps({testID:'chat-navigation-sheet'}).findByType(BobMascot);
-  expect(header().props).toMatchObject({state:'tap',animated:true});expect(mascot().props.animated).toBe(false);
-  act(()=>jest.advanceTimersByTime(650));expect(header().props.state).toBe('open');
-  await act(async()=>tree.update(<ChatNavigation {...props} activity="idle" completionKey="chat-a:20"/>));
-  expect(mascot().props.state).toBe('done');
-  act(()=>jest.advanceTimersByTime(5200));expect(mascot().props.state).toBe('idle');
-  await act(async()=>tree.update(<ChatNavigation {...props} activity="idle" completionKey="chat-a:20"/>));
-  expect(mascot().props.state).toBe('idle');
-  await act(async()=>tree.update(<ChatNavigation {...props} activity="idle" completionKey="chat-a:21"/>));
-  expect(mascot().props.state).toBe('done');
-  await act(async()=>tree.update(<ChatNavigation {...props} scope="chat-b" activity="attention"/>));
-  expect(mascot().props.state).toBe('attention');
-  await act(async()=>tree.update(<ChatNavigation {...props} scope="chat-b" activity="idle"/>));expect(mascot().props.state).toBe('idle');
- }finally{if(tree)await act(async()=>tree.unmount());jest.useRealTimers();}
+  expect(tree.root.findByProps({accessibilityLabel:'Menu'}).props.accessibilityState).toEqual({expanded:true});
+  expect(tree.root.findAllByType(NavigationMenu)).toHaveLength(1);
+  expect(tree.root.findByType(NavigationMenu).props).toEqual(icon.props);
+  const sheet=tree.root.findByProps({testID:'chat-navigation-sheet'});
+  expect(sheet.findAllByProps({testID:'section-heading-menu'})).toHaveLength(0);
+  expect(sheet.findAllByType(Text).filter(text=>text.props.children==='Menu')).toHaveLength(1);
+  expect(sheet.findAllByProps({accessibilityLabel:'Agents'})[0].findAllByType(Text).map(text=>text.props.children)).toContain(100);
+ }finally{if(tree)await act(async()=>tree.unmount());}
 });
 
-test('background/focus loss clears transient celebrations; hidden section disables decorative motion',async()=>{
- jest.useFakeTimers();jest.replaceProperty(Platform,'OS','android');
- const listeners:Record<string,((value?:any)=>void)[]>={};jest.spyOn(AppState,'addEventListener').mockImplementation((name,callback)=>{(listeners[name]??=[]).push(callback as any);return{remove:jest.fn()};});
- let tree!:Renderer.ReactTestRenderer;const props={open:false,onOpen:jest.fn(),onClose:jest.fn(),onSelect:jest.fn(),scope:'a'};
- try{
-  await act(async()=>{tree=Renderer.create(<ChatNavigation {...props} completionKey="a:1"/>);});
-  const mascot=()=>tree.root.findByProps({accessibilityLabel:'Menu'}).findByType(BobMascot);
-  expect(mascot().props.state).toBe('done');act(()=>listeners.blur.forEach(fn=>fn()));expect(mascot().props.state).toBe('idle');
-  act(()=>listeners.focus.forEach(fn=>fn()));
-  await act(async()=>tree.update(<ChatNavigation {...props} completionKey="a:2"/>));expect(mascot().props.state).toBe('done');
-  act(()=>listeners.change.forEach(fn=>fn('background')));expect(mascot().props.state).toBe('idle');
-  act(()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());
-  await act(async()=>tree.update(<ChatNavigation {...props} open/>));
-  act(()=>listeners.blur.forEach(fn=>fn()));
-  // Activity blur from the native Dialog opening is not backgrounding.
-  expect(tree.root.findByProps({testID:'chat-navigation-sheet'}).findByType(BobMascot).props).toMatchObject({state:'tap',insideModal:true,animated:true});
-  await act(async()=>tree.update(<ChatNavigation {...props} activity="working" animated={false}/>));expect(mascot().props).toMatchObject({state:'working',animated:false});
- }finally{if(tree)await act(async()=>tree.unmount());jest.useRealTimers();jest.restoreAllMocks();}
-});
-
-test.each(['hidden','background','blurred','open'] as const)('completion arriving while already %s is consumed without replay on return',async(mode)=>{
- jest.useFakeTimers();jest.replaceProperty(Platform,'OS','android');jest.replaceProperty(AppState,'currentState','active');
- const listeners:Record<string,((value?:any)=>void)[]>={};jest.spyOn(AppState,'addEventListener').mockImplementation((name,callback)=>{(listeners[name]??=[]).push(callback as any);return{remove:jest.fn()};});
- let tree!:Renderer.ReactTestRenderer;const props={open:false,onOpen:jest.fn(),onClose:jest.fn(),onSelect:jest.fn(),scope:'a'};
- const emit=(name:string,value?:any)=>act(()=>listeners[name]?.forEach(fn=>fn(value)));
- try{
-  await act(async()=>{tree=Renderer.create(<ChatNavigation {...props}/>);});
-  const pose=()=>tree.root.findByProps({accessibilityLabel:'Menu'}).findByType(BobMascot).props.state;
-  const hidden=mode==='hidden',open=mode==='open';
-  if(mode==='background')emit('change','background');
-  if(mode==='blurred')emit('blur');
-  await act(async()=>tree.update(<ChatNavigation {...props} animated={!hidden} open={open}/>));
-  await act(async()=>tree.update(<ChatNavigation {...props} animated={!hidden} open={open} completionKey="a:1"/>));
-  expect(pose()).not.toBe('done');
-  if(mode==='background')emit('change','active');
-  if(mode==='blurred')emit('focus');
-  await act(async()=>tree.update(<ChatNavigation {...props} completionKey="a:1"/>));
-  expect(pose()).toBe('idle');
-  // A genuinely new completion while visible still produces the intended finite wave.
-  await act(async()=>tree.update(<ChatNavigation {...props} completionKey="a:2"/>));
-  expect(pose()).toBe('done');
-  act(()=>jest.advanceTimersByTime(5200));expect(pose()).toBe('idle');
- }finally{if(tree)await act(async()=>tree.unmount());jest.useRealTimers();jest.restoreAllMocks();}
-});
-
-
-test('hidden composer observer consumes completions without retaining a second visible menu trigger',async()=>{
+test('static navigation schedules no timers and subscribes to no AppState events',async()=>{
+ jest.useFakeTimers();
+ const appState=jest.spyOn(AppState,'addEventListener');appState.mockClear();
+ const timeout=jest.spyOn(globalThis,'setTimeout'),interval=jest.spyOn(globalThis,'setInterval');
  let tree!:Renderer.ReactTestRenderer;
  const props={open:false,onOpen:jest.fn(),onClose:jest.fn(),onSelect:jest.fn()};
- await act(async()=>{tree=Renderer.create(<ChatNavigation {...props} animated={false} showTrigger={false}/>);});
- expect(tree.root.findAllByProps({accessibilityLabel:'Menu'})).toHaveLength(0);
- await act(async()=>tree.update(<ChatNavigation {...props} animated={false} showTrigger={false} completionKey="hidden-arrival"/>));
- await act(async()=>tree.update(<ChatNavigation {...props} animated showTrigger completionKey="hidden-arrival"/>));
- expect(tree.root.findByProps({accessibilityLabel:'Menu'})).toBeDefined();
- expect(tree.root.findByType(BobMascot).props.state).toBe('idle');
- await act(async()=>tree.unmount());
+ try{
+  await act(async()=>{tree=Renderer.create(<ChatNavigation {...props}/>);});
+  act(()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());
+  await act(async()=>tree.update(<ChatNavigation {...props} open activeAgentCount={2}/>));
+  await act(async()=>tree.update(<ChatNavigation {...props} showTrigger={false}/>));
+  await act(async()=>tree.update(<ChatNavigation {...props}/>));
+  await act(async()=>tree.unmount());
+  expect(timeout).not.toHaveBeenCalled();
+  expect(interval).not.toHaveBeenCalled();
+  expect(appState).not.toHaveBeenCalled();
+ }finally{jest.restoreAllMocks();jest.useRealTimers();}
+});
+
+test('hidden trigger leaves the modal and all navigation destinations available',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const onOpen=jest.fn(),onClose=jest.fn(),onSelect=jest.fn();
+ const props={open:false,onOpen,onClose,onSelect,activeAgentCount:1,showTrigger:false};
+ try{
+  await act(async()=>{tree=Renderer.create(<ChatNavigation {...props}/>);});
+  expect(tree.root.findAllByProps({accessibilityLabel:'Menu'})).toHaveLength(0);
+  expect(tree.root.findAllByType(NavigationMenu)).toHaveLength(0);
+  expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  await act(async()=>tree.update(<ChatNavigation {...props} open/>));
+  expect(tree.root.findAllByProps({accessibilityLabel:'Menu'})).toHaveLength(0);
+  expect(tree.root.findAllByProps({testID:'chat-menu-agent-badge'})).toHaveLength(0);
+  const modal=tree.root.findByType(Modal);
+  expect(modal.props.visible).toBe(true);
+  for(const destination of ['Sessions','Notes','Workstations','Agents','Settings','Chat']){
+   const row=tree.root.findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0];
+   act(()=>row.props.onPress());expect(onSelect).toHaveBeenLastCalledWith(destination);
+  }
+  expect(onSelect).toHaveBeenCalledTimes(6);
+  act(()=>modal.props.onRequestClose());expect(onClose).toHaveBeenCalledTimes(1);
+  expect(onOpen).not.toHaveBeenCalled();
+  await act(async()=>tree.update(<ChatNavigation {...props} showTrigger/>));
+  const trigger=tree.root.findByProps({accessibilityLabel:'Menu'});
+  expect(trigger.props.accessibilityValue).toEqual({text:'1 active agent'});
+  expect(trigger.findAllByType(NavigationMenu)).toHaveLength(1);
+  act(()=>trigger.props.onPress());expect(onOpen).toHaveBeenCalledTimes(1);
+ }finally{if(tree)await act(async()=>tree.unmount());}
 });

@@ -26,12 +26,11 @@ import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks
 import {AgentsScreen} from './components/agents-screen';
 import {type BottomDestination} from './components/bottom-tabs';
 import {ChatNavigation} from './components/chat-navigation';
-import {mascotSignals,observeMascot,type MascotObservation} from './mascot-state';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {useSessionWorking} from './use-session-working';
 import {BuildCard} from './components/build-card';
 import {LiveStatus} from './components/live-status';
-import {HindsightActivity,AgentReportActivity} from './components/passive-activity';
+import {HindsightActivity,AgentReportActivity,LearningActivity} from './components/passive-activity';
 import {useBuildStatus} from './use-build-status';
 import {MessageOutbox,visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
 import {OutboxDelivery} from './outbox-delivery';
@@ -784,9 +783,6 @@ function Main() {
   },[scope,screen,child,agentHistory,view?.docs['app.subagents']]);
   const busy = !!view?.docs['pi.live']?.run || !!view?.work?.some(t=>t.kind==='bob.mcp-ui-action'&&!t.background);
   const showStop=busy&&!hasDraft;
-  const mascot=mascotSignals({live:view?.docs['pi.live'],entries:view?.entries,busy,activeAgents:activeAgents.length,sending:outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted),status,storageError:!!outboxError});
-  const [mascotObservation,setMascotObservation]=useState<MascotObservation>();
-  useEffect(()=>{setMascotObservation(previous=>observeMascot(previous,scope,mascot));},[scope,mascot.activity,mascot.answerId,mascot.runKey]);
   const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page)=>{
     const entries=page?Array.from(new Map([...(page.items as Entry[]),...(snapshot?.entries??[])].map(entry=>[entry.id,entry])).values()).sort((a,b)=>a.id-b.id):snapshot?.entries??[];
     const linked=linkToolResults(entries,snapshot?.docs['pi.live']),anchors=surfaceAnchors(entries,snapshot?.docs['pi.live']),surfaceEntries=new Set(anchors.values());
@@ -895,7 +891,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<Text selectable style={styles.message}>{learningStatus}</Text>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<ChatBubble variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<LearningActivity entry={item}/>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<ChatBubble variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.muted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.muted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble>}
             {!isChild&&(positionedSurfaces.get(item.id)??[]).map(surface=><InlineSurface key={`${surface.backendId}:${surface.value.conversationId}:${surface.value.id}`} backend={backend!} surface={surface.value} onExpand={()=>run(()=>openSurface(surface))}/>)}
           </View>;
         }}
@@ -904,9 +900,8 @@ function Main() {
       </View>
     );
   }
-  // Keep the composer's observer mounted to consume hidden completions. Only
-  // the visible root section gets a second trigger; nested editor headings do not.
-  const sectionMenu=screen!=='Chat'?<ChatNavigation open={navigationOpen} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} activity={mascot.activity} scope={scope} animated={!actions&&!drawingEditor&&!attachmentPicker&&!modelPickerTarget}/>:undefined;
+  // Root sections keep navigation in the same heading slot as Chat.
+  const sectionMenu=screen!=='Chat'?<ChatNavigation open={navigationOpen} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length}/>:undefined;
   if (backends.length === 0) return (
     <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle={colors.background==='#000000'?'light-content':'dark-content'} />}
@@ -962,7 +957,7 @@ function Main() {
               <View style={{flex:1,minWidth:0}}>{!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:((!!outboxError||/pair again|identity|authorization|offline|disconnect|interrupted|reconnecting/i.test(status)||busy||outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)||parentLinked.rawEntries.length>0)&&(
             <ComposerStatus animate={!outboxError&&!/pair again|identity|authorization/i.test(status)} text={outboxError?'Device storage issue • keep Bob open':/pair again|identity|authorization/i.test(status)?'Connection needs attention • pair again':/offline|disconnect|interrupted|reconnecting/i.test(status)?'Reconnecting…':/connecting|cached/i.test(status)?'Connecting…':outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted)?'Sending • automatic retry':busy?'Bob is working':status==='Connected'?'Connected':chat?'Connecting…':'Select a conversation'}/>
             ))}</View>
-              <ChatNavigation showTrigger={screen==='Chat'} open={navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} activity={mascot.activity} completionKey={mascotObservation?.scope===scope?mascotObservation.completionKey:undefined} scope={scope} animated={screen==='Chat'&&!actions&&!drawingEditor&&!attachmentPicker&&!modelPickerTarget}/>
+              <ChatNavigation showTrigger={screen==='Chat'} open={navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length}/>
             </View>
             <View testID="composer-row" style={styles.composerRow}>
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>

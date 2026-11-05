@@ -1,4 +1,4 @@
-import {learningStatusText,inputAttribution,hasInlineChatContent,compactMemoryStatuses} from '../chat-presentation';
+import {learningStatusText,inputAttribution,hasInlineChatContent,compactMemoryStatuses,isCompactActivityEntry,chatEntryGap} from '../chat-presentation';
 import type {ToolEntry} from '../tool-results';
 
 const receipt=(data:unknown):ToolEntry=>({id:1,kind:'bob.learning-status',data});
@@ -42,4 +42,14 @@ test('malformed or nonterminal learning entries retain generic fallback, never i
  for(const kind of ['bob.user','pi.assistant','bob.learning-status-injected','bob.memory-status'])expect(learningStatusText({id:2,kind,data})).toBeUndefined();
  expect(learningStatusText({...receipt(data),model:[{role:'assistant',content:'Not passive metadata'}]})).toBeUndefined();
  expect(learningStatusText({...receipt(data),model:[]})).toBe(data.text);
+});
+
+
+test('only validated learning receipts join compact activity spacing without discarding receipts',()=>{
+ const learning=receipt({status:'completed',origin:'skill-update',text:'💾 Skill update: Skill android patched'});
+ const tool={id:2,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'t',name:'read',arguments:{}}]}]};
+ expect(isCompactActivityEntry(learning)).toBe(true);
+ expect(chatEntryGap(tool,learning)).toBe(0);expect(chatEntryGap(learning,tool)).toBe(0);
+ expect(chatEntryGap(learning,{id:3,kind:'bob.user',data:{text:'Hello'}})).toBe(16);
+ expect(isCompactActivityEntry(receipt({status:'unknown',text:'Claimed completed'}))).toBe(false);
 });

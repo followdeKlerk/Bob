@@ -1,4 +1,3 @@
-jest.mock('../components/bob-mascot',()=>({BobMascot:({state,animated}:any)=>require('react').createElement(require('react-native').View,{testID:'bob-mascot',state,animated})}));
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
@@ -890,7 +889,7 @@ test('recorded codemode audit branches expand independently while the script sta
  }finally{await act(async()=>tree.unmount());}
 });
 
-test('Bob mascot follows native work, scoped new answers and failures without changing send/stop',async()=>{
+test('plain menu stays stable across native work, answers and failures without changing send/stop',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
@@ -902,21 +901,22 @@ test('Bob mascot follows native work, scoped new answers and failures without ch
  const entry=(id:number)=>({id,kind:'pi.assistant',model:[{role:'assistant',stopReason:'stop',content:[{type:'text',text:'Finished answer'}]}]});
  const publish=async(live:any,entries:any[])=>act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'pi.live':live}}})}));
  try{
-  const nav=()=>visibleNavigation(tree),pose=()=>tree.root.findByProps({accessibilityLabel:'Menu'}).findByProps({testID:'bob-mascot'}).props.state;
-  await publish({},[entry(2)]);expect(pose()).toBe('idle');expect(nav().props.completionKey).toBeUndefined();
+  const menu=tree.root.findByProps({accessibilityLabel:'Menu'});
+  const stableMenu=()=>{expect(tree.root.findByProps({accessibilityLabel:'Menu'})).toBe(menu);expect(tree.root.findAllByProps({testID:'bob-mascot'})).toHaveLength(0);};
+  await publish({},[entry(2)]);stableMenu();
   const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
-  await publish({run:{taskId:10,first:3}},[entry(2)]);expect(pose()).toBe('working');expect(tree.root.findByProps({accessibilityLabel:'Stop Bob'})).toBeDefined();
-  await publish({},[entry(2),entry(4)]);expect(pose()).toBe('done');expect(nav().props.completionKey).toBe(`${backend.backendId}:7:4`);
+  await publish({run:{taskId:10,first:3}},[entry(2)]);stableMenu();expect(tree.root.findByProps({accessibilityLabel:'Stop Bob'})).toBeDefined();
+  await publish({},[entry(2),entry(4)]);stableMenu();
   act(()=>draft.props.onChangeText('Retain my draft'));
-  await publish({run:{taskId:11,first:5},runFailure:{reason:'old error'}},[entry(4)]);expect(pose()).toBe('working');
-  await publish({runFailure:{taskId:11,reason:'model_error'}},[entry(4)]);expect(pose()).toBe('attention');expect(tree.root.findAllByProps({accessibilityLabel:'Stop Bob'})).toHaveLength(0);
+  await publish({run:{taskId:11,first:5},runFailure:{reason:'old error'}},[entry(4)]);stableMenu();
+  await publish({runFailure:{taskId:11,reason:'model_error'}},[entry(4)]);stableMenu();expect(tree.root.findAllByProps({accessibilityLabel:'Stop Bob'})).toHaveLength(0);
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Retain my draft');
   await publish({run:{taskId:12,first:6}},[entry(4)]);
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Chat actions'}).props.onPress());
-  expect(nav().props.animated).toBe(false);
+  stableMenu();
   await publish({},[entry(4),entry(8)]);
-  expect(pose()).not.toBe('done');
+  stableMenu();
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Dismiss chat actions'}).props.onPress());
-  expect(nav().props.animated).toBe(true);expect(pose()).toBe('idle');
+  stableMenu();
  }finally{await act(async()=>tree.unmount());}
 });
