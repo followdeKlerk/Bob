@@ -10,25 +10,6 @@ I built Bob because I wanted to use my agents from my phone, not just from a ter
 
 I use it myself, and it keeps changing as I find things I need. A guided Linux installer can check your computer, install missing backend prerequisites with your permission, help configure your model and HTTPS connection, and offer a QR code to pair your phone. You still bring your own model account and Android app; there's no hosted Bob service.
 
-## A task, from your phone
-
-Here's a small coding example: ask for a change, follow the tests, and get the updated project back as a ZIP.
-
-<table>
-  <tr>
-    <th>Ask for a change</th>
-    <th>Follow the work</th>
-    <th>Get the result</th>
-  </tr>
-  <tr>
-    <td><img src="assets/showcase/coding-request.png" width="240" alt="Asking Bob to improve a slugify function and add tests"></td>
-    <td><img src="assets/showcase/coding-tests.png" width="240" alt="Tool output showing five passing tests and the project being zipped"></td>
-    <td><img src="assets/showcase/coding-result.png" width="240" alt="The finished change with a downloadable project ZIP"></td>
-  </tr>
-</table>
-
-These captures show a saved coding run. The [recorded app tour](assets/showcase/coding-demo.gif) also includes staged model and agent data; available models depend on your provider. [Capture details](assets/showcase/README.md).
-
 ## More than a remote terminal
 
 You can switch between machines without mixing up their conversations, send files back and forth, and keep notes alongside your work. When an agent delegates a task, you can follow that agent's conversation too, including after it's finished.
@@ -37,23 +18,6 @@ Optional [Keep connected](FEATURES.md#keep-connected) maintains a small native A
 
 There are file, shell and web tools, native Android [phone tools](FEATURES.md#phone-tools), plus optional memory and interactive views. The [Android capability map](PHONE-CAPABILITIES.md) distinguishes the implemented controls from the notification, screen-control and other planned layers. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
 
-<details>
-  <summary>Around the app</summary>
-
-<table>
-  <tr>
-    <th>Choose a model</th>
-    <th>Follow an agent</th>
-    <th>Come back later</th>
-  </tr>
-  <tr>
-    <td><img src="assets/showcase/model-picker.png" width="240" alt="Model picker with a starred favourite; model catalog is staged demo data"></td>
-    <td><img src="assets/showcase/agents-active.png" width="240" alt="Active agent viewer showing labelled example data"></td>
-    <td><img src="assets/showcase/agents-history.png" width="240" alt="An inactive example agent and its retained transcript"></td>
-  </tr>
-</table>
-
-</details>
 
 ## Where things run
 
