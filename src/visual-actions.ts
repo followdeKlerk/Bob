@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {isIP} from 'node:net';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {defineDoc,defineTool,section,type Conversation,type Extension,type Harness} from '@earendil-works/pi-durable';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {Interactive} from '@bob-local/interactive';
 import {z} from 'zod';
 
@@ -41,10 +41,10 @@ export const VisualActions=defineDoc<{
  receipts:Record<string,{id:string;hash:string}>;
 }>({kind:'bob.visual-actions',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({values:{},receipts:{}}),checkpointWhen:()=>true});
 
-const commonParameters={id:Type.String({pattern:'^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$'}),label:Type.String({minLength:1,maxLength:40})};
-const actionParameters=Type.Union([
- Type.Object({...commonParameters,type:Type.Literal('navigate'),latitude:Type.Number({minimum:-90,maximum:90}),longitude:Type.Number({minimum:-180,maximum:180}),destinationName:Type.Optional(Type.String({minLength:1,maxLength:100})),travelMode:Type.Optional(Type.Union([Type.Literal('driving'),Type.Literal('walking'),Type.Literal('bicycling')]))},{additionalProperties:false}),
- Type.Object({...commonParameters,type:Type.Literal('open_url'),url:Type.String({minLength:1,maxLength:2048,description:'Absolute HTTPS URL, with no embedded credentials, whitespace or backslashes. Android opens it only after a native button tap.'})},{additionalProperties:false}),
+const commonParameters={id:schema.str({pattern:'^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$'}),label:schema.str({minLength:1,maxLength:40})};
+const actionParameters=schema.union([
+ schema.obj({...commonParameters,type:schema.lit('navigate'),latitude:schema.num({minimum:-90,maximum:90}),longitude:schema.num({minimum:-180,maximum:180}),destinationName:schema.opt(schema.str({minLength:1,maxLength:100})),travelMode:schema.opt(schema.union([schema.lit('driving'),schema.lit('walking'),schema.lit('bicycling')]))},{open:false}),
+ schema.obj({...commonParameters,type:schema.lit('open_url'),url:schema.str({minLength:1,maxLength:2048,description:'Absolute HTTPS URL, with no embedded credentials, whitespace or backslashes. Android opens it only after a native button tap.'})},{open:false}),
 ]);
 const RenderArgs=z.object({title:z.string().max(160),html:z.string().max(500000),presentation:z.enum(['inline','fullscreen']).optional(),actions:Actions.optional()}).strict();
 export function withVisualActions(original:NonNullable<Extension['tools']>[number]){
@@ -53,7 +53,7 @@ export function withVisualActions(original:NonNullable<Extension['tools']>[numbe
   name:'render_visual',
   replay:'safe',
   description:'Create an isolated interactive visual with optional native action buttons (max 2): navigate to coordinates or open an HTTPS link, only after an owner tap. HTML itself has no network, files, credentials, navigation or backend tools. Embed fetched images; include a readable textual fallback and action links. Inline uses the supplied width and natural content height; content-sized viewers scroll the chat, not the graphic. Respect the request-specific legacy limit or emergency total-height ceiling, including native buttons. No internal scrolling or horizontal overflow. Use fullscreen for wide/dense workspaces, unsafe growth or unknown width, not merely tall cards. Do not shrink text or clip content.',
-  parameters:Type.Object({title:Type.String({maxLength:160}),html:Type.String({maxLength:500000}),presentation:Type.Optional(Type.Union([Type.Literal('inline'),Type.Literal('fullscreen')])),actions:Type.Optional(Type.Array(actionParameters,{maxItems:2,description:'Immutable destinations shown as native buttons beneath the HTML inside the card. No HTML/JS API can invoke them. Older apps may show only the HTML.'}))},{additionalProperties:false}),
+  parameters:schema.obj({title:schema.str({maxLength:160}),html:schema.str({maxLength:500000}),presentation:schema.opt(schema.union([schema.lit('inline'),schema.lit('fullscreen')])),actions:schema.opt(schema.arr(actionParameters,{maxItems:2,description:'Immutable destinations shown as native buttons beneath the HTML inside the card. No HTML/JS API can invoke them. Older apps may show only the HTML.'}))},{open:false}),
   execute:async(input,api,context)=>{
    const args=RenderArgs.parse(input),actions=args.actions??[];
    const presentation=args.presentation??'fullscreen',key=String(api.taskId);

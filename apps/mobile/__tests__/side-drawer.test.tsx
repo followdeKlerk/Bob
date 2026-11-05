@@ -2,6 +2,8 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {ActivityIndicator,Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
 import {colors} from '../theme';
+import {Button} from '../components/ui/button';
+import {SectionSegments} from '../components/section-ui';
 import {EdgeFade} from '../components/edge-fade';
 import {SideDrawer} from '../components/side-drawer';
 jest.mock('../keyboard-inset',()=>({useKeyboardInset:()=>0}));
@@ -96,7 +98,7 @@ test('embedded Sessions preserves session actions and hides workstation/pairing 
  await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="My machine" visible onClose={close} navigation={[]} workspaces={[{id:'machine',label:'My machine',onPress:open}]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
  expect(tree.root.findAllByType(Modal)).toHaveLength(0);expect(button('First')).toBeDefined();expect(button('Connect backend')).toBeUndefined();expect(button('My machine')).toBeUndefined();expect(button('New conversation')).toBeDefined();
  expect(button('All').props.accessibilityState.selected).toBe(true);
- expect(StyleSheet.flatten(button('All').props.style)).toMatchObject({minHeight:48,borderColor:colors.selectedBorder});
+ expect(StyleSheet.flatten(button('All').props.style)).toMatchObject({minHeight:48,backgroundColor:colors.accent});
  act(()=>button('Session controls for First').props.onPress({nativeEvent:{pageY:350}}));expect(button('Rename')).toBeDefined();
 });
 
@@ -156,19 +158,19 @@ test('visible session overflow is an independent 48dp target that opens controls
  act(()=>row.props.onPress());expect(open).toHaveBeenCalledTimes(1);
 });
 
-test('session segments have 48dp targets, readable scalable labels and a consistent selected outline and checkmark',()=>{
+test('session filters use the Reusables track with scalable labels, 48dp targets and no reflowing checkmark',()=>{
  for(const label of ['Chats','Archived','Trash']){
   const segment=button(label);
   expect(segment.props.accessibilityRole).toBe('tab');
-  expect(StyleSheet.flatten(segment.props.style)).toMatchObject({minWidth:48,minHeight:48,borderWidth:1});
+  expect(StyleSheet.flatten(segment.props.style)).toMatchObject({minWidth:48,minHeight:48,height:'auto'});
   const text=segment.findAllByType(Text).find(node=>node.props.children!=='✓')!;
   expect(StyleSheet.flatten(text.props.style).fontSize).toBeGreaterThanOrEqual(14);
   expect(text.props.allowFontScaling).not.toBe(false);expect(text.props.numberOfLines).toBeUndefined();
   act(()=>segment.props.onPress());
   for(const name of ['Chats','Archived','Trash']){
    expect(button(name).props.accessibilityState.selected).toBe(name===label);
-   expect(button(name).findAllByType(Text).some(node=>node.props.children==='✓')).toBe(name===label);
-   expect(StyleSheet.flatten(button(name).props.style).borderColor).toBe(name===label?colors.selectedBorder:colors.border);
+   expect(button(name).findAllByType(Text)).toHaveLength(1);
+   expect(StyleSheet.flatten(button(name).props.style).backgroundColor).toBe(name===label?colors.accent:'transparent');
   }
  }
 });
@@ -201,8 +203,15 @@ test('session overflow respects disabled rows while backend switching stays a se
 test('global session actions share the right header group with New rightmost; workstation Add is in the same location',async()=>{
  const props={embedded:true,visible:true,onClose:close,navigation:[],workspaces:[],conversations:rows,onNew:newChat,onSettings:()=>{},onSchedules:()=>{},disabled:false,pairing:null,onSessionAction:action};
  await act(async()=>tree.update(<SideDrawer {...props} mode="sessions"/>));
- const labels=()=>tree.root.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function').map(node=>node.props.accessibilityLabel);
+ const labels=()=>tree.root.findByProps({testID:'section-heading-actions'}).findAllByType(Button).map(node=>node.props.accessibilityLabel);
  expect(labels()).toEqual(['Schedules','Search loaded sessions','New conversation']);
  await act(async()=>tree.update(<SideDrawer {...props} mode="workstations"/>));
  expect(labels()).toEqual(['Add workstation']);
+});
+
+test('embedded session filters follow the measured heading without an extra screen-specific spacer',async()=>{
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="nathan-omarchy.tail7d5b8e.ts.net" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ act(()=>tree.root.findByProps({testID:'drawer-header'}).props.onLayout({nativeEvent:{layout:{height:107}}}));
+ expect(tree.root.findByProps({testID:'drawer-scroll-list'}).props.contentContainerStyle.paddingTop).toBe(107);
+ expect(tree.root.findByType(SectionSegments).props.label).toBe('Session filters');
 });

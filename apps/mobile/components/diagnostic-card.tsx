@@ -1,9 +1,11 @@
 import {Text} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
 import {NativeModules,Pressable,View} from 'react-native';
-import {colors,menuChrome} from '../theme';
+import {useTheme} from '../theme';
 export type DiagnosticRequest={id:string;purpose:string;expiresAt:number;status:string;canRespond:boolean};
 export function DiagnosticCard({request,respond}:{request:DiagnosticRequest;respond:(value:object)=>Promise<unknown>}){
+ const {colors,menuChrome}=useTheme();
+
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[now,setNow]=useState(Date.now());
  const lock=useRef(false),mounted=useRef(true),captured=useRef<object|undefined>(undefined);
  useEffect(()=>{mounted.current=true;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>{mounted.current=false;clearInterval(timer);};},[]);

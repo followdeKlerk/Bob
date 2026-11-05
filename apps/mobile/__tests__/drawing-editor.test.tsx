@@ -2,6 +2,7 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Alert,Modal,PanResponder,StyleSheet} from 'react-native';
 import {DrawingEditor} from '../components/drawing-editor';
+import {SectionHeading} from '../components/section-ui';
 import {colors} from '../theme';
 
 const mockExport=jest.fn();
@@ -164,9 +165,11 @@ test('feedback shrink, failed save and rotation preserve logical paper, bottom s
 test('drawing keeps Cancel left and primary Add right with standard control chrome while paper stays unoutlined',async()=>{
  await mount();
  const cancel=find(tree,'Cancel drawing'),add=find(tree,'Add drawing');
- const header=cancel.parent!;
- expect(header.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityLabel).map(node=>node.props.accessibilityLabel)).toEqual(['Cancel drawing','Add drawing']);
- expect(StyleSheet.flatten(header.props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16,flexDirection:'row',flexWrap:'wrap'});
+ const header=tree.root.findByType(SectionHeading);
+ expect(header.props.title).toBe('Drawing');
+ expect(header.findByProps({testID:'section-heading-leading'}).findAll(node=>node.props.accessibilityLabel==='Cancel drawing').length).toBeGreaterThan(0);
+ expect(header.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Add drawing').length).toBeGreaterThan(0);
+ expect(StyleSheet.flatten(header.findAllByType(require('react-native').View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
  for(const label of ['Cancel drawing','Undo','Redo','Eraser','Red','Pen width 3']){
   expect(StyleSheet.flatten(find(tree,label).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
  }

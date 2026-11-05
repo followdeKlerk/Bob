@@ -1,7 +1,7 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {AppState,StyleSheet,View} from 'react-native';
-import {SectionHeading,RoundAction} from '../components/section-ui';
+import {SectionHeading,RoundAction,SectionSegments} from '../components/section-ui';
 import {colors} from '../theme';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert,scheduleFrequency,type ScheduleJob} from '../components/schedules-screen';
 jest.mock('uuid',()=>({v4:()=> '11111111-1111-4111-8111-111111111111'}));
@@ -83,5 +83,15 @@ test('schedule heading has return left and Refresh/Create right; cards and contr
   await act(async()=>tree.update(<ScheduleReceipt job={job} onOpen={()=>{}}/>));
   const receipt=tree.root.findAll(node=>node.props.accessibilityLabel==='View schedule Check release notes'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(receipt.props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('schedules uses the same asset-backed filter component as Sessions and changes only the view',async()=>{
+ const request=jest.fn(async(_path:string,_method?:string)=>({jobs:[job]}));let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<SchedulesScreen visible request={request} onCompose={()=>{}} onOpenChat={()=>{}}/>);});
+ try{
+  const filters=tree.root.findByType(SectionSegments);expect(filters.props.label).toBe('Schedule filters');expect(filters.props.options.map((option:any)=>option.label)).toEqual(['Active','Paused','Finished']);
+  for(const label of ['Paused','Finished','Active']){await act(async()=>press(tree,label));expect(filters.props.value).toBe(label.toLowerCase());}
+  expect(request).toHaveBeenCalledTimes(1);expect(request.mock.calls.every(args=>args[1]!=='POST')).toBe(true);
  }finally{await act(async()=>tree.unmount());}
 });

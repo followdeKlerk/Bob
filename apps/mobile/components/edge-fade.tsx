@@ -1,10 +1,12 @@
 import React,{useId} from 'react';
 import {View} from 'react-native';
 import Svg,{Defs,LinearGradient,Rect,Stop} from 'react-native-svg';
-import {colors} from '../theme';
+import {useTheme} from '../theme';
 
 // Decorative only: never intercept gestures or create an accessibility target.
 export function EdgeFade({edge,height}:{edge:'top'|'bottom';height:number}) {
+ const {colors}=useTheme();
+
  const id='edge'+useId().replace(/[^a-zA-Z0-9]/g,'');
  return <View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants" style={{position:'absolute',left:0,right:0,[edge]:0,height}}>
   <Svg width="100%" height="100%" opacity={edge==='top'?0.5:1}>

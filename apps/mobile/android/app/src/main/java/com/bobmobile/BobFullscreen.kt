@@ -20,8 +20,14 @@ import java.util.WeakHashMap
 internal object BobFullscreen {
     // Values must not strongly retain their weak Window key through a captured listener.
     private val listeners = WeakHashMap<Window, WeakReference<ViewTreeObserver.OnWindowFocusChangeListener>>()
+    // Extra React Dialog windows share bar policy, never Activity background ownership.
+    private val activityWindows = WeakHashMap<Window, Unit>()
     @Suppress("DEPRECATION") // Explicit transparency for Android versions before enforced edge-to-edge.
     fun apply(window: Window) {
+        val colors = BobAppearance.palette(window.context)
+        if (activityWindows.containsKey(window)) {
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(colors.background))
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 29) {
@@ -35,6 +41,7 @@ internal object BobFullscreen {
             }
         }
         WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightNavigationBars = colors.light
             // Do not use transient immersive bars: the first bottom gesture must navigate,
             // not just reveal the navigation bar. Also reset any previous hidden-nav state.
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
@@ -50,15 +57,27 @@ internal object BobFullscreen {
         }
         apply(window)
     }
+    private fun attachActivity(activity: Activity) {
+        val attributes = activity.obtainStyledAttributes(intArrayOf(android.R.attr.windowIsTranslucent, android.R.attr.windowIsFloating))
+        val ownsBackground = try { !attributes.getBoolean(0, false) && !attributes.getBoolean(1, false) }
+            finally { attributes.recycle() }
+        if (ownsBackground) activityWindows[activity.window] = Unit else activityWindows.remove(activity.window)
+        attach(activity.window)
+    }
     fun detach(window: Window) {
+        activityWindows.remove(window)
         val listener = listeners.remove(window)?.get() ?: return
         val observer = window.decorView.viewTreeObserver
         if (observer.isAlive) observer.removeOnWindowFocusChangeListener(listener)
     }
+    fun refreshAppearance() {
+        listeners.keys.toList().forEach { apply(it) }
+    }
     fun install(application: Application) {
+        BobAppearance.install(application)
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { attach(activity.window) }
-            override fun onActivityResumed(activity: Activity) { attach(activity.window) }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { attachActivity(activity) }
+            override fun onActivityResumed(activity: Activity) { attachActivity(activity) }
             override fun onActivityDestroyed(activity: Activity) { detach(activity.window) }
             override fun onActivityStarted(activity: Activity) {}
             override fun onActivityPaused(activity: Activity) {}

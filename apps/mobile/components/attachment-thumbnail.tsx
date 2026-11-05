@@ -3,10 +3,13 @@ import React,{useEffect,useState} from 'react';
 import {Image,Pressable,StyleSheet,View,type ImageSourcePropType} from 'react-native';
 import {Download,FileText,Info,X} from 'lucide-react-native';
 import * as Keychain from 'react-native-keychain';
-import {colors,menuChrome} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 
 export type DraftAttachment={id:string;uri:string;name:string;mime:string;drawingData?:string};
 export function AttachmentThumbnail({name,mime,source,onOpen,onRemove,onDetails,hideFilename=false,disabled=false}:{name:string;mime:string;source?:ImageSourcePropType;onOpen?:()=>void;onRemove?:()=>void;onDetails?:()=>void;hideFilename?:boolean;disabled?:boolean}) {
+ const {colors}=useTheme();
+ const styles=useThemedValue(stylesTheme);
+
  const [failed,setFailed]=useState(false);
  useEffect(()=>setFailed(false),[source]);
  return <View style={styles.tile}>
@@ -18,6 +21,9 @@ export function AttachmentThumbnail({name,mime,source,onOpen,onRemove,onDetails,
  </View>;
 }
 export function SentAttachmentThumbnail({backend,artifact,onOpen,onDetails,onSave,hideFilename=false}:{backend:{backendId:string;endpoint:string};artifact:{id:string;conversationId:number;name:string;mime:string};onOpen:()=>void;onDetails?:()=>void;onSave?:()=>void;hideFilename?:boolean}) {
+ const {colors}=useTheme();
+ const styles=useThemedValue(stylesTheme);
+
  const [source,setSource]=useState<ImageSourcePropType>();
  useEffect(()=>{
   let cancelled=false;setSource(undefined);
@@ -31,7 +37,7 @@ export function SentAttachmentThumbnail({backend,artifact,onOpen,onDetails,onSav
   {onSave&&<Pressable accessibilityRole="button" accessibilityLabel={`Save ${artifact.name}`} onPress={onSave} style={styles.save}><Download size={18} color={colors.foreground}/></Pressable>}
  </View>;
 }
-const styles=StyleSheet.create({
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  tile:{width:96,minHeight:136,position:'relative',alignItems:'center'},
  sentRow:{flexDirection:'row',alignItems:'flex-end',gap:6},
  save:{...menuChrome.control,width:48,height:48,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,marginBottom:28},
@@ -42,4 +48,4 @@ const styles=StyleSheet.create({
  label:{fontSize:11,color:colors.foreground,textAlign:'center'},
  remove:{position:'absolute',top:-4,right:-4,width:44,height:44,alignItems:'center',justifyContent:'center'},
  removeCircle:{width:28,height:28,borderRadius:14,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border},
-});
+}));

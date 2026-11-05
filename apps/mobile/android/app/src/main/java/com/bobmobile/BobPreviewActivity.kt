@@ -19,13 +19,13 @@ class BobPreviewActivity : Activity() {
     private var bitmap: Bitmap? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 64, 24, 48); setBackgroundColor(0xff000000.toInt()) }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 64, 24, 48); BobAppearance.background(this) }
         setContentView(layout)
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(layout) { view, insets ->
             val safe = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
             view.setPadding(safe.left + 24, safe.top + 24, safe.right + 24, safe.bottom + 24); insets
         }
-        layout.addView(Button(this).apply { backgroundTintList = android.content.res.ColorStateList.valueOf(0xffe8e0d2.toInt()); setTextColor(0xff000000.toInt()); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Close preview"; setOnClickListener { finish() } })
+        layout.addView(Button(this).apply { BobAppearance.button(this); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Close preview"; setOnClickListener { finish() } })
         try {
             val root = File(cacheDir, "bob-previews").canonicalFile
             val file = File(intent.getStringExtra("path") ?: error("Missing attachment")).canonicalFile
@@ -38,7 +38,7 @@ class BobPreviewActivity : Activity() {
                         while (count < bytes.size) { val n = input.read(bytes, count, bytes.size - count); if (n < 0) break; count += n }
                         String(bytes, 0, count, Charsets.UTF_8)
                     }
-                    val body = TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); setTextColor(0xffe8e0d2.toInt()); textSize = 16f; setTextIsSelectable(true); this.text = text.take(200000) + if (text.length > 200000) "\n[Preview truncated; download retains original bytes]" else "" }
+                    val body = TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); BobAppearance.text(this); textSize = 16f; setTextIsSelectable(true); this.text = text.take(200000) + if (text.length > 200000) "\n[Preview truncated; download retains original bytes]" else "" }
                     layout.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; isHorizontalScrollBarEnabled = false; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
                 }
                 mime.startsWith("image/") -> {
@@ -56,7 +56,7 @@ class BobPreviewActivity : Activity() {
                     renderer = PdfRenderer(descriptor!!)
                     val pdf = renderer!!; require(pdf.pageCount > 0)
                     var pageNumber = 0
-                    val label = TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; setTextColor(0xffe8e0d2.toInt()) }
+                    val label = TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; BobAppearance.text(this) }
                     val image = ImageView(this).apply { contentDescription = "PDF page preview"; scaleType = ImageView.ScaleType.FIT_CENTER }
                     fun render() {
                         pdf.openPage(pageNumber).use { page ->
@@ -70,14 +70,14 @@ class BobPreviewActivity : Activity() {
                     }
                     layout.addView(label)
                     layout.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
-                    layout.addView(Button(this).apply { backgroundTintList = android.content.res.ColorStateList.valueOf(0xffe8e0d2.toInt()); setTextColor(0xff000000.toInt()); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Previous page"; setOnClickListener { if (pageNumber > 0) { pageNumber--; render() } } })
-                    layout.addView(Button(this).apply { backgroundTintList = android.content.res.ColorStateList.valueOf(0xffe8e0d2.toInt()); setTextColor(0xff000000.toInt()); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Next page"; setOnClickListener { if (pageNumber + 1 < pdf.pageCount) { pageNumber++; render() } } })
+                    layout.addView(Button(this).apply { BobAppearance.button(this); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Previous page"; setOnClickListener { if (pageNumber > 0) { pageNumber--; render() } } })
+                    layout.addView(Button(this).apply { BobAppearance.button(this); typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Next page"; setOnClickListener { if (pageNumber + 1 < pdf.pageCount) { pageNumber++; render() } } })
                     render()
                 }
                 else -> error("Use download/open for this attachment")
             }
         } catch (e: Exception) {
-            layout.addView(TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Preview unavailable: ${e.message}"; setTextColor(0xffe8e0d2.toInt()) })
+            layout.addView(TextView(this).apply { typeface = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.nordwand_mono); textSize = 13f; text = "Preview unavailable: ${e.message}"; BobAppearance.text(this) })
         }
     }
     override fun onDestroy() { renderer?.close(); descriptor?.close(); bitmap?.recycle(); super.onDestroy() }

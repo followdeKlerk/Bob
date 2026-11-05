@@ -13,11 +13,11 @@ const names:Record<string,string>={coding:'coding-tools',resources:'bob.resource
 export type ModuleId=keyof typeof names;
 export const moduleIds=Object.keys(names) as ModuleId[];
 const Selection=z.array(z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).max(32).refine(ids=>new Set(ids).size===ids.length,'Duplicate module selection');
-const Manifest=z.object({name:z.string(),version:z.literal('0.1.0'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:z.literal('1.4.0'),name:z.string(),requires:Selection}).strict()});
+const Manifest=z.object({name:z.string(),version:z.literal('0.1.0'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:z.literal('1.5.0'),name:z.string(),requires:Selection}).strict()});
 export function validateModuleManifest(raw:unknown,id:ModuleId) {
  const manifest=Manifest.parse(raw);
  if(manifest.name!==`@bob-local/${id}`||manifest.bobExtension.name!==names[id])throw Error('Module package or extension identity mismatch');
- if(manifest.dependencies['@earendil-works/pi-durable']!=='1.4.0')throw Error('Module requires the exact validated Durable dependency');
+ if(manifest.dependencies['@earendil-works/pi-durable']!=='1.5.0')throw Error('Module requires the exact validated Durable dependency');
  return manifest;
 }
 export function moduleCatalog(state?:State) {

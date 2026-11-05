@@ -2,14 +2,17 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
-test('Existing bottom destinations replace the burger; chat-managed configuration stays absent',()=>{
+test('Bob menu replaces bottom tabs throughout the app; chat-managed configuration stays absent',()=>{
  const app=readFileSync('apps/mobile/App.tsx','utf8');
- const tabs=readFileSync('apps/mobile/components/bottom-tabs.tsx','utf8');
+ const navigation=readFileSync('apps/mobile/components/chat-navigation.tsx','utf8');
  assert.doesNotMatch(app,/label="Open workspaces"/);
- for(const hidden of ['Skills','Todos','MCP Apps','Prompts'])assert.doesNotMatch(tabs,new RegExp(`id:'${hidden}'`));
- for(const kept of ['Notes','Workstations','Chat','Sessions','Settings'])assert.match(tabs,new RegExp(`id:'${kept}'`));
+ for(const hidden of ['Skills','Todos','MCP Apps','Prompts'])assert.doesNotMatch(navigation,new RegExp(`id:'${hidden}'`));
+ for(const kept of ['Notes','Workstations','Chat','Agents','Sessions','Settings'])assert.match(navigation,new RegExp(`id:'${kept}'`));
  assert.match(app,/(?:label|title)="Advanced modules"/);
- assert.match(app,/keyboardInset<=0&&<BottomTabs/);
+ assert.doesNotMatch(app,/<BottomTabs\b/);
+ assert.match(app,/<ChatNavigation\b/);
+ assert.match(app,/<SectionHeading menu=\{sectionMenu\}/);
+ for(const section of ['AgentsScreen','NotesScreen','SchedulesScreen','SideDrawer'])assert.match(app,new RegExp(`<${section} menu=`));
 });
 
 test('model and thinking has a conversation-settings shortcut and preserves the composer quick route',()=>{

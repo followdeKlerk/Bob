@@ -154,7 +154,8 @@ test('Notes keeps Sync before primary Create in the shared header and uses seman
   expect(heading.findAllByType(RoundAction)[2].props.primary).toBe(true);
   expect(tree.root.findByType(FlatList).findAll(node=>node.props.accessibilityLabel==='Sync notes')).toHaveLength(0);
   const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Categories'&&typeof node.props.onPress==='function')[0];
-  expect(button.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
+  expect(button.props.variant).toBe('ghost');
   expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flexDirection==='row'&&style.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
   act(()=>press(tree,'Categories'));act(()=>input(tree,'Category name','Style check'));
   await act(async()=>press(tree,'Create category'));act(()=>press(tree,'Close categories'));
@@ -162,6 +163,9 @@ test('Notes keeps Sync before primary Create in the shared header and uses seman
   expect(StyleSheet.flatten(all.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
   act(()=>press(tree,'Create note'));
   expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  const editorHeading=tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='New note')!;
+  expect(editorHeading.findByProps({testID:'section-heading-leading'}).findAll(node=>node.props.accessibilityLabel==='Save note and go back').length).toBeGreaterThan(0);
+  expect(editorHeading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Save note').length).toBeGreaterThan(0);
   const save=tree.root.findAll(node=>node.props.accessibilityLabel==='Save note'&&typeof node.props.onPress==='function')[0];
   expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.accent&&style.borderColor===colors.accent&&style.borderWidth===1;})).toBe(true);
   const shade=tree.root.findByProps({accessibilityLabel:'Note shade: Standard gray'});

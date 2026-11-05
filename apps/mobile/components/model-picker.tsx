@@ -5,14 +5,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Check,Search,Star,X} from 'lucide-react-native';
 import {Button} from './ui/button';
-import {colors,menuChrome,menuRadii} from '../theme';
-import {SectionHeading,RoundAction} from './section-ui';
+import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
+import {SectionHeading,RoundAction,SectionAction} from './section-ui';
 export type ModelOption={provider:string;modelId:string;name:string;available?:boolean;thinkingLevels?:string[]};
 export type ModelChoice={model?:{provider:string;modelId:string};thinkingLevel?:string};
 const favoriteKey='model-favorites:v1';
 const key=(m:{provider:string;modelId:string})=>JSON.stringify([m.provider,m.modelId]);
 const labels:Record<string,string>={off:'Off',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Maximum'};
 export function ModelPicker({visible,models,current,onClose,onApply,loading=false}:{visible:boolean;loading?:boolean;models:ModelOption[];current:ModelChoice;onClose:()=>void;onApply:(choice:Required<ModelChoice>)=>Promise<void>}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const [query,setQuery]=useState(''),[provider,setProvider]=useState(''),[selected,setSelected]=useState(''),[thinking,setThinking]=useState('medium'),[saving,setSaving]=useState(false),[error,setError]=useState('');
  const [favorites,setFavorites]=useState<string[]>([]),[favoritesReady,setFavoritesReady]=useState(false),[favoriteSaving,setFavoriteSaving]=useState(false);
  const favoriteBusy=useRef(false);
@@ -35,7 +38,7 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
   <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS==='ios'?'padding':'height'}>
    <Pressable style={StyleSheet.absoluteFill} onPress={()=>{if(!saving)onClose();}} accessibilityLabel="Close model selection"/>
    <SafeAreaView edges={['top','bottom']} style={s.sheet}>
-    <SectionHeading title="Model & thinking"><RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/></SectionHeading>
+    <SectionHeading title="Model & thinking" leading={<RoundAction label="Close model selection" disabled={saving} onPress={onClose} icon={X}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionHeading>
     <FlatList data={rows} keyExtractor={key} style={s.models} keyboardShouldPersistTaps="handled" extraData={[selected,favorites,favoriteSaving,saving,loading]} ListHeaderComponent={<View style={s.header}>
      <View testID="current-model-summary" style={s.summary}><Text style={s.label}>Current model</Text><Text selectable style={s.text}>{loading?'Loading…':currentModel?.name??current.model?.modelId??'Not configured'}</Text><Text style={s.caption}>{current.model?.provider}{current.thinkingLevel?` · ${labels[current.thinkingLevel]??current.thinkingLevel} thinking`:''}</Text></View>
      <View style={s.search}><Search size={19} color={colors.muted}/><TextInput style={s.input} value={query} onChangeText={setQuery} editable={!saving} placeholder="Search models" placeholderTextColor={colors.muted} accessibilityLabel="Search models" autoCapitalize="none"/></View>
@@ -56,10 +59,10 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
       {!chosen&&<Text style={s.caption}>Choose a model first.</Text>}
       {!!error&&<Text accessibilityLiveRegion="polite" style={s.error}>{error}</Text>}
      </ScrollView>
-     <Button accessibilityLabel="Apply model selection" disabled={saving||loading||!chosen||!levels.includes(thinking)} style={s.apply} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}><Text style={s.applyText}>{saving?'Saving…':'Apply'}</Text></Button>
+
     </View>
    </SafeAreaView>
   </KeyboardAvoidingView>
  </Modal>;
 }
-const s=StyleSheet.create({overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},sheet:{height:'94%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,borderWidth:1,borderColor:colors.border,gap:8},text:{color:colors.foreground,fontSize:15,flexShrink:1},label:{color:colors.foreground,fontSize:14,fontWeight:'600'},caption:{fontSize:14,color:colors.muted,lineHeight:20},header:{gap:10},summary:{...menuChrome.card,paddingHorizontal:12,paddingVertical:10,gap:3},search:{...menuChrome.input,flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:12},input:{flex:1,color:colors.foreground,minHeight:48,fontSize:15},models:{flex:1,minHeight:0,marginHorizontal:20},row:{flexDirection:'row',alignItems:'center',borderBottomWidth:StyleSheet.hairlineWidth,borderColor:colors.border},model:{flex:1,minHeight:52,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:5,paddingLeft:10},modelText:{flex:1,gap:1},touch:{minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},selected:{...menuChrome.control,...menuChrome.selected},group:{color:colors.muted,fontSize:14,fontWeight:'600',paddingTop:14,paddingBottom:6,paddingLeft:10},filters:{gap:4},filter:{...menuChrome.control,height:'auto',minHeight:48,minWidth:48,paddingHorizontal:12,paddingVertical:8},wrap:{flexDirection:'row',flexWrap:'wrap',gap:4},choice:{...menuChrome.selected},selection:{paddingHorizontal:20,maxHeight:'55%',flexShrink:1,minHeight:0,borderTopWidth:1,borderColor:colors.border,paddingTop:8,gap:8},controls:{flexGrow:0,flexShrink:1},section:{gap:8,paddingBottom:8},error:{color:colors.foreground,fontSize:14},apply:{...menuChrome.control,backgroundColor:colors.accent,borderColor:colors.accent,height:'auto',minHeight:48,paddingVertical:12,marginBottom:8},applyText:{color:colors.onAccent,fontWeight:'600',fontSize:15}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},sheet:{height:'94%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,borderWidth:1,borderColor:colors.border,gap:8},text:{color:colors.foreground,fontSize:15,flexShrink:1},label:{color:colors.foreground,fontSize:14,fontWeight:'600'},caption:{fontSize:14,color:colors.muted,lineHeight:20},header:{gap:10},summary:{...menuChrome.card,paddingHorizontal:12,paddingVertical:10,gap:3},search:{...menuChrome.input,flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:12},input:{flex:1,color:colors.foreground,minHeight:48,fontSize:15},models:{flex:1,minHeight:0,marginHorizontal:20},row:{flexDirection:'row',alignItems:'center',borderBottomWidth:StyleSheet.hairlineWidth,borderColor:colors.border},model:{flex:1,minHeight:52,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:5,paddingLeft:10},modelText:{flex:1,gap:1},touch:{minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},selected:{...menuChrome.control,...menuChrome.selected},group:{color:colors.muted,fontSize:14,fontWeight:'600',paddingTop:14,paddingBottom:6,paddingLeft:10},filters:{gap:4},filter:{...menuChrome.control,height:'auto',minHeight:48,minWidth:48,paddingHorizontal:12,paddingVertical:8},wrap:{flexDirection:'row',flexWrap:'wrap',gap:4},choice:{...menuChrome.selected},selection:{paddingHorizontal:20,maxHeight:'55%',flexShrink:1,minHeight:0,borderTopWidth:1,borderColor:colors.border,paddingTop:8,gap:8},controls:{flexGrow:0,flexShrink:1},section:{gap:8,paddingBottom:8},error:{color:colors.foreground,fontSize:14},}));

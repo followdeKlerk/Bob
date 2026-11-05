@@ -2,25 +2,33 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import {readControlFloor} from "./maintenance-migration.js";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export const secret = () => randomBytes(32).toString("base64url");
 export class State {
   readonly db: DatabaseSync;
   readonly id: string;
   constructor(readonly dir: string) {
+    // Validate before opening a writer, setting WAL, creating tables or changing config.
+    // A runtime floor is not the independently maintained device lifecycle schema.
+    readControlFloor(dir);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
     this.db = new DatabaseSync(join(dir, "control.sqlite"));
     chmodSync(join(dir, "control.sqlite"), 0o600);
-    const schema=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-    if(schema>2){this.db.close();throw Error('Unsupported newer control schema; use the matching Bob release');}
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+    try {
+      this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
    CREATE TABLE IF NOT EXISTS config(key TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS invites(hash TEXT PRIMARY KEY,expires INTEGER NOT NULL,used INTEGER NOT NULL DEFAULT 0);
    CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,name TEXT NOT NULL,hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
   `);
-    this.id = this.get<string>("identity") ?? randomUUID();
-    this.set("identity", this.id);
+      this.id = this.get<string>("identity") ?? randomUUID();
+      this.set("identity", this.id);
+    } catch(error) {this.db.close();throw error;}
+  }
+  /** Raw lifecycle marker (0 remains historical/unversioned), never runtime floor 3. */
+  get lifecycleSchemaVersion(): 0|1|2 {
+    return readControlFloor(this.dir,true).lifecycleSchemaVersion;
   }
   get<T>(key: string): T | undefined {
     const r = this.db.prepare("SELECT value FROM config WHERE key=?").get(key);
@@ -58,7 +66,7 @@ export class State {
       this.db
         .prepare("INSERT INTO devices(id,name,hash) VALUES(?,?,?)")
         .run(id, name, hash(credential));
-      if(Number(this.db.prepare('PRAGMA user_version').get()?.user_version)===2)
+      if(this.lifecycleSchemaVersion===2)
         this.db.prepare('UPDATE devices SET created_at=? WHERE id=?').run(Date.now(),id);
       this.db.exec("COMMIT");
       return { deviceId: id, credential };
@@ -76,7 +84,7 @@ export class State {
     return this.db.prepare("SELECT id,name,revoked FROM devices").all();
   }
   revoke(id: string) {
-    if(Number(this.db.prepare('PRAGMA user_version').get()?.user_version)===2)
+    if(this.lifecycleSchemaVersion===2)
       this.db.prepare('UPDATE devices SET revoked=1,revoked_at=COALESCE(revoked_at,?) WHERE id=?').run(Date.now(),id);
     else this.db.prepare("UPDATE devices SET revoked=1 WHERE id=?").run(id);
   }

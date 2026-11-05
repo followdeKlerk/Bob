@@ -3,8 +3,11 @@ import {Text} from './app-text';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {Check,ChevronDown,ChevronRight,Users} from 'lucide-react-native';
-import {colors} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 export function PeerAdmission({data,peerName}:{data:unknown;peerName?:string}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const [open,setOpen]=useState(false);
  const value=data&&typeof data==='object'?data as Record<string,any>:{};
  const result=value.result&&typeof value.result==='object'?value.result:{};
@@ -23,4 +26,4 @@ export function PeerAdmission({data,peerName}:{data:unknown;peerName?:string}){
   </View>
  </View>;
 }
-const s=StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:13,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:13,lineHeight:21,color:colors.body},caption:{fontSize:12,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:APP_FONT_FAMILY,fontSize:12,lineHeight:20,color:colors.body}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:13,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:13,lineHeight:21,color:colors.body},caption:{fontSize:12,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:APP_FONT_FAMILY,fontSize:12,lineHeight:20,color:colors.body}}));

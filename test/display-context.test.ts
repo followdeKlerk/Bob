@@ -43,7 +43,7 @@ test('authenticated requests deliver viewer-specific guidance without rewriting 
    const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'faux',modelId:'faux-1'}}},ctx);
    const snapshotResponse=await fetch(base+`/chats/${chat.id}`,{headers});assert.equal(snapshotResponse.status,200);
    const snapshot=await snapshotResponse.json() as any;assert.deepEqual(snapshot.view.docs['bob.display'],{inlineHeight:8192});
-   const rawView=await chat.viewState(ctx);try{assert.equal(rawView.value.docs['bob.display'],undefined,'capability is read-only presentation metadata, not persisted state');}finally{rawView.dispose();}
+   const rawView=await chat.watch(ctx);try{assert.equal(rawView.value.docs['bob.display'],undefined,'capability is read-only presentation metadata, not persisted state');}finally{await rawView.stop();}
    const request={...message(height),text:'Show a card #nomem'};
    const response=await fetch(base+`/chats/${chat.id}/messages`,{method:'POST',headers,body:JSON.stringify(request)});assert.equal(response.status,202);
    const accepted=await response.json() as any;await(await runtime.harness.submission(accepted.id,ctx))!.wait(ctx);

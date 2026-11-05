@@ -1,3 +1,5 @@
+import {prepareFreshPi15Floor} from '../src/maintenance-migration.js';
+import {acquireOwner} from '../src/ownership.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -7,7 +9,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall,type FauxResponseFactory} from '@earendil-works/pi-ai/providers/faux';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {defineTool,defineExtension,createRegistry,Harness,configure,AgentDoc,type ToolRegistration,type Conversation,type ConversationId} from '@earendil-works/pi-durable';
 import {openNodeSqliteStorage} from '@earendil-works/pi-durable/storage/sqlite/node';
 import {CodingTools} from '@bob-local/coding';
@@ -19,7 +21,7 @@ import {ChatMeta,Library} from '../src/documents.js';
 import {DelegationConfig,saveDelegationConfig,readDelegationConfig,fingerprint} from '../src/delegation-config.js';
 import {DelegationChild,DelegationSession} from '../src/delegation.js';
 import {createDelegationModels} from '../src/delegation-providers.js';
-import {DelegationBehavior,DelegationChildTools,DelegationToolProvisioning,readDelegationBehavior,saveDelegationBehavior,behaviorRevision} from '../src/delegation-behavior.js';
+import {COORDINATOR_POLICY,DelegationBehavior,DelegationChildTools,DelegationToolProvisioning,readDelegationBehavior,saveDelegationBehavior,behaviorRevision} from '../src/delegation-behavior.js';
 import {DelegationBudget,registerDelegationOwner,revokeDelegation} from '../src/delegation-budget.js';
 import {handleDelegationCommand} from '../src/delegation-command.js';
 import {DelegationBehaviorCommands} from '../src/delegation-behavior-command.js';
@@ -47,6 +49,14 @@ async function until(check:()=>Promise<boolean>){for(let i=0;i<300;i++){if(await
 async function ledger(rt:Runtime,id:ConversationId){return (await rt.harness.snapshot(DelegationBudget,id,ctx))??{epoch:0,seen:[],dispatches:{},grants:[]};}
 async function results(chat:Conversation){return (await chat.entries({order:'ascending'},100,undefined,ctx)).items.flatMap(entry=>entry.model??[]).filter(message=>message.role==='toolResult') as any[];}
 async function registry(rt:Runtime,chat:Conversation){return (await rt.harness.snapshot(Subagents,chat.id,ctx))??{agents:{},reporters:{}};}
+
+test('coordinator guidance asks a lightweight usefulness question without imposing a helper quota',()=>{
+ assert.match(COORDINATOR_POLICY,/While I advance the main task, could a helper independently shorten completion or resolve an important uncertainty/);
+ assert.match(COORDINATOR_POLICY,/zero helpers is a valid answer/);
+ assert.match(COORDINATOR_POLICY,/multiple helpers of the same profile when useful/);
+ assert.match(COORDINATOR_POLICY,/quick judgment, not a separate planning workflow/);
+ assert.match(COORDINATOR_POLICY,/Current-input denial, stop\/revoke and deterministic active\/dispatch bounds override/);
+});
 
 test('adaptive config is off by default, bounded, independently versioned, profile-fingerprint bound, and partial updates preserve policy',async()=>{
  const f=fixture();try{
@@ -199,7 +209,7 @@ test('in-transaction child configuration failure and reserved names leave native
 test('cross-epoch coalesced sends fail closed when revoked reporter wins native answer dedup; read-only Agents inspection preserves scope',{timeout:20000},async()=>{
  const f=fixture(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
  // Test-only native tool boundary: both child inputs end in one actual native answer.
- const gate=defineTool({name:'adaptive_test_gate',description:'Deterministic test boundary',parameters:Type.Object({}),replay:'unsafe',execute:async()=>{entered.resolve();await release.promise;return {output:[{type:'text' as const,text:'Gate released'}]};}}),extension=defineExtension({name:'adaptive-test-gate',tools:[gate]});
+ const gate=defineTool({name:'adaptive_test_gate',description:'Deterministic test boundary',parameters:schema.obj({},{open:true}),replay:'unsafe',execute:async()=>{entered.resolve();await release.promise;return {output:[{type:'text' as const,text:'Gate released'}]};}}),extension=defineExtension({name:'adaptive-test-gate',tools:[gate]});
  f.child.setResponses([fauxAssistantMessage(fauxToolCall('adaptive_test_gate',{}),{stopReason:'toolUse'}),fauxAssistantMessage('One answer for both epochs')]);f.setReport(()=>dispatch([spawn('forbidden-continuation')]));
  const {rt,chat}=await setup(f);rt.registry.install(extension);await chat.configure({extensions:[...(await chat.agent(ctx)).extensions,extension]},ctx);
  const app=await serve(f.state,{port:0,runtime:rt}),device=f.state.pair(f.state.invite().token,'Inspection fixture'),base=`http://127.0.0.1:${(app.server.address() as {port:number}).port}/v1`,headers={authorization:`Bearer ${device.credential}`,'x-bob-backend':f.state.id};
@@ -243,6 +253,8 @@ test('one-time native provisioning upgrades genuine pre-behavior AD profile chil
   if((args as any).action==='spawn'&&id&&id!==before){await configure(tx,id,{model:route,extensions:[CodingTools,legacyMarker],tools:[read,bash],modelTools:[read],cwd:f.dir,instructions:profile.instructions});Object.assign(await tx.doc(DelegationChild,id),{profile,route:profile.route,skills:[],observation:{label:profile.name,profile:profile.name,provider:profile.route.provider,model:profile.route.model,reasoning_effort:'off',service_tier:'normal'}});}
   return result;
  },callContext)},context)}]});
+ // The pre-AD host below still uses current native 1.5 storage, not a Pi 1.4 fixture.
+ const releaseFloorOwner=acquireOwner(f.dir);try{prepareFreshPi15Floor(f.dir);}finally{releaseFloorOwner();}
  const nativeRegistry=createRegistry();nativeRegistry.install(CodingTools);nativeRegistry.install(legacyMarker);nativeRegistry.install(legacyModule);
  let legacy:Harness|undefined=await Harness.open(await openNodeSqliteStorage(join(f.dir,'durable.sqlite')),{models:aliases.models,registry:nativeRegistry,settings:{extensions:[CodingTools,legacyModule]},conversationCreated:async(tx,record)=>{await tx.doc(ChatMeta,record.id);}},ctx),rt:Runtime|undefined;
  try{

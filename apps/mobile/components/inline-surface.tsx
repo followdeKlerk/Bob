@@ -4,12 +4,14 @@ import {DeviceEventEmitter,NativeModules,requireNativeComponent,View,type ViewPr
 import * as Keychain from 'react-native-keychain';
 import {Maximize2} from 'lucide-react-native';
 import {ActionIcon,ActionRow} from './message-actions';
-import {colors} from '../theme';
+import {useTheme} from '../theme';
 import {MAX_INLINE_HEIGHT,initialInlineHeight,rememberInlineHeight,forgetInlineHeight} from '../inline-visual-policy';
 const NativeSurface=requireNativeComponent<ViewProps&{session:string}>('BobInlineSurface');
 type Backend={backendId:string;endpoint:string};
 type Props={backend:Backend;surface:{id:string;conversationId:number;title:string;kind:string;presentation?:'inline'|'fullscreen'};onExpand:()=>void};
 function Content({backend,surface,onOverflow}:{backend:Backend;surface:Props['surface'];onOverflow:()=>void}) {
+ const {colors}=useTheme();
+
  const [handle,setHandle]=useState<string>();const [error,setError]=useState('');
  const scope={backendId:backend.backendId,conversationId:surface.conversationId,id:surface.id};
  const [height,setHeight]=useState(()=>initialInlineHeight(scope)),[dataStatus,setDataStatus]=useState('');
@@ -34,6 +36,8 @@ function Content({backend,surface,onOverflow}:{backend:Backend;surface:Props['su
  return error?<Text style={{fontSize:13,color:colors.muted,paddingVertical:16}}>{error}</Text>:handle?<><NativeSurface testID="bob-inline-native-surface" collapsable={false} session={handle} style={{height,width:'100%'}}/>{!!dataStatus&&<Text accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:12}}>{dataStatus}</Text>}</>:<Text style={{fontSize:13,paddingVertical:16,color:colors.muted}}>Loading visual…</Text>;
 }
 export function InlineSurface({backend,surface,onExpand}:Props) {
+ const {colors}=useTheme();
+
  const [overflow,setOverflow]=useState(false);
  const onOverflow=useCallback(()=>setOverflow(true),[]);
  // Old content has no fit contract; preserve it in the full viewer rather than guessing.

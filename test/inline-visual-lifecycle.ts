@@ -208,12 +208,19 @@ test('inline visual size and data lifecycle in the actual isolated host document
   const page=await open();
   try{
    await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
+   // Control only the parent's guard clock, as in the burst test above. Real
+   // layout, measurement, native resize ACKs and timeout timers still run.
+   // Wall-clock sleeps plus ACK/polling delays can turn these 20 spaced updates
+   // into a >6s continuous run on a busy host, correctly invoking that guard.
+   // 180ms steps expire the 1500ms burst window while staying below 6000ms.
+   await page.evaluate("(()=>{let now=performance.now();window.__advanceResizeClock=()=>{now+=180;};Object.defineProperty(performance,'now',{value:()=>now});})()");
    for(let i=0;i<20;i++){
-    await page.waitForTimeout(180);const height=i%2?650:1200;
+    await page.evaluate('window.__advanceResizeClock()');const height=i%2?650:1200;
     await child.evaluate(height=>{document.body.style.height=height+'px';},height);
-    await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1',height);
+    await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1'||document.querySelector('iframe')?.style.visibility==='hidden',height);
+    const resized=await state(page);assert.notEqual(resized.visibility,'hidden',`Resize ${i+1}: ${resized.reason}`);
    }
-   assert.deepEqual(await overflows(page),[]);assert.ok((await state(page)).requests.length>16);
+   assert.deepEqual(await overflows(page),[]);assert.ok((await state(page)).requests.filter(request=>request.payload.method==='layout').length>16);
   }finally{await page.close();}
  });
  await t.test('stale viewport reports cannot promote, wrong keys cannot resize, and pagehide cleans up',async()=>{

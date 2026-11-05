@@ -1,13 +1,15 @@
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {Text} from './app-text';
-import {colors} from '../theme';
+import {themed,useThemedValue} from '../theme';
 import {CompactActivityRow} from './compact-activity-row';
 import {CopyAction} from './message-actions';
 import {toolPresentation} from '../tool-presentation';
 import type {NestedToolActivity as Activity,NestedToolRow} from '../nested-tool-results';
 
 function Branch({row,source}:{row:NestedToolRow;source:Activity['source']}){
+ const styles=useThemedValue(stylesTheme);
+
  const [expanded,setExpanded]=useState(false);
  const presentation=row.args?toolPresentation(row.name,row.args):undefined;
  const hint=presentation?.command??presentation?.detail??row.args;
@@ -24,6 +26,8 @@ function Branch({row,source}:{row:NestedToolRow;source:Activity['source']}){
 
 /** Compact branches remain visible below their parent, independently of its script panel. */
 export function NestedToolActivity({activity}:{activity:Activity}){
+ const styles=useThemedValue(stylesTheme);
+
  const [all,setAll]=useState(false);
  const active=(row:NestedToolRow)=>['running','pending','error'].includes(row.status);
  const rows=all?activity.rows:[...activity.rows.filter(active),...activity.rows.filter(row=>!active(row))].slice(0,4);
@@ -34,7 +38,7 @@ export function NestedToolActivity({activity}:{activity:Activity}){
   {all&&activity.rows.length>4&&<Pressable accessibilityRole="button" accessibilityLabel="Fewer nested tool calls" onPress={()=>setAll(false)} style={styles.more}><Text style={styles.text}>Show fewer branches</Text></Pressable>}
  </View>;
 }
-const styles=StyleSheet.create({
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  container:{marginLeft:7,paddingLeft:13,borderLeftWidth:1,borderLeftColor:colors.border},
  branch:{minWidth:0},
  details:{paddingLeft:21,paddingBottom:10,gap:6},
@@ -42,4 +46,4 @@ const styles=StyleSheet.create({
  more:{minHeight:48,justifyContent:'center'},
  text:{color:colors.muted,fontSize:12,lineHeight:20},
  code:{color:colors.body,fontSize:12,lineHeight:20},
-});
+}));

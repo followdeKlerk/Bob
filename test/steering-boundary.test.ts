@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {defineExtension,defineTool,configure,InboxDoc,LiveDoc} from '@earendil-works/pi-durable';
@@ -16,7 +16,7 @@ test('HTTP steering joins the same native run after tool output; follow-up stays
  const state=new State(mkdtempSync(join(process.env.TMPDIR!,'bob-steer-boundary-')));
  const models=createModels(),faux=fauxProvider({tokensPerSecond:100000});models.setProvider(faux.provider);
  const entered=[Promise.withResolvers<void>(),Promise.withResolvers<void>()],release=[Promise.withResolvers<void>(),Promise.withResolvers<void>()];
- const gate=defineTool({name:'acceptance_gate',description:'Deterministic test gate',parameters:Type.Object({stage:Type.Number()}),replay:'unsafe',execute:async(args)=>{const i=args.stage-1;entered[i]!.resolve();await release[i]!.promise;return{output:[{type:'text' as const,text:`TOOL_RESULT_${args.stage}`} ]};}});
+ const gate=defineTool({name:'acceptance_gate',description:'Deterministic test gate',parameters:schema.obj({stage:schema.num()},{open:true}),replay:'unsafe',execute:async(args)=>{const i=args.stage-1;entered[i]!.resolve();await release[i]!.promise;return{output:[{type:'text' as const,text:`TOOL_RESULT_${args.stage}`} ]};}});
  const extension=defineExtension({name:'acceptance-steering-boundary',tools:[gate]});
  const seen:any[]=[];
  const reply=(value:any)=>(context:any)=>{seen.push(structuredClone(context.messages));return value;};

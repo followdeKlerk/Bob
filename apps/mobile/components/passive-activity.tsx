@@ -4,9 +4,11 @@ import {CompactActivityRow} from './compact-activity-row';
 import {Text} from './app-text';
 import {memoryStatusText,inputAttribution} from '../chat-presentation';
 import type {ToolEntry} from '../tool-results';
-import {colors} from '../theme';
+import {themed,useThemedValue} from '../theme';
 
 function PassiveActivity({title,detail,status,accessibilityLabel,children}:{title:string;detail?:string;status:string;accessibilityLabel:string;children:React.ReactNode}){
+ const styles=useThemedValue(stylesTheme);
+
  const [expanded,setExpanded]=useState(false);
  return <View>
   <CompactActivityRow title={title} detail={detail} status={status} accessibilityLabel={accessibilityLabel} expanded={expanded} onPress={()=>setExpanded(!expanded)}/>
@@ -16,6 +18,8 @@ function PassiveActivity({title,detail,status,accessibilityLabel,children}:{titl
 
 /** Backend metadata stays literal, never model content or supplied status text. */
 export function HindsightActivity({entry}:{entry:ToolEntry}){
+ const styles=useThemedValue(stylesTheme);
+
  const label=memoryStatusText(entry);
  if(label===undefined)return null;
  const {phase,count,receiptKey}=entry.data as {phase:string;count?:number;receiptKey?:unknown};
@@ -34,7 +38,7 @@ export function AgentReportActivity({entry,children}:{entry:ToolEntry;children:R
  return <PassiveActivity title="Agent report" detail={typeof name==='string'&&name?name:undefined} status="received" accessibilityLabel={inputAttribution(entry).label!}>{children}</PassiveActivity>;
 }
 
-const styles=StyleSheet.create({
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  details:{paddingLeft:21,paddingBottom:10,gap:6},
  metadata:{color:colors.body,fontSize:12,lineHeight:20},
-});
+}));

@@ -24,7 +24,7 @@ test('session metadata controls are durable, recoverable and preserve all conver
   assert.ok(listed.includes(id),'ownerless regular session stays visible');assert.ok(!listed.includes(child.id),'owned child is excluded from regular Sessions');assert.ok(!listed.includes(runtime.library.id),'library stays excluded');
   assert.equal((await request(`/chats/${child.id}`)).status,200,'owned child transcript endpoint remains available');
   await runtime.harness.commit(async tx=>{const page=await tx.scanConversations({ownerConversationId:id},20);assert.ok(page.items.some(c=>c.id===child.id));},ctx);
-  const snapshot=async()=>{const view=await chat.viewState(ctx);try{return{entries:view.value.entries,docs:{'bob.chat':{...(await runtime.harness.snapshot(ChatMeta,id,ctx))!,...await runtime.harness.snapshot(SessionUI,id,ctx)}}};}finally{view.dispose();}};
+  const snapshot=async()=>{const view=await chat.watch(ctx);try{return{entries:view.value.entries,docs:{'bob.chat':{...(await runtime.harness.snapshot(ChatMeta,id,ctx))!,...await runtime.harness.snapshot(SessionUI,id,ctx)}}};}finally{await view.stop();}};
   await chat.commit(tx=>tx.appendEntry(id,{kind:'bob.session-fixture',data:{text:'This original message must survive Trash and reopen.'}}),ctx);
   const before=await snapshot();
   assert.equal(before.docs['bob.chat'].pinned,undefined,'legacy documents need no destructive migration');

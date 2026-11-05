@@ -107,7 +107,7 @@ class BobInteractive(private val context: ReactApplicationContext) : ReactContex
         }.start()
     }
 }
-internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit, private val inline: Boolean = false, private val mountId: String? = null, private val onInlineHeight: ((Int) -> Unit)? = null) : LinearLayout(context) {
+internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit, private val inline: Boolean = false, private val mountId: String? = null, private val onInlineHeight: ((Int) -> Unit)? = null) : LinearLayout(context), BobAppearance.Listener {
     @Volatile private var disposed = false
     private var approval: AlertDialog? = null
     private var session: SurfaceSession? = null
@@ -130,6 +130,15 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
     @Volatile private var dataFetchAllowed = false
     @Volatile private var dataConnection: HttpURLConnection? = null
     private val dataRefresh = Runnable { refreshData() }
+    override fun applyAppearance() {
+        if (disposed) return
+        val colors = BobAppearance.palette(context)
+        web?.let { view ->
+            view.setBackgroundColor(colors.background)
+            // Only the trusted outer host changes. Do not reload or enter the user iframe.
+            view.evaluateJavascript("document.documentElement.style.backgroundColor='${colors.backgroundCss}';document.body.style.backgroundColor='${colors.backgroundCss}';document.body.style.color='${colors.foregroundCss}';", null)
+        }
+    }
     private fun emit(name: String, fill: (WritableMap) -> Unit = {}) {
         val selected = session ?: return
         val reactContext = context as? ThemedReactContext ?: return
@@ -240,7 +249,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         content.setPadding(padding, padding, padding, padding)
         for (action in actions) {
             val caption = TextView(context).apply {
-                useSurfaceTypeface(); textSize = 14f; setTextColor(0xffe8e0d2.toInt())
+                useSurfaceTypeface(); textSize = 14f; BobAppearance.text(this)
                 textDirection = View.TEXT_DIRECTION_LTR
                 text = "Destination: ${action.caption}"
             }
@@ -248,7 +257,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             val button = Button(context).apply {
                 useSurfaceTypeface(); textSize = 16f; isAllCaps = false; text = action.label
                 setSingleLine(false); maxLines = Int.MAX_VALUE; ellipsize = null; setHorizontallyScrolling(false)
-                setTextColor(0xff000000.toInt()); backgroundTintList = android.content.res.ColorStateList.valueOf(0xffe8e0d2.toInt())
+                BobAppearance.button(this)
                 minHeight = (48 * resources.displayMetrics.density).toInt()
                 minimumHeight = minHeight; filterTouchesWhenObscured = true
                 // These immutable values are captured once, never looked up in live data or JS.
@@ -313,11 +322,12 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         if (disposed || session != null) return
         if (inline) ApprovedDiagnostics.record(context, "mount", width, height)
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(0xff000000.toInt())
+        BobAppearance.background(this)
+        BobAppearance.addListener(this)
         clipChildren = true; clipToPadding = true
         if (inline) { isFocusable = false; isFocusableInTouchMode = false }
         val layout = this
-        status = TextView(context).apply { useSurfaceTypeface(); setTextColor(0xffe8e0d2.toInt()); textSize = 14f; setTextIsSelectable(true); visibility = View.GONE }
+        status = TextView(context).apply { useSurfaceTypeface(); BobAppearance.text(this); textSize = 14f; setTextIsSelectable(true); visibility = View.GONE }
         layout.addView(status)
         val actions = try { VisualActions.fromResource(selected.resource) } catch (_: IllegalArgumentException) {
             status.text = "Content unavailable: invalid native actions. Reopen after correcting the visual."
@@ -338,6 +348,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
                     return super.overScrollBy(deltaX, deltaY, scrollX, scrollY, scrollRangeX, scrollRangeY, maxOverScrollX, maxOverScrollY, isTouchEvent)
                 }
             }; web = view
+            view.setBackgroundColor(BobAppearance.palette(context).background)
             view.isVerticalScrollBarEnabled = false; view.isHorizontalScrollBarEnabled = false
             WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
             view.settings.apply {
@@ -350,7 +361,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             CookieManager.getInstance().setAcceptCookie(false)
             CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
             view.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String) { if (!disposed) { pushVisualData(); scheduleData() } }
+                override fun onPageFinished(view: WebView, url: String) { if (!disposed) { applyAppearance(); pushVisualData(); scheduleData() } }
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream("Network access denied".toByteArray()))
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; actionFooter?.visibility = View.GONE; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
@@ -372,7 +383,8 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
             val fontFaceCss = surfaceFontFaces(context)
             val safePayload = payload.toString().replace("<", "\\u003c")
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:#000000;color:#e8e0d2;font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+            val colors = BobAppearance.palette(context)
+            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:${colors.backgroundCss};color:${colors.foregroundCss};font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
 window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }
@@ -381,7 +393,7 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
             approval = AlertDialog.Builder((context as? ThemedReactContext)?.currentActivity ?: context).setTitle("Allow this MCP App's scoped tools?")
                 .setMessage("Only this conversation and configured MCP server are granted. Allowed tools: $names\nThe app can call these tools while open. No ambient host or network access is granted.")
                 .setPositiveButton("Open with these tools") { _, _ -> start() }
-                .setNegativeButton("Cancel") { _, _ -> dispose(); onClose() }.setOnCancelListener { dispose(); onClose() }.show()
+                .setNegativeButton("Cancel") { _, _ -> dispose(); onClose() }.setOnCancelListener { dispose(); onClose() }.show().also { BobAppearance.dialog(it) }
         } else start()
     }
     private fun reply(id: String, value: JSONObject) {
@@ -435,6 +447,7 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
         if (disposed) return
         if (inline) ApprovedDiagnostics.record(context, "dispose", web?.width ?: 0, web?.height ?: 0, lastInlineHeight)
         disposed = true; pauseData()
+        BobAppearance.removeListener(this)
         actionFooter?.visibility = View.GONE; actionFooter = null; actionContent = null
         approval?.setOnCancelListener(null); approval?.dismiss(); approval = null
         web?.removeJavascriptInterface("BobNative"); web?.destroy(); web = null; executor.shutdownNow()
@@ -453,7 +466,7 @@ class BobInteractiveActivity : Activity() {
         super.onCreate(savedInstanceState)
         val selected = SurfaceSessions.pending.remove(intent.getStringExtra("session"))
         if (selected == null) {
-            setContentView(TextView(this).apply { useSurfaceTypeface(); textSize = 13f; text = "Content expired. Return to chat and reopen it." }); return
+            setContentView(TextView(this).apply { BobAppearance.background(this); BobAppearance.text(this); useSurfaceTypeface(); textSize = 13f; text = "Content expired. Return to chat and reopen it." }); return
         }
         val surface = BobSurfacePanel(this, { finish() })
         panel = surface
@@ -490,7 +503,7 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
         val selected = SurfaceSessions.pending.remove(handle) ?: return
         val surface = BobSurfacePanel(host.context, {
             host.removeAllViews()
-            host.addView(TextView(host.context).apply { useSurfaceTypeface(); textSize = 13f; text = "Opening cancelled. Expand to reopen."; setTextColor(0xffa1a1aa.toInt()) })
+            host.addView(TextView(host.context).apply { useSurfaceTypeface(); textSize = 13f; text = "Opening cancelled. Expand to reopen."; BobAppearance.text(this, muted = true) })
         }, true, handle)
         surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
         host.addView(surface, LinearLayout.LayoutParams(-1, -1))

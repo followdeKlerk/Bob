@@ -1,6 +1,6 @@
 {
   "name": "BobMobile",
-  "version": "0.3.120",
+  "version": "0.3.135",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -13,11 +13,13 @@
     "@react-native-async-storage/async-storage": "3.1.1",
     "@react-native/new-app-screen": "0.88.0",
     "@rn-primitives/slot": "1.5.2",
+    "@rn-primitives/tabs": "1.5.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react-native": "1.61.0",
     "nativewind": "4.2.2",
     "react": "19.3.0",
+    "react-dom": "19.3.0",
     "react-native": "0.88.0",
     "react-native-get-random-values": "2.0.0",
     "react-native-keychain": "10.0.0",

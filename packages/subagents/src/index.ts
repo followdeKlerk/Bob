@@ -1,5 +1,6 @@
 // Adapted from official Pi Durable 1.4.0 example 23 (MIT, Earendil Works).
-import { type AssistantMessage, Type } from "@earendil-works/pi-ai";
+import {type AssistantMessage} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {
   AssistantEntry,
   type ConversationId,
@@ -171,17 +172,17 @@ const subagentTool = defineTool({
     "Manage persistent subagents that work in the background. Actions: spawn (name, message), send (name, message; " +
     "followUp: true queues it after the current answer instead of steering), stop (name: aborts its current work), " +
     "status (name, or all subagents without one). Answers are reported back to you when they arrive.",
-  parameters: Type.Object({
-    action: Type.Union([
-      Type.Literal("spawn"),
-      Type.Literal("send"),
-      Type.Literal("stop"),
-      Type.Literal("status"),
+  parameters: schema.obj({
+    action: schema.union([
+      schema.lit("spawn"),
+      schema.lit("send"),
+      schema.lit("stop"),
+      schema.lit("status"),
     ]),
-    name: Type.Optional(Type.String()),
-    message: Type.Optional(Type.String()),
-    followUp: Type.Optional(Type.Boolean()),
-  }),
+    name: schema.opt(schema.str()),
+    message: schema.opt(schema.str()),
+    followUp: schema.opt(schema.bool()),
+  },{open:true}),
   // A call interrupted by a crash is not rerun: repeating `stop` could stop newer work. The model sees that the call
   // was interrupted and can check with `status`.
   replay: "unsafe",

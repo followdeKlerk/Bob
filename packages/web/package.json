@@ -12,13 +12,14 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "playwright": "1.64.1"
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "playwright": "1.64.1",
+    "@earendil-works/pi-schema": "1.5.0"
   },
   "bobExtension": {
     "api": 1,
-    "durable": "1.4.0",
+    "durable": "1.5.0",
     "name": "bob.web",
     "requires": []
   }

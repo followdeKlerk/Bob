@@ -8,21 +8,27 @@ import {ArrowLeft,Check,Plus,Pin,Trash2,X,RefreshCw,Search,Tags} from 'lucide-re
 import {NotesStore,type NotesTransport} from '../notes-store';
 import {formatNote,noteSnippet,toggleNoteTask,type NoteFormat} from '../notes-format';
 import {ChatMarkdown} from './chat-markdown';
-import {colors,menuChrome} from '../theme';
-import {SectionHeading,RoundAction} from './section-ui';
+import {themed,useTheme,useThemedValue} from '../theme';
+import {SectionHeading,RoundAction,SectionAction} from './section-ui';
 import {useKeyboardInset} from '../keyboard-inset';
 import {NoteValue,type NoteRecord,type CategoryRecord} from '../../../src/notes-contracts';
 type Value=ReturnType<typeof NoteValue.parse>;
 type Draft=Value&{id?:string;baseRevision:number};
 const empty=():Draft=>({title:'',body:'',categoryIds:[],pinned:false,trashed:false,color:'neutral',baseRevision:0});
 // Preserve stored color IDs while presenting neutral shades. No note data is rewritten.
-const palette={neutral:colors.surface,sage:'#303030',sand:'#383838',blue:'#202020',rose:'#444444'};
+const paletteTheme=themed(({noteShades})=>noteShades);
 const shadeLabels={neutral:'Standard gray',sage:'Medium gray',sand:'Light gray',blue:'Dark gray',rose:'Lightest gray'};
 const valueOf=(note:Value):Value=>({title:note.title,body:note.body,categoryIds:note.categoryIds,pinned:note.pinned,trashed:note.trashed,color:note.color});
 function Action({label,text=label,onPress,disabled=false,primary=false}:{label:string;text?:string;onPress:()=>void;disabled?:boolean;primary?:boolean}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.action,disabled&&{opacity:0.4}]}><View style={[s.actionSurface,primary&&s.primary]}><Text style={[s.actionText,primary&&{color:colors.onAccent}]}>{text}</Text></View></Pressable>;
 }
 function NotesPreview({body,onToggle}:{body:string;onToggle:(line:number)=>void}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const blocks:React.ReactNode[]=[];let text:string[]=[],fence:string|undefined;
  const flush=(key:number)=>{if(text.length){blocks.push(<ChatMarkdown key={`text-${key}`} text={text.join('\n')}/>);text=[];}};
  body.split('\n').forEach((line,index)=>{
@@ -35,7 +41,11 @@ function NotesPreview({body,onToggle}:{body:string;onToggle:(line:number)=>void}
   blocks.push(<Pressable key={`task-${index}`} accessibilityRole="checkbox" accessibilityLabel={task[2]||'Checklist item'} accessibilityState={{checked}} onPress={()=>onToggle(index)} style={s.task}><View style={[s.check,checked&&{backgroundColor:colors.accent}]}>{checked&&<Check size={16} color={colors.onAccent}/>}</View><Text style={[s.body,checked&&{textDecorationLine:'line-through',color:colors.muted}]}>{task[2]}</Text></Pressable>);
  });flush(-1);return <View style={{gap:8}}>{blocks}</View>;
 }
-export function NotesScreen({backendId,request,visible,topInset}:{backendId:string;request:NotesTransport;visible:boolean;topInset:number;onBack?:()=>void}){
+export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:React.ReactNode;backendId:string;request:NotesTransport;visible:boolean;topInset:number;onBack?:()=>void}){
+ const {colors}=useTheme();
+ const palette=useThemedValue(paletteTheme);
+ const s=useThemedValue(sTheme);
+
  const requestRef=useRef(request);requestRef.current=request;
  const store=useMemo(()=>new NotesStore(backendId,(...args)=>requestRef.current(...args)),[backendId]);
  const [,refresh]=useState(0);
@@ -85,7 +95,7 @@ export function NotesScreen({backendId,request,visible,topInset}:{backendId:stri
  };
  if(!visible)return null;
  return <View testID="notes-screen" style={[StyleSheet.absoluteFill,s.screen,{paddingTop:topInset,zIndex:25}]}>
-  <SectionHeading title="Notes"><RoundAction label="Categories" icon={Tags} onPress={()=>setManaging(true)} disabled={!store.ready}/><RoundAction label="Sync notes" icon={RefreshCw} onPress={()=>void store.sync()} disabled={store.syncing||!store.ready}/><RoundAction label="Create note" icon={Plus} disabled={!store.ready||!editorReady} onPress={()=>open()} primary/></SectionHeading>
+  <SectionHeading menu={menu} title="Notes"><RoundAction label="Categories" icon={Tags} onPress={()=>setManaging(true)} disabled={!store.ready}/><RoundAction label="Sync notes" icon={RefreshCw} onPress={()=>void store.sync()} disabled={store.syncing||!store.ready}/><RoundAction label="Create note" icon={Plus} disabled={!store.ready||!editorReady} onPress={()=>open()} primary/></SectionHeading>
   <FlatList key={columns===2?'grid':'list'} data={notes} numColumns={columns} keyExtractor={note=>note.id} contentContainerStyle={{paddingHorizontal:20,paddingBottom:28,gap:12}} columnWrapperStyle={columns===2?{gap:12}:undefined} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
    ListHeaderComponent={<View style={{gap:12,marginBottom:4}}>
     <View style={s.search}><Search size={20} color={colors.muted}/><TextInput accessibilityLabel="Search notes" placeholder="Search notes" placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={s.searchInput}/></View>
@@ -104,7 +114,7 @@ export function NotesScreen({backendId,request,visible,topInset}:{backendId:stri
     <View style={s.cardActions}><Pressable accessibilityRole="button" accessibilityLabel={`${item.pinned?'Unpin':'Pin'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),pinned:!item.pinned},item.id))} style={s.icon}><Pin size={18} color={item.pinned?colors.accent:colors.muted}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${item.trashed?'Restore':'Trash'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),trashed:!item.trashed},item.id))} style={s.icon}>{item.trashed?<ArrowLeft size={18} color={colors.muted}/>:<Trash2 size={18} color={colors.muted}/>}</Pressable></View>
    </View>}/>
   {editing&&draft&&<Modal visible animationType="slide" onRequestClose={closeEditor}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:keyboard}]}>
-   <View style={s.heading}><RoundAction label="Save note and go back" disabled={saving} onPress={closeEditor} icon={ArrowLeft}/><Text style={[s.title,{fontSize:18}]}>{draft.id?'Edit note':'New note'}</Text><Action label={saving?'Saving note…':'Save note'} primary disabled={saving||(!draft.title.trim()&&!draft.body.trim())} onPress={()=>void save()}/></View>
+   <SectionHeading title={draft.id?'Edit note':'New note'} leading={<RoundAction label="Save note and go back" disabled={saving} onPress={closeEditor} icon={ArrowLeft}/>}><SectionAction label={saving?'Saving note…':'Save note'} primary busy={saving} disabled={saving||(!draft.title.trim()&&!draft.body.trim())} onPress={()=>void save()}/></SectionHeading>
    <ScrollView keyboardShouldPersistTaps="handled" pointerEvents={saving?'none':'auto'} contentContainerStyle={{padding:16,gap:16}}>
     <TextInput accessibilityLabel="Note title" editable={!saving} placeholder="Title" placeholderTextColor={colors.muted} value={draft.title} maxLength={200} onChangeText={title=>setDraft({...draft,title})} style={[s.input,{fontSize:22,fontWeight:'600'}]}/>
     <View style={s.wrap}>{(['bold','italic','heading','bullet','checklist'] as const).map(kind=><Action key={kind} label={{bold:'Bold',italic:'Italic',heading:'Heading',bullet:'Bullet list',checklist:'Checklist'}[kind]} disabled={preview} onPress={()=>format(kind)}/>)}<Action label={preview?'Edit text':'Preview note'} onPress={()=>setPreview(value=>!value)}/></View>
@@ -115,7 +125,7 @@ export function NotesScreen({backendId,request,visible,topInset}:{backendId:stri
     <Action label="Discard unsaved draft" onPress={()=>Alert.alert('Discard unsaved changes?','Saved notes and server copies are not deleted.',[{text:'Keep editing',style:'cancel'},{text:'Discard draft',style:'destructive',onPress:()=>{setEditing(false);setDraft(undefined);}}])}/>
    </ScrollView>
   </SafeAreaView></Modal>}
-  {managing&&<Modal visible animationType="slide" onRequestClose={()=>setManaging(false)}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:keyboard}]}><SectionHeading title="Categories"><RoundAction label="Close categories" onPress={()=>setManaging(false)} icon={X}/></SectionHeading><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:12}}>
+  {managing&&<Modal visible animationType="slide" onRequestClose={()=>setManaging(false)}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:keyboard}]}><SectionHeading title="Categories" leading={<RoundAction label="Close categories" onPress={()=>setManaging(false)} icon={X}/>}/><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:12}}>
    <TextInput accessibilityLabel="Category name" editable={!savingCategory} placeholder="Category name" placeholderTextColor={colors.muted} maxLength={60} value={categoryForm.name} onChangeText={name=>setCategoryForm({...categoryForm,name})} style={s.input}/>
    <Action label={categoryForm.id?'Save category name':'Create category'} primary disabled={savingCategory||!categoryForm.name.trim()} onPress={()=>invoke(async()=>{if(categorySaving.current)return;categorySaving.current=true;setSavingCategory(true);try{const id=categoryForm.id??uuid();setCategoryForm({...categoryForm,id});await store.saveCategory({name:categoryForm.name.trim(),deleted:false},id,categoryForm.revision);setCategoryForm({name:''});}finally{categorySaving.current=false;setSavingCategory(false);}})}/>
    {categoryForm.id&&<Action label="Cancel category rename" onPress={()=>setCategoryForm({name:''})}/>}
@@ -123,4 +133,4 @@ export function NotesScreen({backendId,request,visible,topInset}:{backendId:stri
   </ScrollView></SafeAreaView></Modal>}
  </View>;
 }
-const s=StyleSheet.create({search:{...menuChrome.input,flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:14},searchInput:{flex:1,color:colors.foreground,fontSize:15,minHeight:52,paddingVertical:12},screen:{backgroundColor:colors.background},heading:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:12,paddingHorizontal:20,paddingTop:20,paddingBottom:16},title:{flex:1,minWidth:80,color:colors.foreground,fontSize:27,fontWeight:'600'},icon:{...menuChrome.control,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},input:{...menuChrome.input,color:colors.foreground,padding:14,fontSize:16},action:{minHeight:48,justifyContent:'center'},actionSurface:{...menuChrome.control,minHeight:48,paddingHorizontal:12,paddingVertical:8,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent,borderColor:colors.accent},actionText:{color:colors.foreground,fontSize:13,fontWeight:'500'},chip:{...menuChrome.control,minHeight:48,paddingHorizontal:14,paddingVertical:10,justifyContent:'center'},selected:{...menuChrome.selected},swatchSelected:{borderColor:colors.accent,borderWidth:2},small:{color:colors.foreground,fontSize:13},status:{color:colors.muted,fontSize:12,lineHeight:20},body:{color:colors.body,fontSize:16,lineHeight:26,flexShrink:1},card:{...menuChrome.card,overflow:'hidden'},cardActions:{flexDirection:'row',justifyContent:'flex-end',gap:8,paddingHorizontal:12,paddingBottom:12},noteTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground},snippet:{fontSize:13,lineHeight:22,color:colors.body},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:15,fontWeight:'500'},color:{height:48,width:48,borderRadius:24,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:colors.border},task:{minHeight:48,flexDirection:'row',alignItems:'center',gap:12},check:{width:24,height:24,borderRadius:5,borderWidth:1,borderColor:colors.accent,alignItems:'center',justifyContent:'center'}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({search:{...menuChrome.input,flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:14},searchInput:{flex:1,color:colors.foreground,fontSize:15,minHeight:52,paddingVertical:12},screen:{backgroundColor:colors.background},icon:{...menuChrome.control,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},input:{...menuChrome.input,color:colors.foreground,padding:14,fontSize:16},action:{minHeight:48,justifyContent:'center'},actionSurface:{...menuChrome.control,minHeight:48,paddingHorizontal:12,paddingVertical:8,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent,borderColor:colors.accent},actionText:{color:colors.foreground,fontSize:13,fontWeight:'500'},chip:{...menuChrome.control,minHeight:48,paddingHorizontal:14,paddingVertical:10,justifyContent:'center'},selected:{...menuChrome.selected},swatchSelected:{borderColor:colors.accent,borderWidth:2},small:{color:colors.foreground,fontSize:13},status:{color:colors.muted,fontSize:12,lineHeight:20},body:{color:colors.body,fontSize:16,lineHeight:26,flexShrink:1},card:{...menuChrome.card,overflow:'hidden'},cardActions:{flexDirection:'row',justifyContent:'flex-end',gap:8,paddingHorizontal:12,paddingBottom:12},noteTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground},snippet:{fontSize:13,lineHeight:22,color:colors.body},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:15,fontWeight:'500'},color:{height:48,width:48,borderRadius:24,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:colors.border},task:{minHeight:48,flexDirection:'row',alignItems:'center',gap:12},check:{width:24,height:24,borderRadius:5,borderWidth:1,borderColor:colors.accent,alignItems:'center',justifyContent:'center'}}));

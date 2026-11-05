@@ -3,6 +3,8 @@ import {displayContext,INLINE_VISUAL_EMERGENCY_HEIGHT} from './display-context.j
 import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
+import {createConversationProjection} from './conversation-projection.js';
+import {mobileTranscriptEntries} from './mobile-transcript.js';
 import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
 import {setTimeout as locationDelay} from 'node:timers/promises';
 import {bindLocationDevice,locationAvailability,pollLocations,pendingLocations,respondLocation} from './phone-location.js';
@@ -20,7 +22,7 @@ import { isAbsolute } from "node:path";
 import { once } from "node:events";
 import { z } from "zod";
 import {getSupportedThinkingLevels} from "@earendil-works/pi-ai/models";
-import type { ConversationId, Cursor, TaskId, EntryRecord } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, Cursor, TaskId, ConversationView } from "@earendil-works/pi-durable";
 import {LiveDoc} from '@earendil-works/pi-durable';
 import {setProviderKey} from './provider-auth.js';
 import { State } from "./state.js";
@@ -103,19 +105,18 @@ export async function serve(
   let activeNotes=0;
   // Upstream ConversationView deliberately contains BUILT-IN docs only.
   // Add Bob's native document snapshots explicitly; never assume watch exposes them.
-  async function present(value: unknown, id: ConversationId, deviceId: string) {
-    const view = value as { entries:EntryRecord[]; docs: Record<string, unknown> };
+  async function present(view: Omit<ConversationView, 'before'>, id: ConversationId, deviceId: string) {
     const [meta, todos, questions, subagents, inspection, questionChoices] = await Promise.all([
       h.snapshot(ChatMeta, id, ctx), h.snapshot(Todos, id, ctx),
       h.snapshot(Questions, id, ctx), h.snapshot(Subagents, id, ctx),
       h.inspect(ctx), h.snapshot(QuestionChoices,id,ctx),
     ]);
-    const work=inspection.tasks.filter(t=>t.record.conversationId===id).map(t=>NativeWork.parse({id:t.record.id,kind:t.record.kind,background:t.record.background,abortRequested:t.record.abortRequested,state:t.state.kind}));
+    const work=inspection.tasks.filter(t=>t.record.conversationId===id).map(t=>NativeWork.parse({id:t.record.id,kind:t.record.kind,background:t.record.background,abortRequested:t.record.abortRequested,state:t.state.kind==='pending'?'ready':t.state.kind}));
     const agents=Object.fromEntries(await Promise.all(Object.entries(subagents?.agents??{}).map(async([name,agent])=>{
       const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
     })));
-    return { ...view, entries:await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents)), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:mobileTranscriptEntries(await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -218,7 +219,7 @@ export async function serve(
         return send(res, 200, {
           protocol,
           backendId: state.id,
-          durable: "1.4.0",
+          durable: "1.5.0",
           connectedAgents: {version:1,automaticHistory:true,automaticLinking:true,replyDelivery:"durable"},
           providerReady: (await runtime.models.getAvailable()).length > 0,
           inspection: await h.inspect(ctx),
@@ -398,11 +399,11 @@ export async function serve(
           return send(res,200,{id,meta,deleted:true,recoverable:true});
         }
         if (action === "" && req.method === "GET") {
-          const view = await chat.viewState(ctx);
+          const view = await chat.watch(ctx);
           try {
-            return send(res, 200, { backendId: state.id, view: await present(view.value, id, String(state.authenticate(token)!.id)) });
+            return send(res, 200, { backendId: state.id, view: await present(await createConversationProjection(chat, ctx)(view.value), id, String(state.authenticate(token)!.id)) });
           } finally {
-            view.dispose();
+            await view.stop();
           }
         }
         if (action === "ui" && req.method === "GET") return send(res, 200, await runtime.interactive.list(h, chat));
@@ -436,12 +437,20 @@ export async function serve(
           return;
         }
         if (action === "history" && req.method === "GET") {
+          // Exact originals are opt-in, never part of automatic phone hydration.
+          if(url.searchParams.has('entryId')){
+            const entryId=z.coerce.number().int().positive().safe().parse(url.searchParams.get('entryId')) as EntryId;
+            const page=await chat.entries({minEntryId:entryId,maxEntryId:entryId},1,undefined,ctx);
+            const entry=page.items.find(item=>item.id===entryId);
+            if(!entry)throw new HttpError(404,'Entry not found in this conversation');
+            return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entry',entry});
+          }
           const resource=`history:${id}`,cursor=decodeCursor(state,resource,url.searchParams.get('cursor'));
           const query=(url.searchParams.get('query')??'').trim().slice(0,160),limit=Math.min(Math.max(Number(url.searchParams.get('limit')??100)||100,1),100);
           const page=await chat.entries({order:'descending'},limit,cursor,ctx);
           let items=await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,page.items));
           if(query){const terms=query.toLocaleLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
-          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items,next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
+          return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:mobileTranscriptEntries(items),next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
         }
         if (action === "configure" && req.method === "GET") {
           const agent = await chat.agent(ctx);
@@ -537,7 +546,9 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
         }
         if (action === "events" && req.method === "GET") {
           const watch = await chat.watch(ctx);
+          const project = createConversationProjection(chat, ctx);
           let ended = false;
+          let emitting = Promise.resolve();
           res.writeHead(200, {
             "content-type": "text/event-stream",
             "cache-control": "no-store",
@@ -545,32 +556,30 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
           });
           streams.add(res);
           // Reattach always sends authoritative snapshot; Last-Event-ID is not a mutation retry.
-          const emit = async (value: unknown) => {
-            if (ended) return;
-            if (!state.authenticate(token)) {
-              res.end();
-              return;
-            }
-            if (
-              !res.write(
-                `event: snapshot\ndata: ${JSON.stringify({
-                  backendId: state.id,
-                  conversationId: id,
-                  view: await present(value, id, String(state.authenticate(token)!.id)),
-                })}\n\n`
-              )
-            )
-              await Promise.race([once(res, "drain"), once(res, "close")]);
+          // Native watch delivery is serialized, but our periodic Bob-doc refresh
+          // is not part of that watch. Put *all* projection/presentation/writes on
+          // the same line so a slow older refresh cannot overwrite a newer value.
+          const emit = (value: ConversationView) => {
+            emitting = emitting.then(async () => {
+              if (ended) return;
+              const device = state.authenticate(token);
+              if (!device) { res.end(); return; }
+              const view = await present(await project(value), id, String(device.id));
+              if (ended || res.destroyed) return;
+              if (!state.authenticate(token)) { res.end(); return; }
+              if (!res.write(`event: snapshot\ndata: ${JSON.stringify({
+                backendId: state.id, conversationId: id, view,
+              })}\n\n`))
+                await Promise.race([once(res, "drain"), once(res, "close")]);
+            });
+            return emitting;
           };
           let refreshing = false;
           const timer = setInterval(() => {
             if (!state.authenticate(token)) { res.end(); return; }
             if (refreshing || ended) return;
             refreshing = true;
-            void (async () => {
-              const current = await chat.viewState(ctx);
-              try { await emit(current.value); } finally { current.dispose(); }
-            })().catch(() => res.end()).finally(() => { refreshing = false; });
+            void emit(watch.value).catch(() => res.end()).finally(() => { refreshing = false; });
           }, 3000);
           res.on("close", () => {
             ended = true;
@@ -579,7 +588,9 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
             void watch.stop();
           });
           await emit(watch.value);
-          watch.start(emit);
+          if (ended) return;
+          watch.start(async call=>{if(call.kind==='value')await emit(call.value);});
+          void watch.closed.then(()=>{if(!ended)res.end();});
           return;
         }
       }

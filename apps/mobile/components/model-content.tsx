@@ -8,9 +8,11 @@ import {ToolContent} from './tool-content';
 import {replyText} from '../reply-text';
 import {CHAT_CONTENT_GAP} from '../tool-presentation';
 import type {LinkedResult} from '../tool-results';
-import {colors} from '../theme';
+import {useTheme} from '../theme';
 type Group={kind:'text';text:string;key:number}|{kind:'block';block:any;key:number};
 function Content({value,results,showTools=true,quietTools=false,speakable=true}:{value:unknown;results?:Map<string,LinkedResult>;showTools?:boolean;quietTools?:boolean;speakable?:boolean}){
+ const {colors}=useTheme();
+
  const groups:Group[]=[];
  const blocks=Array.isArray(value)?value:[{type:'text',text:replyText(value)}];
  for(const [index,block] of blocks.entries()){

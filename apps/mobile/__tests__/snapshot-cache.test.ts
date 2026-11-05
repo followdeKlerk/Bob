@@ -36,3 +36,18 @@ test('passive receipt rows advance and retry while unchanged cells and heartbeat
   previous=updated;
  }
 });
+
+test('slim server image presentation replaces a same-ID legacy cache once, then preserves heartbeat identity',()=>{
+ const legacy={id:1,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'read-image',content:[{type:'image',data:'A'.repeat(3170000),mimeType:'image/png'}]}]};
+ const unchanged={id:2,kind:'pi.assistant',data:{text:'Preserved reply'}};
+ const previous={entries:[legacy,unchanged],docs:{}};
+ const projected={...legacy,mobilePresentation:{version:1,omittedToolImages:true,originalEntryId:1},model:[{role:'toolResult',toolCallId:'read-image',content:[{type:'text',text:'Image bytes omitted; original retained in stored history.'}]}]};
+ const next={entries:[projected,JSON.parse(JSON.stringify(unchanged))],docs:{}};
+ const current=reuseSnapshotEntries(previous,next);
+ expect(current.entries[0]).toBe(projected);expect(current.entries[1]).toBe(unchanged);
+ expect(reuseSnapshotEntries(current,JSON.parse(JSON.stringify(current)))).toBe(current);
+ const restored=reuseSnapshotEntries(current,previous);expect(restored.entries[0]).toBe(legacy);
+ const revised={...projected,mobilePresentation:{...projected.mobilePresentation,version:2}};
+ expect(reuseSnapshotEntries(current,{...next,entries:[revised,unchanged]}).entries[0]).toBe(revised);
+ expect(legacy.model[0].content[0].data).toHaveLength(3170000);
+});

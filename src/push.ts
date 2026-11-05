@@ -206,17 +206,18 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
   events.set(key,event);if(events.size>RECENT_LIMIT)events.delete(events.keys().next().value!);
   scheduleEvents();
  }
- const unsubscribe=config?harness.subscribeCommits(publication=>{
+ const observation=config?harness.observeCommits({advance:publication=>{
   if(closed)return;
   for(const change of publication.changes){
    if(change.type==='submission'&&change.value.type==='input'&&['done','unanswered'].includes(change.value.status))enqueue(`submission:${change.value.id}`,{kind:'submission',value:change.value});
    else if(change.type==='entry'&&change.value.kind==='bob.schedule-alert')enqueue(`schedule:${change.value.id}`,{kind:'schedule',conversationId:change.value.conversationId,id:change.value.id});
-   else if(change.type==='document'&&change.record.kind==='bob.questions'&&change.conversationId){
+   else if(change.type==='document'&&change.kind==='change'&&change.record.kind==='bob.questions'&&change.conversationId){
     const pending=change.value?.pending;
     if(pending&&typeof pending==='object'&&!Array.isArray(pending)&&typeof pending.id==='string')enqueue(`question:${change.conversationId}:${digest(pending.id)}`,{kind:'question',conversationId:change.conversationId,id:pending.id});
    }
   }
- }):()=>{};
+ },end:()=>{}}):undefined;
+ const unsubscribe=()=>observation?.detach();
  if(config){trim();save();wake();}
  return {
   enabled:!!config,

@@ -3,13 +3,16 @@ import {AccessibilityInfo,AppState,Pressable,StyleSheet,ToastAndroid,View} from 
 import Svg,{Path} from 'react-native-svg';
 import Animated,{cancelAnimation,Easing,ReduceMotion,useAnimatedProps,useSharedValue,withSpring,withTiming} from 'react-native-reanimated';
 import {TabGlyph,type TabGlyphName} from './tab-glyph';
-import {colors} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 import {Text} from './app-text';
 import {FLUID_TAB_HEIGHT,fluidTabPath} from '../fluid-tabs';
 export type BottomDestination=TabGlyphName;
 const tabs=[{id:'Notes'},{id:'Workstations'},{id:'Chat'},{id:'Agents'},{id:'Sessions'},{id:'Settings'}] as const;
 const AnimatedPath=Animated.createAnimatedComponent(Path);
 export function BottomTabs({selected,onSelect,onHeight,activeAgentCount=0}:{selected:string;onSelect:(tab:BottomDestination)=>void;onHeight?:(height:number)=>void;activeAgentCount?:number}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const count=Number.isSafeInteger(activeAgentCount)&&activeAgentCount>0?activeAgentCount:0;
  const index=Math.max(0,tabs.findIndex(tab=>tab.id===selected));
  const [width,setWidth]=useState(0),[active,setActive]=useState(AppState.currentState==='active');
@@ -40,7 +43,7 @@ export function BottomTabs({selected,onSelect,onHeight,activeAgentCount=0}:{sele
   {width>0&&<View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={StyleSheet.absoluteFill}>
    <Svg width={width} height={FLUID_TAB_HEIGHT}>
     <AnimatedPath testID="fluid-tab-surface" animatedProps={surfaceProps} fill={colors.background}/>
-    {tabs.map(({id},i)=><TabGlyph key={id} name={id} x={width*(i+.5)/tabs.length-12} y={15} color={id===selected?colors.foreground:'#111111'}/>)}
+    {tabs.map(({id},i)=><TabGlyph key={id} name={id} x={width*(i+.5)/tabs.length-12} y={15} color={id===selected?colors.foreground:colors.navigationInk}/>)}
    </Svg>
   </View>}
   {tabs.map(({id})=><Pressable key={id} accessibilityRole="tab" accessibilityLabel={id} accessibilityValue={id==='Agents'?{text:`${count} active ${count===1?'agent':'agents'}`}:undefined} accessibilityState={{selected:selected===id}} onPress={()=>onSelect(id)} onLongPress={()=>ToastAndroid.show(id,ToastAndroid.SHORT)} style={s.tab}>
@@ -49,4 +52,4 @@ export function BottomTabs({selected,onSelect,onHeight,activeAgentCount=0}:{sele
   </View>
  </View>;
 }
-const s=StyleSheet.create({bar:{width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.navigationSurface},icons:{width:'100%',flexDirection:'row',height:FLUID_TAB_HEIGHT},tab:{flex:1,minHeight:48,height:FLUID_TAB_HEIGHT},badge:{position:'absolute',top:7,left:'50%',marginLeft:4,minWidth:18,minHeight:18,paddingHorizontal:4,paddingVertical:1,borderRadius:12,borderWidth:1,borderColor:colors.foreground,backgroundColor:colors.selectedSurface,alignItems:'center',justifyContent:'center'},badgeText:{color:colors.foreground,fontSize:11,lineHeight:14,fontWeight:'700',fontVariant:['tabular-nums']}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({bar:{width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.navigationSurface},icons:{width:'100%',flexDirection:'row',height:FLUID_TAB_HEIGHT},tab:{flex:1,minHeight:48,height:FLUID_TAB_HEIGHT},badge:{position:'absolute',top:7,left:'50%',marginLeft:4,minWidth:18,minHeight:18,paddingHorizontal:4,paddingVertical:1,borderRadius:12,borderWidth:1,borderColor:colors.foreground,backgroundColor:colors.selectedSurface,alignItems:'center',justifyContent:'center'},badgeText:{color:colors.foreground,fontSize:11,lineHeight:14,fontWeight:'700',fontVariant:['tabular-nums']}}));

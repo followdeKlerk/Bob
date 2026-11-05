@@ -1,10 +1,12 @@
 import {Text} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
 import {Pressable,ScrollView,StyleSheet,View} from 'react-native';
-import {colors,menuChrome} from '../theme';
+import {themed,useThemedValue} from '../theme';
 import {filterSkills,pickerEntries,type PickerEntry} from '../skill-picker';
 
 export function SkillPicker({scope,query,loadLibrary,bottom,maxHeight,onSelect,onDismiss}:{scope:string;query:string;loadLibrary:()=>Promise<unknown>;bottom:number;maxHeight:number;onSelect:(entry:PickerEntry)=>void;onDismiss:()=>void}){
+ const s=useThemedValue(sTheme);
+
  const loader=useRef(loadLibrary);loader.current=loadLibrary;
  const [state,setState]=useState<{scope:string;entries?:PickerEntry[];error?:boolean}>({scope});
  const [retry,setRetry]=useState(0);
@@ -25,4 +27,4 @@ export function SkillPicker({scope,query,loadLibrary,bottom,maxHeight,onSelect,o
   </ScrollView>
  </View>;
 }
-const s=StyleSheet.create({popup:{...menuChrome.card,position:'absolute',left:12,right:12,zIndex:24,elevation:12,overflow:'hidden'},content:{padding:8},heading:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingLeft:12},title:{fontSize:16,fontWeight:'600',color:colors.foreground,flexShrink:1},dismiss:{minHeight:48,paddingHorizontal:12,justifyContent:'center'},dismissText:{fontSize:15,color:colors.accent},message:{padding:12,fontSize:15,color:colors.muted},row:{minHeight:58,padding:12,borderTopWidth:1,borderColor:colors.border,gap:4},name:{fontSize:16,color:colors.foreground,fontWeight:'500'},description:{fontSize:14,lineHeight:21,color:colors.muted},disabled:{opacity:0.55}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({popup:{...menuChrome.card,position:'absolute',left:12,right:12,zIndex:24,elevation:12,overflow:'hidden'},content:{padding:8},heading:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingLeft:12},title:{fontSize:16,fontWeight:'600',color:colors.foreground,flexShrink:1},dismiss:{minHeight:48,paddingHorizontal:12,justifyContent:'center'},dismissText:{fontSize:15,color:colors.accent},message:{padding:12,fontSize:15,color:colors.muted},row:{minHeight:58,padding:12,borderTopWidth:1,borderColor:colors.border,gap:4},name:{fontSize:16,color:colors.foreground,fontWeight:'500'},description:{fontSize:14,lineHeight:21,color:colors.muted},disabled:{opacity:0.55}}));

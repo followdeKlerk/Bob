@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {defineExtension,defineTask,defineTool} from '@earendil-works/pi-durable';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {Interactive} from '@bob-local/interactive';
 import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
@@ -62,7 +62,7 @@ test('surface publication receipt is atomic/idempotent and ignores absent, wrong
   await c.commit(async tx=>{const doc=await tx.doc(Interactive,c.id);doc.apps.own={id:'own',kind:'visual',title:'Own',html:'<p>Own</p>',allowedTools:[]};doc.apps.wrong={id:'wrong',kind:'mcp',title:'Wrong kind',html:'<p>Wrong</p>',allowedTools:[]};},ctx);
   await other.commit(async tx=>{(await tx.doc(Interactive,other.id)).apps.foreign={id:'foreign',kind:'visual',title:'Foreign',html:'<p>Foreign</p>',allowedTools:[]};},ctx);
   let appId='foreign';
-  const original=defineTool({name:'render_visual',description:'Receipt boundary only',parameters:Type.Object({}),execute:async()=>({output:[],details:{appId}})});
+  const original=defineTool({name:'render_visual',description:'Receipt boundary only',parameters:schema.obj({},{open:true}),execute:async()=>({output:[],details:{appId}})});
   const wrapper=nestedSurfaceWraps(defineExtension({name:'receipt-fixture',tools:[original]}))[0] as any;
   const wrapped=wrapper.wrap(original),api={taskId,conversationId:c.id,commit:c.commit.bind(c),getTask:async()=>({input:{kind:'nested',parentCallId:'native-parent-call'}})};
   for(const id of ['foreign','missing','wrong']){appId=id;await wrapped.execute({},api,ctx);}

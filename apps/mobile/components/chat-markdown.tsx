@@ -3,12 +3,14 @@ import {Text} from './app-text';
 import React,{memo,useMemo,useState} from 'react';
 import {Linking,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import Markdown,{MarkdownIt,type ASTNode,type RenderRules} from 'react-native-markdown-display';
-import {colors} from '../theme';
+import {themed,useThemedValue} from '../theme';
 import {markdownTableWidths,markdownCodeLanguage} from '../markdown-layout';
 import {CopyAction} from './message-actions';
 
 const parser=new MarkdownIt({html:false,linkify:false,typographer:false});
 function CodeBlock({content,info}:{content:string;info?:unknown}) {
+ const layout=useThemedValue(layoutTheme);
+
  return <View testID="markdown-code-block" style={layout.codeBlock}>
   <View style={layout.codeHeader}><Text style={layout.codeLabel}>{markdownCodeLanguage(info)}</Text><CopyAction text={content} label="Copy code"/></View>
   <ScrollView horizontal nestedScrollEnabled directionalLockEnabled showsHorizontalScrollIndicator style={layout.horizontal} contentContainerStyle={layout.codeContent}>
@@ -18,6 +20,9 @@ function CodeBlock({content,info}:{content:string;info?:unknown}) {
 }
 // Native rendering only: never execute code/HTML or load remote images.
 export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
+ const layout=useThemedValue(layoutTheme);
+ const styles=useThemedValue(stylesTheme);
+
  const window=useWindowDimensions(),[measured,setMeasured]=useState(0);
  const width=measured||Math.max(1,window.width-48);
  const rules=useMemo<RenderRules>(()=>{
@@ -57,7 +62,7 @@ export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
    th:(node,children,parents)=>cell(node,children,parents,true),
    td:(node,children,parents)=>cell(node,children,parents,false),
   };
- },[width,window.fontScale]);
+ },[width,window.fontScale,layout,styles]);
  return <View testID="markdown-content" style={layout.root} onLayout={event=>{const next=event.nativeEvent.layout.width;if(Number.isFinite(next)&&next>0)setMeasured(previous=>Math.abs(previous-next)>.5?next:previous);}}>
   <Markdown markdownit={parser} style={styles} mergeStyle rules={rules} onLinkPress={url=>{
    if(/^https?:\/\//i.test(url))void Linking.openURL(url).catch(()=>{});
@@ -65,7 +70,7 @@ export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
   }}>{text}</Markdown>
  </View>;
 });
-const layout=StyleSheet.create({
+const layoutTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  root:{width:'100%',minWidth:0,alignSelf:'stretch'},
  textGroup:{flexShrink:1},
  horizontal:{width:'100%',flexGrow:0},
@@ -81,8 +86,8 @@ const layout=StyleSheet.create({
  codeLabel:{color:colors.muted,fontSize:11,lineHeight:18,flexShrink:1},
  codeContent:{padding:12},
  codeText:{fontFamily:APP_FONT_FAMILY,fontSize:13,lineHeight:22,color:colors.foreground,flexShrink:0},
-});
-const styles=StyleSheet.create({
+}));
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  body:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:15,lineHeight:25,minWidth:0,width:'100%'},
  text:{color:colors.body},textgroup:{flexShrink:1},
  paragraph:{marginTop:0,marginBottom:10,flexShrink:1},
@@ -100,4 +105,4 @@ const styles=StyleSheet.create({
  th:{fontWeight:'600'},
  bullet_list:{marginBottom:10},ordered_list:{marginBottom:10},
  list_item:{marginBottom:4},bullet_list_icon:{marginLeft:0,marginRight:8},ordered_list_icon:{marginLeft:0,marginRight:8},
-});
+}));

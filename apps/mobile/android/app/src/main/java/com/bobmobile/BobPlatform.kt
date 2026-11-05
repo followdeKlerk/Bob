@@ -54,6 +54,18 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
     }
     override fun getName() = "BobPlatform"
     override fun getConstants(): Map<String, Any> = mapOf("loopbackTesting" to BuildConfig.DEBUG)
+    @ReactMethod fun setAppearance(mode: String, promise: Promise) {
+        if (mode != "light" && mode != "dark" && mode != "system") {
+            promise.reject("appearance", "Appearance must be light, dark, or system"); return
+        }
+        com.facebook.react.bridge.UiThreadUtil.runOnUiThread {
+            try {
+                BobAppearance.set(context, mode)
+                context.currentActivity?.window?.let { BobFullscreen.apply(it) }
+                promise.resolve(null)
+            } catch (e: Exception) { promise.reject("appearance", "Unable to apply appearance", e) }
+        }
+    }
     @ReactMethod fun recordDiagnosticEvent(event: String, promise: Promise) {
         AppDiagnostics.record(context, event)
         promise.resolve(null)

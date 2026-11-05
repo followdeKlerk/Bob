@@ -9,8 +9,8 @@ import type {State} from './state.js';
 import type {Runtime} from './runtime.js';
 import {ctx} from './runtime.js';
 const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),Version=z.string().regex(/^\d+\.\d+\.\d+$/);
-const hostDependencies:Record<string,string>={'@earendil-works/pi-durable':'1.4.0','@earendil-works/pi-ai':'1.4.0','@earendil-works/chord':'1.4.0','@bob-local/core':'0.1.0'};
-const Manifest=z.object({name:z.string().regex(/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/),version:Version,type:z.literal('module'),exports:z.literal('./dist/index.js'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:z.literal('1.4.0'),stateVersion:z.number().int().positive(),name:z.string().min(1).max(100),requires:z.array(Id).max(32)}).strict()});
+const hostDependencies:Record<string,string>={'@earendil-works/pi-durable':'1.5.0','@earendil-works/pi-ai':'1.5.0','@earendil-works/chord':'1.5.0','@bob-local/core':'0.1.0'};
+const Manifest=z.object({name:z.string().regex(/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/),version:Version,type:z.literal('module'),exports:z.literal('./dist/index.js'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:z.literal('1.5.0'),stateVersion:z.number().int().positive(),name:z.string().min(1).max(100),requires:z.array(Id).max(32)}).strict()});
 const RecordSchema=z.object({id:Id,manifest:Manifest,hash:z.string().regex(/^[a-f0-9]{64}$/),files:z.record(z.string(),z.string().regex(/^[a-f0-9]{64}$/))}).strict();
 type PackageRecord=z.infer<typeof RecordSchema>;
 const hash=(value:Buffer|string)=>createHash('sha256').update(value).digest('hex');
@@ -30,7 +30,7 @@ function inspectPackage(directory:string){
  walk(join(root,'package.json'));walk(join(root,'dist'));
  if(!files['dist/index.js'])throw Error('Custom package requires dist/index.js');
  const manifest=Manifest.parse(JSON.parse(readFileSync(join(root,'package.json'),'utf8')));
- if(manifest.dependencies['@earendil-works/pi-durable']!=='1.4.0')throw Error('Declare the exact validated Durable dependency');
+ if(manifest.dependencies['@earendil-works/pi-durable']!=='1.5.0')throw Error('Declare the exact validated Durable dependency');
  for(const [name,version]of Object.entries(manifest.dependencies))if(hostDependencies[name]!==version)throw Error('Unsupported or unvalidated custom dependency: '+name);
  return {manifest,files,hash:hash(JSON.stringify(files))};
 }

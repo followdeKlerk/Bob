@@ -54,7 +54,11 @@ Configure credentials in Bob itself. Replacing a provider API key supersedes its
 4. The external supervisor builds a candidate, checks compatibility, waits for foreground work, backs up before backend activation and verifies readiness. Build failure leaves running code alone; an unhealthy candidate returns to previous compatible code with current data retained.
 5. Verify the returned status/card: **queued**, **built**, **backend active**, **APK ready** and **phone installed** are different outcomes. Android installation requires the owner's approval and in-place signing/version compatibility. Never uninstall to update.
 
+Failed chat-requested jobs are also admitted as `bob.maintenance-result` follow-ups to the original owner conversation through the existing native Durable runtime. This relay is independent of FCM and checks the bounded maintenance journal every two seconds. It baselines historical failures once, persists its observation cursor in control settings, and uses stable native request IDs so admission followed by an interrupted cursor write cannot duplicate model turns. It catches failures recorded while the backend was offline on reopening; successful jobs are not consumed because a later activation/handoff error may change them to failed. No raw log text or credentials are injected, no new owner/delegation authority is granted, and no build is automatically retried. Missing/source-less/owned-worker destinations are not replaced with another conversation. The notification can trigger model usage; native admission does not prove model completion or phone delivery. This feature only operates after its backend code is successfully activated.
+
 `rollback` selects the previous compatible backend code while keeping current data; Android downgrades are separate. Compatibility fences reject storage/task changes that require migration. Review and authorize a migration rather than weaken the fence. Finish edits before building: source changes invalidate a candidate.
+
+The [Pi Durable 1.5 migration gates](PI15-MIGRATION.md) describe the preparatory Pi 1.4 supervisor bridge, exact reviewed transition allowlist and forward-only downgrade barrier. The bridge ships with that allowlist empty: its installation alone does not migrate native state or enable the 1.5 crossing.
 
 ### Scheduled work
 
@@ -84,7 +88,7 @@ Verify on a real phone: foreground suppression; a new notice while locked on Wi-
 
 `backup <new-directory>` / `export <new-directory>` require a stopped runtime and exclusive ownership. The checksummed export includes Durable history/documents/tasks, control configuration, credentials/grants, uploaded artifacts and custom-module packages. Treat it as a private full-state backup.
 
-The editable `core-prompt.md` in the state directory is independent of release packages; preserve it separately when backing up (the fixed backup/export manifest does not include it).
+Only the generic `packages/resources/soul.default.md` template is published. The editable, Git-ignored `soul.md` in each installation’s state directory is independent of release packages; preserve it separately when backing up (the fixed backup/export manifest does not include it). On upgrade, existing `core-prompt.md` contents seed `soul.md` without overwriting either file; `soul.md` then takes precedence and the legacy file remains for older releases. Maintenance transition snapshots include both names when present.
 
 Excluded: Android caches/drafts, external working folders, external TLS/signing material, systemd units, browser binaries, bundled runtime dependencies and external Hindsight data. Reinstall the exact compatible Bob package and provision excluded prerequisites separately.
 
@@ -232,3 +236,7 @@ The scanner is a heuristic and can reject benign descriptions that contain upstr
 Skill mutations atomically record name, action, revision and supporting path when the package changes. Foreground mutations emit a notice only in their owner conversation, not the shared library or task-owned chat. Background workers accumulate details and the review driver emits a compact aggregate after completion/failure/cancellation. Tool-task receipts prevent duplicate mutations and notices after replay/restart; transaction rollback also rolls back notices. Reads, revision conflicts and no-op saves do not claim changes. Legacy worker records without detailed action receipts use a generic “changed” fallback rather than inventing a specific action.
 
 Automatic no-change reviews stay silent; explicit reviews report no saved changes when appropriate. Model-authored review replies remain available in learning status diagnostics but do not author the saved-result notice. Memory proposals remain visibly pending approval, never described as applied. Large skill summaries are bounded at action boundaries with an explicit additional-change count; full structured changes remain in native metadata. This is chat visibility, not a promise of push delivery or on-device display before the Android update is installed.
+
+## Tool-schema library conversion
+
+See [Tool-schema builder conversion](SCHEMA-MIGRATION.md) for the exact same-format compatibility alias, preserved input rules and supervised two-stage deployment. This does not rewrite the Pi 1.5 migration floor or native state.

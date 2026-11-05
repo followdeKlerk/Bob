@@ -1,3 +1,5 @@
+// Decorative SVG motion is tested independently; retain the real transcript and state wiring.
+jest.mock('../components/bob-mascot',()=>({BobMascot:()=>null}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {NativeModules,StyleSheet,Text,Pressable,ScrollView,Linking} from 'react-native';
@@ -6,7 +8,7 @@ import * as Keychain from 'react-native-keychain';
 import App from '../App';
 import {ModelContent} from '../components/model-content';
 import {ToolContent} from '../components/tool-content';
-import {colors} from '../theme';
+import {lightColors as colors} from '../theme';
 
 // Match the App regression's native boundaries; keep the real transcript path.
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
@@ -18,7 +20,7 @@ jest.mock('react-native-svg',()=>new Proxy({},{get:(_,name)=>name==='__esModule'
 jest.mock('react-native-sse',()=>jest.fn(()=>({addEventListener:jest.fn(),close:jest.fn(),open:jest.fn()})));
 jest.mock('uuid',()=>({v4:()=> '5aaee20e-e260-4403-80da-b97ce80664a1'}));
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
-jest.mock('../components/ui/text',()=>({Text:require('react-native').Text}));
+jest.mock('../components/ui/text',()=>({Text:require('react-native').Text,TextClassContext:require('react').createContext(undefined)}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
 jest.mock('react-native-keychain',()=>({getGenericPassword:jest.fn(async()=>false)}));
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),removeItem:jest.fn(async(key:string)=>{values.delete(key);}),getMany:jest.fn(async(keys:string[])=>Object.fromEntries(keys.map(key=>[key,values.get(key)??null]))),setMany:jest.fn(async(items:Record<string,string>)=>{for(const [key,value] of Object.entries(items))values.set(key,value);}),removeMany:jest.fn(async(keys:string[])=>{for(const key of keys)values.delete(key);}),clear:jest.fn(async()=>values.clear())};});

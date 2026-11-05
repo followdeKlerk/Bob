@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createModels} from '@earendil-works/pi-ai/models';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {AgentDoc,defineExtension,defineTool,type Conversation} from '@earendil-works/pi-durable';
 import {CodemodeStoreDoc,createCodemodeExtension} from '@earendil-works/pi-durable/codemode';
@@ -123,13 +123,14 @@ test('existing coding selections gain codemode without rewriting tools/modelTool
  }finally{await rt.close();f.close();}
 });
 
-test('official response mechanics: nested image read is text-only, explicit image output reaches model, and failures remain errors',{timeout:20000},async()=>{
+test('official response mechanics: structured nested image reads reach the model through image(), text stays text, and failures remain errors',{timeout:20000},async()=>{
  const f=fixture(),rt=await openRuntime(f.state,f.models);
  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
  try{
   const c=await chat(rt);writeFileSync(join(f.dir,'pixel.png'),Buffer.from(png,'base64'));
-  const result=await execute(f,c,`text({nestedImage:await tools.read({path:'pixel.png'})});image({type:'image',mimeType:'image/png',data:${JSON.stringify(png)}});`);
-  assert.equal(result.isError,false,text(result));assert.match(text(result),/"nestedImage":""/);
+  writeFileSync(join(f.dir,'plain.txt'),'structured read text');
+  const result=await execute(f,c,`text({text:await tools.read({path:'plain.txt'})});const block=await tools.read({path:'pixel.png'});text({kind:block.type,mime:block.mimeType});image(block);`);
+  assert.equal(result.isError,false,text(result));assert.match(text(result),/"text":"structured read text"/);assert.match(text(result),/"kind":"image","mime":"image\/png"/);assert.ok(!text(result).includes(png));
   assert.ok(result.content.some(b=>b.type==='image'&&b.data===png));
   const paths=text(result).match(/\/[^\s\]]+\.png/g)??[];
   assert.ok(paths.length);for(const path of paths){assert.deepEqual(readFileSync(path),Buffer.from(png,'base64'));rmSync(join(path,'..'),{recursive:true,force:true});}
@@ -154,7 +155,7 @@ test('runtime startup failure and cleanup failure both close sandbox and release
 });
 
 function gateExtension(onEnter:()=>void,wait:boolean){
- return defineExtension({name:'codemode-test-gate',tools:[defineTool({name:'codemode_test_gate',description:'Deterministic recovery boundary',parameters:Type.Object({}),replay:'safe',execute:async(_args,_api,context)=>{
+ return defineExtension({name:'codemode-test-gate',tools:[defineTool({name:'codemode_test_gate',description:'Deterministic recovery boundary',parameters:schema.obj({},{open:true}),replay:'safe',execute:async(_args,_api,context)=>{
   onEnter();
   if(wait)await new Promise<void>((_resolve,reject)=>{const stop=()=>reject(context.abortSignal?.reason??Error('aborted'));if(context.abortSignal?.aborted)stop();else context.abortSignal?.addEventListener('abort',stop,{once:true});});
   return {output:[{type:'text' as const,text:'gate finished'}]};

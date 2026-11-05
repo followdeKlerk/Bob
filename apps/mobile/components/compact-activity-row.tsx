@@ -2,7 +2,7 @@ import React from 'react';
 import {Pressable,StyleSheet} from 'react-native';
 import {ChevronDown,ChevronRight,SquareTerminal} from 'lucide-react-native';
 import {Text} from './app-text';
-import {colors} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 
 export type CompactActivityRowProps={
  title:string;
@@ -26,6 +26,9 @@ export function activityStatusGlyph(status?:string):string {
 
 /** Shared compact header only: the caller owns expansion state and full content. */
 export function CompactActivityRow({title,detail,status,accessibilityLabel,expanded,onPress,count}:CompactActivityRowProps){
+ const {colors}=useTheme();
+ const styles=useThemedValue(stylesTheme);
+
  const statusLabel=status??'Status unavailable';
  const hint=[detail,statusLabel,count===undefined?undefined:`${count} calls`,expanded?'Collapse details':'Expand details'].filter(Boolean).join(' · ');
  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityHint={hint} accessibilityState={{expanded}} onPress={onPress} style={styles.row}>
@@ -38,10 +41,10 @@ export function CompactActivityRow({title,detail,status,accessibilityLabel,expan
  </Pressable>;
 }
 
-const styles=StyleSheet.create({
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  row:{minHeight:48,paddingVertical:6,flexDirection:'row',alignItems:'center',gap:6},
  title:{color:colors.foreground,fontSize:12,lineHeight:18,fontWeight:'600',flexShrink:1},
  detail:{color:colors.muted,fontSize:12,lineHeight:18,flex:1,minWidth:0},
  count:{color:colors.muted,fontSize:12,lineHeight:18,marginLeft:'auto'},
  status:{color:colors.muted,fontSize:12,lineHeight:18,marginLeft:'auto'},
-});
+}));

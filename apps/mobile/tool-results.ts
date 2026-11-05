@@ -11,7 +11,12 @@ export function linkToolResults(entries:ToolEntry[],live:any) {
  const persistedIds=new Set<string>();
  const results=new Map<string,LinkedResult>();
  const nested=liveNestedActivity(live);
- for(const tool of live?.tools??[])if(typeof tool.callId==='string')results.set(tool.callId,{content:tool.output,status:tool.status??'running',isError:tool.isError===true||tool.status==='failed'||tool.status==='error',nested:nested.get(tool.callId)});
+ for(const tool of live?.tools??[])if(typeof tool.callId==='string'){
+  // Native done-without-entry means faulted/orphaned, not successful completion.
+  // An actual stored result below remains authoritative and replaces this status.
+  const missingResult=tool.status==='done'&&!(Number.isSafeInteger(tool.entry)&&tool.entry>0);
+  results.set(tool.callId,{content:tool.output??(missingResult?'Tool ended without a recorded result.':undefined),status:missingResult?'failed':tool.status??'running',isError:missingResult||tool.isError===true||tool.status==='failed'||tool.status==='error',nested:nested.get(tool.callId)});
+ }
  for(const entry of entries)for(const message of entry.model??[])if(message.role==='toolResult'&&typeof message.toolCallId==='string'){persistedIds.add(message.toolCallId);results.set(message.toolCallId,{content:message.content,status:message.isError?'failed':'done',isError:message.isError,nested:codemodeAudit(message.toolName,message.details)});}
  const visible=entries.flatMap(entry=>{
   if(!entry.model?.length)return [entry];

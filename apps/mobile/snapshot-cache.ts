@@ -1,4 +1,4 @@
-type Entry={id:number;kind?:string;model?:unknown[];data?:unknown};
+type Entry={id:number;kind?:string;model?:unknown[];data?:unknown;mobilePresentation?:unknown};
 const serialized=new WeakMap<object,string|undefined>();
 function fingerprint(value:unknown){
  if(value&&typeof value==='object'){
@@ -10,9 +10,12 @@ function fingerprint(value:unknown){
 const same=(a:unknown,b:unknown)=>a===b||fingerprint(a)===fingerprint(b);
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const sameFields=(a:Record<string,unknown>,b:Record<string,unknown>)=>Object.keys(a).length===Object.keys(b).length&&Object.keys(b).every(key=>a[key]===b[key]);
-/** Passive receipt presentation may change while its stored entry ID does not. */
+/** Server display projections may change while stored entry IDs do not. */
 export function reusePresentedEntry<T extends Entry>(previous:T|undefined,next:T):T{
  if(!previous)return next;
+ // Drop an old cached encoded-image payload as soon as its server presentation
+ // arrives. Compare only the tiny marker, never stringify multi-megabyte images.
+ if(!same(previous.mobilePresentation,next.mobilePresentation))return next;
  if(previous.kind==='bob.memory-status'&&next.kind==='bob.memory-status'&&!previous.model?.length&&!next.model?.length&&!same(previous.data,next.data))return next;
  return previous;
 }

@@ -1,27 +1,49 @@
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdirSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {MaintenanceStore,MaintenanceSupervisor,type MaintenanceConfig,type Release} from './maintenance.js';
 import {buildRelease} from './maintenance-build.js';
+import {acquireOwner} from './ownership.js';
+import {supervisorProtocol,type SupervisorEvidence} from './maintenance-migration.js';
 const home=process.argv[2];if(!home)throw Error('Maintenance home required');
 const config=JSON.parse(readFileSync(join(home,'config.json'),'utf8')) as MaintenanceConfig;
+const ownerDir=join(home,'supervisor-owner');mkdirSync(ownerDir,{recursive:true,mode:0o700});
+const releaseSupervisor=acquireOwner(ownerDir); // No competing runner can rewrite recovery decisions.
 const store=new MaintenanceStore(home),supervisor=new MaintenanceSupervisor(home,config,store);
+const loaded=store.get<Release>('active'),own=dirname(fileURLToPath(import.meta.url));
+const runnerRelease=loaded&&dirname(loaded.cli)===own?loaded:undefined;
+store.set('supervisorEvidence',null);
 let stopping=false;
 for(const signal of ['SIGTERM','SIGINT'] as const)process.on(signal,()=>{if(stopping)return;stopping=true;void supervisor.stop().then(()=>process.exit(0),()=>process.exit(1));});
-const interrupted=store.get<{previous:Release;candidate:Release}>('transition');
-if(interrupted){store.set('active',interrupted.previous);store.set('transition',null);}
-store.set('draining',false);
-for(const job of store.jobs())if(['building','activating'].includes(job.status))store.patch(job.id,{status:'failed',stage:'Interrupted; running state retained. Request a new build.',error:'Supervisor restarted during operation; build was not replayed.'});
-const active=store.get<Release>('active');if(!active)throw Error('No installed backend release');
-await supervisor.start(active);
-let restarting=false;
-const heartbeat=setInterval(()=>{
- store.set('heartbeat',Date.now());
- if(!stopping&&!restarting&&!supervisor.transitioning&&!supervisor.expectedStop&&(supervisor.child?.exitCode!==null||supervisor.child?.signalCode!==null)){
-  restarting=true;void supervisor.start(store.get<Release>('active')!).catch(()=>process.exit(1)).finally(()=>{restarting=false;});
- }
-},2000);store.set('heartbeat',Date.now());
+let heartbeat:ReturnType<typeof setInterval>|undefined;
 try{
+ const active=supervisor.recoveryRelease();
+ store.set('draining',false);
+ for(const job of store.jobs())if(['building','activating'].includes(job.status))store.patch(job.id,{status:'failed',stage:'Interrupted; running state retained. Request a new build.',error:'Supervisor restarted during operation; build was not replayed.'});
+ await supervisor.start(active);
+ // Interrupted migration may have selected a different active release before
+ // any queued job runs. Hand off after health; never stay an old runner forever.
+ if(runnerRelease?.id!==active.id||runnerRelease?.cli!==active.cli){
+  store.set('draining',true);await supervisor.stop();process.exit(0);
+ }
+ let restarting=false,restartFailure:Error|undefined;
+ const beat=()=>{
+  store.set('heartbeat',Date.now());
+  if(runnerRelease)store.set('supervisorEvidence',{supervisorProtocol,pid:process.pid,release:{id:runnerRelease.id,cli:runnerRelease.cli,compatibility:runnerRelease.compatibility,sourceHash:runnerRelease.sourceHash},at:Date.now()} satisfies SupervisorEvidence);
+ };
+ heartbeat=setInterval(()=>{
+  beat();
+  if(!stopping&&!restarting&&!supervisor.transitioning&&!supervisor.expectedStop&&(supervisor.child?.exitCode!==null||supervisor.child?.signalCode!==null)){
+   restarting=true;
+   void (async()=>{
+    try{await supervisor.start(supervisor.recoveryRelease());}
+    catch(error){
+     restartFailure=error instanceof Error?error:Error(String(error));stopping=true;
+     try{await supervisor.stop();}catch(stopError){restartFailure=new AggregateError([restartFailure,stopError],'Backend recovery and cleanup failed');}
+    }finally{restarting=false;}
+   })();
+  }
+ },2000);beat();
  while(!stopping){
   if(restarting){await new Promise(r=>setTimeout(r,500));continue;}
   const job=store.jobs().reverse().find(j=>j.status==='queued');
@@ -37,11 +59,18 @@ try{
     }
    }
    store.patch(job.id,{status:'complete',stage:job.action==='rollback'?'Previous code restored; chat data retained':job.target==='backend'?'Backend update complete':'Ready — install the signed APK in chat'});
-   const installed=store.get<Release>('active')!;
+   const installed=supervisor.recoveryRelease(); // Re-exec choices obey the same read-only floor guard.
    const own=dirname(fileURLToPath(import.meta.url)),next=dirname(installed.cli);
-   if(['maintenance.js','maintenance-build.js','maintenance-runner.js'].some(file=>!readFileSync(join(own,file)).equals(readFileSync(join(next,file))))){
+   // Evidence must keep naming the actual runner. Even identical supervisor code
+   // needs a handoff when the active release identity changes; never relabel it.
+   if(runnerRelease?.id!==installed.id||runnerRelease?.cli!==installed.cli||['maintenance.js','maintenance-build.js','maintenance-runner.js','maintenance-migration.js'].some(file=>!readFileSync(join(own,file)).equals(readFileSync(join(next,file))))){
     store.set('draining',true);await supervisor.stop();process.exit(0); // systemd restarts through the stable loader into the active release.
    }
-  }catch(error){store.patch(job.id,{status:'failed',stage:'Update stopped safely',error:error instanceof Error?error.message:String(error)});}
+  }catch(error){store.patch(job.id,{status:'failed',stage:'Update stopped safely',error:error instanceof Error?error.message:String(error)});if(supervisor.expectedStop)throw error;}
  }
-}finally{clearInterval(heartbeat);await supervisor.stop();store.close();}
+ if(restartFailure)throw restartFailure;
+}finally{
+ if(heartbeat)clearInterval(heartbeat);
+ try{try{store.set('supervisorEvidence',null);}finally{await supervisor.stop();}}
+ finally{try{store.close();}finally{releaseSupervisor();}}
+}

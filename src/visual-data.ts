@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import type {JsonValue} from '@earendil-works/chord';
 import {defineDoc,defineTool,section,type Conversation,type Harness} from '@earendil-works/pi-durable';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {Interactive} from '@bob-local/interactive';
 import {HttpError} from './errors.js';
 import {z} from 'zod';
@@ -41,7 +41,7 @@ export const visualDataSection=section('bob-visual-data',()=>`Visuals can receiv
 
 export const visualDataTool=defineTool({
  name:'visual_data',description:'Read or update the JSON data of an existing render_visual in this conversation. Updates preserve its HTML/identity and reach compatible visible viewers without reloading their controls. Get before editing; update requires expectedRevision and replaces the data object (max 64 KiB). This grants the visual no network/tools and starts no external feed or background job. A saved revision is not confirmation of on-device display.',
- parameters:Type.Object({action:Type.Union([Type.Literal('get'),Type.Literal('update')]),id:Type.String({format:'uuid'}),expectedRevision:Type.Optional(Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER})),data:Type.Optional(Type.Record(Type.String(),Type.Unknown()))}),
+ parameters:schema.obj({action:schema.union([schema.lit('get'),schema.lit('update')]),id:schema.str({format:'uuid'}),expectedRevision:schema.opt(schema.int({minimum:0,maximum:Number.MAX_SAFE_INTEGER})),data:schema.opt(schema.map(schema.unknown()))},{open:true}),
  execute:async(args,api,context)=>{
   const app=(await api.snapshot(Interactive,api.conversationId,context))?.apps[args.id];
   if(!app||app.kind!=='visual')throw Error('Visual not found in this conversation');

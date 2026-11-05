@@ -55,7 +55,7 @@ cli
         backendId: s.id,
         state: s.dir,
         node: process.version,
-        durable: "1.4.0",
+        durable: "1.5.0",
         provider: "not configured",
       })
     );

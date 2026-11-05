@@ -1,6 +1,7 @@
 import {createLearning} from './learning.js';
 import {createPush} from './push.js';
 import {watchPushMaintenance} from './push-maintenance.js';
+import {watchMaintenanceReports} from './maintenance-reports.js';
 import {createEmailRead} from './email-read.js';
 import {createSchedules} from './schedules.js';
 import {withDelegationPeerPolicy} from './peer-policy.js';
@@ -30,9 +31,10 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import {createCodingWithCodemode} from './codemode.js';
-import {createResources,createCorePromptReader} from "@bob-local/resources";
+import {createResources,createSoulReader} from "@bob-local/resources";
 import { State } from "./state.js";
 import {acquireOwner} from "./ownership.js";
+import {readControlFloor,prepareFreshPi15Floor} from './maintenance-migration.js';
 import { ChatMeta, Library, Todos, Questions } from "./documents.js";
 import {encodeCursor,decodeCursor} from './pagination.js';
 import { SubagentTools } from "./subagents.js";
@@ -58,6 +60,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   let closeMemory=async()=>{};
   let closeLearning=async()=>{};
   let closePush=async()=>{};
+  let closeMaintenanceReports=async()=>{};
   let closeCodemode=async()=>{};
   let closeWeb=async()=>{};
   let disposeInteractive=()=>{};
@@ -67,12 +70,15 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const errors:unknown[]=[];
     // Join native invocations before destroying the VM host. Attempt every cleanup,
     // even on startup failure or when another resource's close throws.
-    for(const dispose of [disposeInteractive,closePush,closeLearning,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
+    for(const dispose of [disposeInteractive,closeMaintenanceReports,closePush,closeLearning,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
       try {await dispose();} catch(error){errors.push(error);}
     }
     if(errors.length)throw new AggregateError(errors,'Runtime cleanup failed');
   })();
   try {
+    // This barrier is independent of resume: native storage may migrate on open.
+    // Under the owner lock, only an absent native DB may establish a fresh origin.
+    if(readControlFloor(state.dir,true).kind==='legacy')prepareFreshPi15Floor(state.dir);
     const baseModels = testModels ?? createBackendModels(state);
     const registry = createRegistry();
     const memory=backendMemory(state);
@@ -80,8 +86,8 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const interactive = createInteractive(state, testMcpTransport);disposeInteractive=()=>interactive.dispose();
     const coding=await createCodingWithCodemode();closeCodemode=coding.close;
     let libraryId: ConversationId;
-    const corePrompt=createCorePromptReader(join(state.dir,'core-prompt.md'));
-    const delegation=createDelegation(state,baseModels,registry,()=>libraryId,()=>modules,corePrompt);
+    const soul=createSoulReader(join(state.dir,'soul.md'));
+    const delegation=createDelegation(state,baseModels,registry,()=>libraryId,()=>modules,soul);
     const models=delegation.models;
     const resources = createResources(()=>libraryId,async(source,input,context)=>{
       if(input.mode==='search')return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
@@ -102,7 +108,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     },async(input,taskId,source,context)=>{
       const chat=await harness.conversation(source,context);if(!chat)throw Error('File conversation is unavailable');
       return sendFile(state,chat,taskId,input,context);
-    },corePrompt);
+    },soul);
     const peers=withDelegationPeerPolicy(createPeerTools({list:()=>[{id:state.id,name:hostname(),local:true,allConversations:true,enabled:true},...listPeers(state).outbound],request:(id,action,request,signal)=>id===state.id
       ?conversationOperation(state,{harness,models,library:{id:libraryId}},{originBackendId:state.id,name:hostname(),allConversations:true,read:[],message:[]},action,{...request,destinationBackendId:state.id})
       :requestPeer(state,id,action,request,signal)}));
@@ -163,7 +169,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     closePush=()=>push.close();
     const stopPushMaintenance=push.enabled?watchPushMaintenance(state,key=>push.attention(key,'update')):()=>{};
     closePush=async()=>{stopPushMaintenance();await push.close();};
-    if(options.resume!==false){await scheduling.recover();harness.resume();}
+    if(options.resume!==false){await scheduling.recover();harness.resume();closeMaintenanceReports=watchMaintenanceReports(state,harness).close;}
     return {
       harness,
       push,

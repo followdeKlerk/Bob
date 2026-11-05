@@ -12,17 +12,18 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
     "@bob-local/core": "0.1.0",
-    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/chord": "1.5.0",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/ext-apps": "2.0.3",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@earendil-works/pi-schema": "1.5.0"
   },
   "bobExtension": {
     "api": 1,
-    "durable": "1.4.0",
+    "durable": "1.5.0",
     "name": "bob.interactive",
     "requires": []
   }

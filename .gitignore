@@ -70,3 +70,8 @@ cli.json
 /captures/
 *.mp4
 *.webm
+
+# Per-installation identity is private; publish only soul.default.md.
+soul.md
+SOUL.md
+core-prompt.md

@@ -8,7 +8,7 @@ import {Harness,MemoryStorage,createRegistry,defineExtension,defineTool,defineTa
 import {openNodeSqliteStorage} from '@earendil-works/pi-durable/storage/sqlite/node';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {createModels} from '@earendil-works/pi-ai/models';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall,fauxThinking} from '@earendil-works/pi-ai/providers/faux';
 import {createHindsightMemory,MemoryActivity,MemoryPreferences,MemorySaves,MemoryInstallation,MemoryTurnPolicy,HindsightClient,memoryConfig,redact,isTrivialMemoryPrompt,type MemoryConfig} from '@bob-local/memory';
 import {State} from '../src/state.js';
@@ -47,7 +47,7 @@ async function saves(h:HarnessType,id:ConversationId){const a=await h.snapshot(M
 async function chat(h:HarnessType){return h.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'faux',modelId:'faux-1'}}},ctx);}
 
 test('native module recalls both banks once per run, deduplicates, and retains only canonical user/final answer',{timeout:12000},async()=>{
- const extra=defineExtension({name:'fixture.tools',tools:[defineTool({name:'probe',parameters:Type.Object({}),execute:async()=>({output:[{type:'text',text:'RAW_TOOL_OUTPUT_SECRET'}]})})]});
+ const extra=defineExtension({name:'fixture.tools',tools:[defineTool({name:'probe',parameters:schema.obj({},{open:true}),execute:async()=>({output:[{type:'text',text:'RAW_TOOL_OUTPUT_SECRET'}]})})]});
  const r=await setup({extra}),seen:any[]=[];
  r.faux.setResponses([request=>{seen.push(request.messages);return fauxAssistantMessage([fauxThinking('HIDDEN_REASONING_SECRET'),fauxToolCall('probe',{})],{stopReason:'toolUse'});},request=>{seen.push(request.messages);return fauxAssistantMessage('The historical project used PostgreSQL.');}]);
  try{
@@ -131,7 +131,7 @@ test('Bob host exposes removable standalone memory module but default unconfigur
 
 for(const kind of ['pi.user','bob.user'])test(`late opt-out in a steered ${kind} run revokes automatic retention for every input sharing its final answer`,{timeout:12000},async()=>{
  let release!:()=>void,entered!:()=>void;const started=new Promise<void>(r=>entered=r),blocked=new Promise<void>(r=>release=r);
- const extra=defineExtension({name:'fixture.blocker',tools:[defineTool({name:'block',parameters:Type.Object({}),execute:async()=>{entered();await blocked;return {};}})]});
+ const extra=defineExtension({name:'fixture.blocker',tools:[defineTool({name:'block',parameters:schema.obj({},{open:true}),execute:async()=>{entered();await blocked;return {};}})]});
  const r=await setup({extra,ownerInputKinds:['pi.user','bob.user']});r.faux.setResponses([fauxAssistantMessage([fauxToolCall('block',{})],{stopReason:'toolUse'}),fauxAssistantMessage('This final answer includes private steered context.')]);
  try{
   const c=await chat(r.h),first=await c.submit({type:'input',content:'Original non-private request',...(kind==='pi.user'?{}:{entry:{kind}})},ctx);await started;

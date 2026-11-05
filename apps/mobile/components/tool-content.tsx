@@ -3,7 +3,7 @@ import {Text} from './app-text';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight} from 'lucide-react-native';
-import {colors} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 import {CopyAction} from './message-actions';
 import {toolPresentation,toolResultPreview,toolText} from '../tool-presentation';
 import type {LinkedResult} from '../tool-results';
@@ -13,6 +13,9 @@ function pretty(content:string){try{return JSON.stringify(JSON.parse(content),nu
 
 /** Compact single-line activity; original arguments and recorded output stay expandable. */
 function Content({name,content,result}:{name:string;content:string;result?:LinkedResult;quiet?:boolean}){
+ const {colors}=useTheme();
+ const styles=useThemedValue(stylesTheme);
+
  const [open,setOpen]=useState(false),[resultOpen,setResultOpen]=useState(false);
  const resultText=!open||result?.content===undefined?'Result not available yet.':toolText(result.content);
  const presentation=toolPresentation(name,content),preview=open&&result?toolResultPreview(result.content,!!result.isError):undefined;
@@ -36,7 +39,7 @@ function Content({name,content,result}:{name:string;content:string;result?:Linke
   </View>}
  </View>;
 }
-const styles=StyleSheet.create({
+const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  card:{minWidth:0},
  label:{color:colors.muted,fontSize:11,lineHeight:18,flexShrink:1},
  summary:{color:colors.body,fontSize:13,lineHeight:21,flexShrink:1},
@@ -46,6 +49,6 @@ const styles=StyleSheet.create({
  code:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:12,lineHeight:20},
  resultButton:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
  error:{color:colors.foreground,fontSize:12,lineHeight:20},
-});
+}));
 
 export const ToolContent=React.memo(Content,(a,b)=>a.quiet===b.quiet&&a.name===b.name&&a.content===b.content&&a.result?.status===b.result?.status&&a.result?.isError===b.result?.isError&&a.result?.content===b.result?.content&&a.result?.nested===b.result?.nested);

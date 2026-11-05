@@ -1,7 +1,8 @@
-import {readCorePrompt} from '@bob-local/resources';
+import {readSoul} from '@bob-local/resources';
 import {DelegationBudget,authorizeDelegation,checkDelegationDispatch,recordDelegationDispatch,restoreDelegationBudget,stopDelegationHelper} from './delegation-budget.js';
 import {DelegationChildTools,DelegationToolProvisioning,provisionLegacyDelegationTools,applyDelegationTools,enforceDelegationTools,snapshotDelegationTools,COORDINATOR_POLICY,readDelegationBehavior,behaviorRevision} from './delegation-behavior.js';
-import {Type,type ModelThinkingLevel} from '@earendil-works/pi-ai';
+import {type ModelThinkingLevel} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {getSupportedThinkingLevels,type Models} from '@earendil-works/pi-ai/models';
 import {defineDoc,defineExtension,configure,AgentDoc,GenerationTask,hook,wrapTool,wrapSection,section,LiveDoc,InboxDoc,type Agent,type Conversation,type ConversationId,type ConversationRecord,type Cursor,type Extension,type Harness,type Registry,type ToolExecutionApi,type ToolRegistration,type Tx} from '@earendil-works/pi-durable';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
@@ -38,7 +39,10 @@ function currentRoute(config:DelegationConfig,args:{option?:string;profile?:stri
 export function delegationSchema(config:DelegationConfig){
  const field=config.mode==='model_map'?'option':config.mode==='profile_routes'?'profile':undefined;
  const choices=config.mode==='model_map'?config.modelMap.options:config.profileRoutes.profiles;
- return Type.Object({...((native.parameters as {properties:Record<string,any>}).properties),...(field&&choices.length?{[field]:Type.Optional(Type.Union(choices.map(c=>Type.Literal(c.name)),{description:'Spawn only: choose a configured route, or omit for the mode default / parent.\n'+choices.map(c=>`${c.name}: ${c.description}`).join('\n')}))}: {})},{additionalProperties:false});
+ // Builder optional markers do not survive into properties. Keep the native required list
+ // when extending its already-built JSON Schema; route selectors remain optional.
+ const base=native.parameters as {properties:Record<string,schema.Schema>;required?:string[]};
+ return {...base,properties:{...base.properties,...(field&&choices.length?{[field]:schema.union(choices.map(c=>schema.lit(c.name)),{description:'Spawn only: choose a configured route, or omit for the mode default / parent.\n'+choices.map(c=>`${c.name}: ${c.description}`).join('\n')})}: {})},additionalProperties:false};
 }
 export function formatDelegationRoute(route:RouteObservation){return `${route.label}: ${route.provider}/${route.model} · effort ${route.reasoning_effort} · tier ${route.service_tier}${route.profile?' · profile '+route.profile:''}`;}
 /** Native transactional check, called before any table writes. */
@@ -49,7 +53,7 @@ export async function requireDelegationSettled(tx:Tx,id:ConversationId){
   const tasks=await tx.scanTasks({conversationId:id,status},1);if(tasks.items.length)throw Error('Stop and settle this chat and its background work before /delegation --now');
  }
 }
-export function createDelegation(state:State,baseModels:Models,registry:Registry,getLibrary:()=>ConversationId,getModules:()=>Record<string,Extension>,corePrompt:()=>string=readCorePrompt){
+export function createDelegation(state:State,baseModels:Models,registry:Registry,getLibrary:()=>ConversationId,getModules:()=>Record<string,Extension>,soul:()=>string=readSoul){
  const providerRoutes=createDelegationModels(baseModels,state),models=providerRoutes.models;
  const childExtension=defineExtension({name:childExtensionName,
   wraps:[wrapSection('bob-resources',original=>({...original,render:async(input,context)=>{
@@ -62,7 +66,7 @@ export function createDelegation(state:State,baseModels:Models,registry:Registry
   }}))],
   sections:[...['bob-policy','bob-notes','bob-phone-location','bob-self-update','bob-diagnostics','bob-resources','bob-model-identity'].map(key=>section(key,async(input,context)=>{
    const source=getModules().resources?.sections?.find(s=>s.key===key);
-   return source?source.render(input,context):key==='bob-policy'?corePrompt():undefined;
+   return source?source.render(input,context):key==='bob-policy'?soul():undefined;
   })),section('bob-delegation-route',async(input,context)=>{const child=await input.read.snapshot(DelegationChild,input.conversationId,context);return child?.observation?`Actual subagent route: ${formatDelegationRoute(child.observation)}. You cannot start subagents. Module and cwd selection is not a sandbox.`:undefined;})],
   hooks:[hook(GenerationTask,{afterResponse:async(message,api,context)=>{
    if(!['stop','length','toolUse'].includes(message.stopReason)||(message.stopReason==='toolUse'&&message.content.some(block=>block.type==='toolCall')))return;

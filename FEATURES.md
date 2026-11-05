@@ -16,7 +16,7 @@ Open **Model & thinking** from the composer's **+** menu or **Settings → This 
 
 **Chat actions → More** separates message actions, conversation navigation, app maintenance and stopping work. The attachment picker's Android Back goes up a nested folder before dismissing the picker; its X closes the whole picker. Drawing uses the shared neutral theme around white paper, asks before discarding unsaved strokes, and prevents repeated Add taps while exporting/attaching. Export or attachment failures keep the drawing available for an explicit retry.
 
-Menu headers use the same title/action alignment: utilities on the right, the primary/create action rightmost, and Back or editor Cancel on the left. Cards share 20dp corners and a 1dp outline; buttons and inputs share 14dp corners and the same outline treatment, with consistent selected and primary states. Switches, checkmarks, colour swatches and document content retain their functional shapes.
+Menu headers use the same title/action alignment: utilities on the right, the primary/create action rightmost, and Back or editor Cancel on the left. Header actions use the pinned React Native Reusables Button asset with 48dp circular targets: quiet utility actions and an ivory primary action. Sessions and Schedules use its Tabs asset: one dark track and an ivory selected tab, with no shifting checkmark or nested outlined buttons. Subtitles use the full header width rather than moving the actions vertically. Cards retain 20dp corners and a 1dp outline; ordinary form controls retain 14dp corners. Text remains scalable, and filter rows can grow when labels need more room.
 
 Bob uses locally bundled **Nordwand Mono**, a monochrome palette and Android text scaling. Notes adapts to a single column at larger text sizes. System dialogs, keyboards, document content and third-party views use their own presentation; MCP apps can adopt the host font preference.
 
@@ -58,13 +58,19 @@ Manage skills and todos through chat. Type `/` at the start of an empty main-cha
 | Notes | One notebook per backend, shared by app and agents | User content, not automatically injected instructions |
 | Hindsight | Configured long-term memory service/banks | Historical reference, separate from Notes |
 | Skills | Backend library; enabled skills enter a compact index and are loaded on demand with `skill_view` | Procedural memory with native supporting files, revision checks, recoverable archives and a change ledger; explicit auto-load is available |
-| Core Bob prompt | `<backend state directory>/core-prompt.md` | Seeded from bundled Markdown once; read on every prompt assembly, including delegation fallback. Edit this file without rebuilding/restarting; already-submitted model requests are unchanged. Empty/unreadable files fail visibly rather than silently falling back. Other feature/skill instructions and enforced permissions remain separate. |
+| Bob’s soul | `<backend state directory>/soul.md` | Preserves an existing `core-prompt.md` on first upgrade (the legacy file is retained for older releases); otherwise seeded from the generic bundled `soul.default.md` once; read on every prompt assembly, including delegation fallback. Edit this file without rebuilding/restarting; already-submitted model requests are unchanged. Empty/unreadable files fail visibly rather than silently falling back. Other feature/skill instructions and enforced permissions remain separate. |
 | Default instructions | Backend library | Used when a conversation has no instruction override |
 | Conversation instructions | Settings, this conversation | Override defaults; do not disable separately enabled skills |
 | Message templates | Backend library | Insert text into the draft; user still submits it |
 | Todos | This conversation | `todos` replaces the **entire** list; not reminders or background execution |
 
 For an ambiguous “remember this,” distinguish a notebook entry from long-term knowledge; ask if the intended destination matters. Do not silently write both. Read an existing skill before improving it. Bob normally injects a compact skill index, not every body; `skill_view` loads a relevant body or native reference file. Guidance calls for loading even partially relevant skills, including familiar tasks, without loading unrelated skills. Default discovery and explicit auto-load respect declared backend-platform applicability. Native description/tags are authoritative; Markdown/YAML edits do not silently synchronize routing metadata. Tool/environment/credential readiness is not evaluated automatically.
+
+### Your own soul.md
+
+Each backend installation owns its private `<backend state directory>/soul.md`. Edit that file to customize Bob’s identity and standing behaviour, or create it before the first start. Existing content is never overwritten by initialization or upgrades; changes are read on the next prompt assembly without a rebuild/restart. The loader does not import a repository’s `soul.md` from the working directory.
+
+GitHub and release packages contain only the generic `packages/resources/soul.default.md` starting template, not your customized file. `soul.md`, `SOUL.md` and the legacy `core-prompt.md` are Git-ignored at any directory depth to protect accidental copies into a checkout. Git ignores do not protect files deliberately force-added or already tracked; keep personalized content in the backend state directory and review staged changes before publishing. Back up your private soul separately.
 
 ### Automatic learning
 
@@ -167,6 +173,8 @@ Use `/delegation` for a mode picker followed by **Next session** or **Now**, or 
 ### Adaptive delegation
 
 Adaptive delegation is **off by default**. Configure the profiles you want, then use `/delegation auto on` to let Bob select helpers for suitable tasks. For an existing settled chat, apply `/delegation profiles --now`, or start a new chat. Bob should handle simple or tightly sequential work directly and delegate separable research, implementation or review tasks with clear scope. Stale/default profile snapshots must be refreshed before profile-based work can start.
+
+Before substantial work, Bob briefly considers whether a helper could independently shorten completion or resolve an important uncertainty while Bob advances the main task. Zero helpers is a valid answer; multiple helpers may use the same profile. Useful work splits get a brief explanation and are reconsidered at meaningful phase changes—not through an extra planning agent or routine approval questions.
 
 The default native bounds are **4 active helpers and 12 total spawn/send dispatches per owner scope**. Pending deliveries reserve capacity; repeatedly sending work to one helper also consumes the allowance. Genuine report continuations require recorded lineage to the originating owner scope and current permission. Peer messages, report text and old or unrecorded reports cannot supply permission. A denial or revocation cannot be bypassed by reusing a helper.
 
@@ -283,6 +291,8 @@ Manual reports follow the same privacy exclusions and are shared only when reque
 ## Updates
 
 Ask Bob to update the app, backend or both with `self_update`. It checks the current build status before queueing `update` targeting `android`, `backend` or `all`. Build progress appears in chat; further source changes must wait until the build finishes.
+
+Once the updated backend is running, failed chat-requested builds automatically submit a status follow-up to the requesting conversation, even without phone push. A busy conversation finishes its current answer first. Native submission IDs prevent duplicate reports after restart; old failures present when this feature is first installed are not replayed. The assistant can inspect the private build log and explain the failure; the relay never automatically retries a build. Source-less requests from Settings keep their existing build card/notification instead of being sent to an arbitrary conversation. Model availability and phone delivery remain separate.
 
 `build` stages and checks a candidate; `update` activates it after foreground work settles. The status/card distinguishes queued, backend active and APK ready. Approve the Android installer to complete the phone update. `rollback` selects compatible previous code while retaining current chat data. See [Operations](OPERATIONS.md#updates-and-recovery) for the release and recovery steps.
 

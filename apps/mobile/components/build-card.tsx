@@ -6,10 +6,13 @@ import * as Keychain from 'react-native-keychain';
 import {v4 as uuid} from 'uuid';
 import {Check,ChevronDown,ChevronRight,Download,RefreshCw,X} from 'lucide-react-native';
 import {activeBuild,type BuildBackend,type BuildState} from '../use-build-status';
-import {colors,menuChrome} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 type Request={id:string;action:'update'|'build'|'rollback';target:'android'|'all'|'backend'};
 const retryable=(request:Request)=>request.action!=='rollback'&&request.target!=='backend';
 export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:{backend:BuildBackend;state?:BuildState;error?:string;focus?:boolean;onDismiss:()=>void;onRefresh:()=>void}){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const [busy,setBusy]=useState(false),[note,setNote]=useState(''),[failure,setFailure]=useState(''),[details,setDetails]=useState(false),[collapsed,setCollapsed]=useState(false),[request,setRequest]=useState<Request>(),[installVersion,setInstallVersion]=useState<number>(),[dismissed,setDismissed]=useState('');
  const key=`bob.update-request.${backend.backendId}`,installed=Number(NativeModules.BobFiles.versionCode??0),apk=state?.apk,job=activeBuild(state),failed=!job&&state?.jobs?.[0]?.status==='failed'?state.jobs[0]:undefined;
  const ready=!!apk&&apk.versionCode>installed,success=!!installVersion&&installed>=installVersion&&!ready;
@@ -49,4 +52,4 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
   </View>}
  </View>;
 }
-const s=StyleSheet.create({card:{...menuChrome.card,overflow:'hidden'},header:{padding:14,flexDirection:'row',alignItems:'center',gap:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:15,lineHeight:23,color:colors.foreground,fontWeight:'500'},icon:{width:48,height:48,alignItems:'center',justifyContent:'center'},body:{paddingHorizontal:14,paddingBottom:14,gap:12},text:{fontSize:13,lineHeight:21,color:colors.body},primary:{...menuChrome.control,minHeight:48,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,borderColor:colors.accent,backgroundColor:colors.accent},primaryText:{fontSize:15,color:colors.onAccent,fontWeight:'600'},option:{minHeight:48,flexDirection:'row',alignItems:'center',gap:8},secondary:{...menuChrome.control,minHeight:48,padding:12,justifyContent:'center'}});
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({card:{...menuChrome.card,overflow:'hidden'},header:{padding:14,flexDirection:'row',alignItems:'center',gap:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:15,lineHeight:23,color:colors.foreground,fontWeight:'500'},icon:{width:48,height:48,alignItems:'center',justifyContent:'center'},body:{paddingHorizontal:14,paddingBottom:14,gap:12},text:{fontSize:13,lineHeight:21,color:colors.body},primary:{...menuChrome.control,minHeight:48,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,borderColor:colors.accent,backgroundColor:colors.accent},primaryText:{fontSize:15,color:colors.onAccent,fontWeight:'600'},option:{minHeight:48,flexDirection:'row',alignItems:'center',gap:8},secondary:{...menuChrome.control,minHeight:48,padding:12,justifyContent:'center'}}));

@@ -55,7 +55,7 @@ test('favourites obey search and provider filters without losing their saved ide
 // Read text once from the native leaves, including mixed provider/status captions.
 const textContent=(node:Renderer.ReactTestInstance):string=>node.children.map(child=>typeof child==='string'?child:textContent(child)).join(' ');
 
-test('thinking and selected summary are independently scrollable beside Apply, never in the catalog footer',async()=>{
+test('thinking and selected summary are independently scrollable while Apply stays in the header, never in the catalog footer',async()=>{
  const catalog=[...models,...Array.from({length:80},(_,i)=>({provider:'other',modelId:`extra-${i}`,name:`Extra ${i}`,thinkingLevels:['medium']}))];
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelPicker visible models={catalog} current={current} onClose={()=>{}} onApply={jest.fn()}/>);});
@@ -68,7 +68,8 @@ test('thinking and selected summary are independently scrollable beside Apply, n
  expect(textContent(controls)).toContain('Selected model');
  expect(textContent(controls)).toContain('Alpha');
  expect(textContent(controls)).toContain('Thinking effort');
- expect(panel.findAll(n=>n.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
+ expect(panel.findAll(n=>n.props.accessibilityLabel==='Apply model selection')).toHaveLength(0);
+ expect(tree.root.findByType(SectionHeading).findByProps({testID:'section-heading-actions'}).findAll(n=>n.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
  // The bounded panel can shrink with the keyboard; its controls scroll while Apply stays outside that scroll.
  expect(StyleSheet.flatten(panel.props.style)).toMatchObject({maxHeight:'55%',flexShrink:1,minHeight:0});
  expect(StyleSheet.flatten(controls.props.style)).toMatchObject({flexShrink:1});
@@ -173,15 +174,16 @@ test('Apply locks editing and dismissal while the authoritative callback is pend
 });
 
 
-test('model modal places close at header right with outlined summaries, input and controls, not every model row',async()=>{
+test('model modal keeps Close left and Apply right beneath the shared title with outlined summaries, input and controls, not every model row',async()=>{
  const close=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ModelPicker visible models={models} current={current} onClose={close} onApply={jest.fn()}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props.title).toBe('Model & thinking');
   expect(heading.props.onBack).toBeUndefined();
-  const actions=heading.findByProps({testID:'section-heading-actions'});
-  expect(actions.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close model selection']);
+  const leading=heading.findByProps({testID:'section-heading-leading'});
+  expect(leading.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close model selection']);
+  expect(heading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
   const headerView=heading.findAllByType(View)[0];
   expect(StyleSheet.flatten(headerView.props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
   expect(StyleSheet.flatten(tree.root.findByProps({testID:'current-model-summary'}).props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});

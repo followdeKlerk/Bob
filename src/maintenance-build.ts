@@ -3,6 +3,7 @@ import {readFileSync,writeFileSync,mkdirSync,openSync,closeSync,copyFileSync,sta
 import {join,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {MaintenanceStore,sourceFingerprint,compatibilityFingerprint,type MaintenanceConfig,type UpdateJob,type Release} from './maintenance.js';
+import {assertBridgeBuild,type SupervisorEvidence} from './maintenance-migration.js';
 export async function buildRelease(home:string,config:MaintenanceConfig,store:MaintenanceStore,job:UpdateJob):Promise<Release>{
  const root=config.sourceRoot,dir=join(home,'releases',job.id);mkdirSync(dir,{recursive:true,mode:0o700});
  const log=join(dir,'build.log'),env={...process.env,PATH:[config.javaHome?join(config.javaHome,'bin'):'',dirname(config.node),process.env.PATH].filter(Boolean).join(':'),JAVA_HOME:config.javaHome,ANDROID_HOME:config.androidHome,BOB_SIGNING_PROPERTIES:config.signingProperties};
@@ -13,7 +14,9 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  const stage=(text:string)=>store.patch(job.id,{status:'building',stage:text});
  stage('Checking source and release compatibility');
  const compatibility=compatibilityFingerprint(root),active=store.get<Release>('active');
- if(active?.compatibility&&active.compatibility!==compatibility)throw Error('Durable/storage/task-bearing source changed. Explicit compatible migration required; running code untouched.');
+ const durableVersion=JSON.parse(readFileSync(join(root,'package.json'),'utf8')).dependencies?.['@earendil-works/pi-durable'];
+ if(active?.compatibility&&active.compatibility!==compatibility)assertBridgeBuild(active,{compatibility,durableVersion},store.get<SupervisorEvidence>('supervisorEvidence'));
+ else if(durableVersion!=='1.4.0'&&durableVersion!==active?.durableVersion)throw Error('Unrecognized Durable package transition');
  const android=job.target!=='backend';
  if(android){
   if(!config.javaHome||!config.androidHome||!config.signingProperties||!config.referenceApk)throw Error('Android build/signing configuration missing');
@@ -26,7 +29,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  const sourceHash=sourceFingerprint(root);
  stage('Compiling backend');await run('npm',['run','build']);
  stage('Running automated backend checks');await run('npm',['test'],root,600000);
- const release:Release={id:job.id,cli:'',sourceHash,compatibility};
+ const release:Release={id:job.id,cli:'',sourceHash,compatibility,durableVersion};
  if(android){
   stage('Compiling interactive content and checking mobile TypeScript');await run('npm',['run','build:interactive']);await run(join(root,'node_modules/.bin/tsc'),['--noEmit'],join(root,'apps/mobile'));
   stage('Building signed Android release');await run(join(root,'apps/mobile/android/gradlew'),['-p','android','assembleRelease','-PreactNativeArchitectures=x86_64,arm64-v8a'],join(root,'apps/mobile'));
@@ -48,7 +51,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  const archive=join(dir,'bob-local-cli-'+packageManifest.version+'.tgz'),installation=join(dir,'installation');
  await run('npm',['install','--offline','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',installation,archive],root,180000);
  const packageRoot=join(installation,'node_modules/@bob-local/cli');const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
- if(manifest.name!=='@bob-local/cli'||manifest.dependencies?.['@earendil-works/pi-durable']!=='1.4.0')throw Error('Native Durable package identity mismatch');
+ if(manifest.name!=='@bob-local/cli'||manifest.dependencies?.['@earendil-works/pi-durable']!==durableVersion)throw Error('Native Durable package identity mismatch');
  release.cli=join(packageRoot,'dist/cli.js');
  stage('Checking installed package in a disposable state');
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'setup','--cwd',dir],root,60000);

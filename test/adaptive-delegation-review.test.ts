@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createModels} from '@earendil-works/pi-ai/models';
-import {Type} from '@earendil-works/pi-ai';
+import * as schema from '@earendil-works/pi-schema';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall,type FauxResponseFactory} from '@earendil-works/pi-ai/providers/faux';
 import {defineExtension,defineTool,wrapTool,AgentDoc,LiveDoc,type Conversation,type Tx,type ToolExecutionApi} from '@earendil-works/pi-durable';
 import {State} from '../src/state.js';
@@ -209,7 +209,7 @@ test('adaptive review: a newer false steer and mixed peer steer cannot borrow an
  for(const kind of ['false-owner','peer'] as const){
   const f=fixture(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
   const {rt,chat}=await setup(f);let verifiedMixedRun=false;
-  const gate=defineTool({name:'adaptive_review_gate',description:'Independent deterministic test boundary',parameters:Type.Object({}),replay:'unsafe',execute:async()=>{entered.resolve();await release.promise;return {output:[{type:'text' as const,text:'Gate released'}]};}});
+  const gate=defineTool({name:'adaptive_review_gate',description:'Independent deterministic test boundary',parameters:schema.obj({},{open:true}),replay:'unsafe',execute:async()=>{entered.resolve();await release.promise;return {output:[{type:'text' as const,text:'Gate released'}]};}});
   const extension=defineExtension({name:'adaptive-review-gate',tools:[gate]});rt.registry.install(extension);await chat.configure({extensions:[...(await chat.agent(ctx)).extensions,extension]},ctx);
   let calls=0;f.flow(async()=>{
    if(calls++===0)return call('adaptive_review_gate',{});

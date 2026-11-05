@@ -135,16 +135,17 @@ test('small picker controls are at least 48dp and selected files have checked st
 });
 
 
-test('attachment modal puts close at header right and standardizes cards, input and Add with consistent selected borders',async()=>{
+test('attachment modal keeps Close left and Add right beneath the shared title and standardizes cards, input and Add with consistent selected borders',async()=>{
  const close=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<AttachmentPicker initialTab="files" limit={1000} onClose={close} onAdd={()=>{}}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
   expect(heading.props.title).toBe('Add files');expect(heading.props.onBack).toBeUndefined();
-  expect(heading.findByProps({testID:'section-heading-actions'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
+  expect(heading.findByProps({testID:'section-heading-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
   expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:20,paddingBottom:16});
   expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
   expect(StyleSheet.flatten(find(tree,'Gallery tab').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  expect(heading.findByProps({testID:'section-heading-actions'}).findAll(node=>node.props.accessibilityLabel==='Add 0 attachments').length).toBeGreaterThan(0);
   expect(StyleSheet.flatten(find(tree,'Add 0 attachments').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.accent,backgroundColor:colors.accent});
   expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===14&&style.borderColor===colors.border&&style.borderWidth===1&&style.marginTop===14;})).toBe(true);
   await act(async()=>find(tree,'report.pdf').props.onPress());

@@ -114,3 +114,20 @@ test('opening with a cached queued receipt persists its authoritative terminal r
  expect(writeHistoryCache).toHaveBeenCalledWith('history-pages:'+backend+':781',expect.stringContaining('save-completed'));
  await act(async()=>tree.unmount());
 });
+
+test('reopening legacy cached image results replaces their presentation without changing IDs or other rows',async()=>{
+ const legacy={id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'exact-read',content:[{type:'image',data:'A'.repeat(3170000),mimeType:'image/png'}]}]};
+ const unchanged={id:3,kind:'pi.assistant',model:[{role:'assistant',content:'Keep this reply'}]};
+ const old={...page(),items:[legacy,unchanged]};
+ const slim={...legacy,mobilePresentation:{version:1,omittedToolImages:true,originalEntryId:2},model:[{role:'toolResult',toolCallId:'exact-read',content:[{type:'text',text:'Image omitted from phone; original retained.'}]}]};
+ const fresh={...old,items:[slim,JSON.parse(JSON.stringify(unchanged))]};
+ const merged=mergeLatestHistory(old as any,fresh as any);
+ expect(merged.items[0]).toBe(slim);expect(merged.items[1]).toBe(unchanged);expect(mergeLatestHistory(merged,JSON.parse(JSON.stringify(fresh)))).toBe(merged);
+ (readHistoryCache as jest.Mock).mockResolvedValue(JSON.stringify(old));
+ const request=jest.fn().mockResolvedValue(fresh);let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<Harness request={request}/>);});
+ expect(history.page?.items[0]).toEqual(slim);expect(history.page?.items.map(item=>item.id)).toEqual([2,3]);
+ const persisted=JSON.parse((writeHistoryCache as jest.Mock).mock.calls.at(-1)[1]);
+ expect(persisted.items[0].mobilePresentation.omittedToolImages).toBe(true);expect(JSON.stringify(persisted)).not.toContain('A'.repeat(1000));
+ await act(async()=>tree.unmount());
+});

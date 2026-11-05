@@ -3,11 +3,14 @@ import {Text,TextInput} from './app-text';
 import React,{useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Pressable,StyleSheet,View} from 'react-native';
 import {ChevronDown,ChevronRight,FileText} from 'lucide-react-native';
-import {colors,menuChrome} from '../theme';
+import {themed,useTheme,useThemedValue} from '../theme';
 export type ConversationChange={instructions:string|null}|{cwd:string};
 export type SavedConversationSettings={instructions:string|null;cwd:string};
 type Props={instructions:string;folder:string;inherited:boolean;onInstructionsChange:(text:string)=>void;onFolderChange:(text:string)=>void;onLoad:()=>Promise<SavedConversationSettings>;onSave:(change:ConversationChange)=>Promise<SavedConversationSettings>};
 export function ConversationSettings({instructions,folder,inherited,onInstructionsChange,onFolderChange,onLoad,onSave}:Props){
+ const {colors}=useTheme();
+ const s=useThemedValue(sTheme);
+
  const [open,setOpen]=useState(false),[busy,setBusy]=useState<'instructions'|'default'|'folder'>(),[feedback,setFeedback]=useState(''),[error,setError]=useState(false);
  const [loading,setLoading]=useState(false),[loaded,setLoaded]=useState(false),[loadError,setLoadError]=useState('');
  const loadedRef=useRef(false),loadingRef=useRef(false);
@@ -65,9 +68,9 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
   </View>}
  </View>;
 }
-const s=StyleSheet.create({
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  heading:{flexDirection:'row',alignItems:'center',gap:12,minHeight:62,paddingHorizontal:2,paddingVertical:10},icon:{...menuChrome.icon,width:34,height:34,alignItems:'center',justifyContent:'center'},headingText:{flex:1,color:colors.foreground,fontSize:15,lineHeight:23},
  body:{paddingHorizontal:2,paddingTop:10,paddingBottom:16,gap:12},labelRow:{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:14,fontWeight:'600'},mode:{color:colors.accent,fontSize:11,lineHeight:18},hint:{color:colors.muted,fontSize:12,lineHeight:20},
  input:{...menuChrome.input,paddingHorizontal:12,paddingVertical:12,color:colors.foreground,fontSize:15,lineHeight:24},instructions:{minHeight:132,maxHeight:260},path:{fontSize:13,fontFamily:APP_FONT_FAMILY},
  actions:{flexDirection:'row',flexWrap:'wrap',gap:8},action:{...menuChrome.control,minHeight:48,minWidth:88,paddingVertical:12,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},primary:{backgroundColor:colors.accent,borderColor:colors.accent},actionText:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600'},folder:{borderTopWidth:1,borderColor:colors.subtle,marginTop:8,paddingTop:20,gap:12},feedback:{color:colors.accent,fontSize:12,lineHeight:20},
-});
+}));

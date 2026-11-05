@@ -1,15 +1,16 @@
 import {DatabaseSync} from 'node:sqlite';
-import {mkdirSync,chmodSync,openSync,closeSync,readFileSync,writeFileSync,copyFileSync,cpSync,existsSync,readdirSync,statSync} from 'node:fs';
+import {mkdirSync,chmodSync,openSync,closeSync,readFileSync,existsSync,readdirSync,statSync} from 'node:fs';
 import {spawn,type ChildProcess} from 'node:child_process';
 import {randomBytes,createHash} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
+import {acquireOwner} from './ownership.js';
+import {readControlFloor,assertReleaseFloor,assertFloorIntent,assertLegacyIntent,assertBridgeActivation,preparePi15Floor,prepareFreshPi15ReleaseFloor,verifiedBackup,type MigrationIntent,type SupervisorEvidence} from './maintenance-migration.js';
 export type UpdateRequest={id:string;action:'build'|'update'|'rollback';target:'android'|'backend'|'all';conversationId?:number};
 export type UpdateJob=UpdateRequest&{status:string;stage:string;created:number;updated:number;error?:string;releaseId?:string};
 /** Deployment journal only. Conversation/tool execution remains in official Durable. */
 export class MaintenanceStore{
  readonly db:DatabaseSync;
- constructor(readonly home:string){mkdirSync(home,{recursive:true,mode:0o700});this.db=new DatabaseSync(join(home,'journal.sqlite'));chmodSync(join(home,'journal.sqlite'),0o600);this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,request TEXT NOT NULL,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)');}
+ constructor(readonly home:string){mkdirSync(home,{recursive:true,mode:0o700});this.db=new DatabaseSync(join(home,'journal.sqlite'));chmodSync(join(home,'journal.sqlite'),0o600);this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,request TEXT NOT NULL,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)');}
  enqueue(request:UpdateRequest):UpdateJob{
   if(!/^[A-Za-z0-9_-]{1,128}$/.test(request.id)||!['build','update','rollback'].includes(request.action)||!['android','backend','all'].includes(request.target))throw Error('Invalid self-update request');
   const canonical=JSON.stringify({id:request.id,action:request.action,target:request.target,conversationId:request.conversationId});
@@ -32,21 +33,63 @@ export function sourceFingerprint(root:string){
  for(const path of ['src','packages','apps','test','package.json','package-lock.json','tsconfig.json'])visit(path);
  return hash.digest('hex');
 }
-export function compatibilityFingerprint(root:string){
+export function rawCompatibilityFingerprint(root:string){
  const hash=createHash('sha256');const manifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
  for(const name of ['@earendil-works/pi-durable','@earendil-works/pi-ai','@earendil-works/chord'])hash.update(name+':'+manifest.dependencies[name]);
  for(const file of ['src/control-migrations.ts','packages/core/src/documents.ts','packages/subagents/src/index.ts','packages/peers/src/index.ts','packages/interactive/src/index.ts'])hash.update(file+':').update(readFileSync(join(root,file)));
  return hash.digest('hex');
 }
-export type Release={id:string;cli:string;sourceHash?:string;compatibility?:string;apk?:{path:string;sha256:string;size:number;versionCode:number;versionName:string;signer:string}};
+/** Persistence compatibility identities, not source identities. This exact reviewed
+ * schema-builder conversion changes no document/task format or executor. Keep the
+ * original raw hash calculation above, and the full sourceHash, for audit. Never
+ * accept aliases from configuration, requests, environment or journal metadata.
+ * Any other source/version change retains its distinct raw fingerprint and fails
+ * the existing transition gate. The historical Pi1.5 floor/intent stay untouched. */
+export function compatibilityFingerprint(root:string){
+ const raw=rawCompatibilityFingerprint(root);
+ return raw==='95750e8918ed663e0607933a0e3867674fec8098d32981b45008b15806a072f9'
+  ?'5c798ab849e5ebf456f1aa4da70f8ef88f87af72bd8e709292083776ba1d0b45':raw;
+}
+export type Release={id:string;cli:string;sourceHash?:string;compatibility?:string;durableVersion?:string;apk?:{path:string;sha256:string;size:number;versionCode:number;versionName:string;signer:string}};
 export type MaintenanceConfig={sourceRoot:string;stateDir:string;backendId:string;node:string;serveArgs:string[];origin:string;healthTimeoutMs?:number;javaHome?:string;androidHome?:string;signingProperties?:string;referenceApk?:string};
 const sleep=(ms:number)=>new Promise<void>(r=>setTimeout(r,ms));
 export class MaintenanceSupervisor{
  child?:ChildProcess;transitioning=false;expectedStop=true;private healthToken=randomBytes(32).toString('hex');
  constructor(readonly home:string,readonly config:MaintenanceConfig,readonly store=new MaintenanceStore(home)){}
  async health(){const response=await fetch(this.config.origin+'/internal/update-health',{headers:{authorization:'Bearer '+this.healthToken},signal:AbortSignal.timeout(3000)});if(!response.ok)throw Error('Backend health unavailable');const value=await response.json() as {backendId:string;releaseId:string;foreground:number};if(value.backendId!==this.config.backendId)throw Error('Backend identity mismatch');return value;}
+ /** Every recovery decision reads the actual floor, including COMMIT-before-phase crashes. */
+ recoveryRelease():Release{
+  const intent=this.store.get<MigrationIntent>('migrationIntent');let floor=readControlFloor(this.config.stateDir,!!intent);
+  let active=this.store.get<Release>('active');
+  const interrupted=this.store.get<{previous:Release;candidate:Release}>('transition');
+  if(floor.kind==='pi15'){
+   assertFloorIntent(floor,intent);
+   // The stable loader may still have selected the old bridge runner. It must recover forward.
+   if(interrupted?.previous?.compatibility===floor.to&&interrupted.previous.durableVersion==='1.5.0')active=interrupted.previous;
+   if(!active||active.compatibility!==floor.to||active.durableVersion!=='1.5.0')active=intent!.candidate;
+  }else if(intent){
+   assertLegacyIntent(intent);active=intent.previous;
+  }else if(interrupted){active=interrupted.previous;}
+  if(!active)throw Error('No installed backend recovery release');
+  if(floor.kind==='legacy'&&!intent&&active.durableVersion==='1.5.0'){
+   const releaseOwner=acquireOwner(this.config.stateDir);
+   try{floor=prepareFreshPi15ReleaseFloor(this.config.stateDir,active,intent);}finally{releaseOwner();}
+  }
+  assertReleaseFloor(floor,active,intent);
+  this.store.set('active',active);this.store.set('transition',null);
+  if(floor.kind==='legacy'&&intent)this.store.set('migrationIntent',null);
+  return active;
+ }
  async start(release:Release){
   if(this.child&&this.child.exitCode===null&&this.child.signalCode===null)throw Error('Backend already running');
+  // Check under the same OS-backed ownership lock used by the runtime. Release for handoff;
+  // the child's own runtime lock remains the final single-owner authority.
+  const releaseOwner=acquireOwner(this.config.stateDir);
+  try{
+   const intent=this.store.get<MigrationIntent>('migrationIntent');let floor=readControlFloor(this.config.stateDir,!!intent);
+   if(floor.kind==='legacy'&&!intent&&release.durableVersion==='1.5.0')floor=prepareFreshPi15ReleaseFloor(this.config.stateDir,release,intent);
+   assertReleaseFloor(floor,release,intent);
+  }finally{releaseOwner();}
   this.expectedStop=false;
   const fd=openSync(join(this.home,'backend.log'),'a',0o600);
   this.child=spawn(this.config.node,[release.cli,...this.config.serveArgs],{cwd:this.config.sourceRoot,env:{...process.env,BOB_MAINTENANCE_HOME:this.home,BOB_RELEASE_ID:release.id,BOB_HEALTH_TOKEN:this.healthToken},stdio:['ignore',fd,fd]});closeSync(fd);
@@ -63,24 +106,48 @@ export class MaintenanceSupervisor{
   if(child.exitCode===null&&child.signalCode===null)throw Error('Backend did not stop gracefully; no second owner started');
  }
  async activate(candidate:Release){
+  if(this.transitioning)throw Error('A release transition is already in progress');
   const previous=this.store.get<Release>('active');if(!previous)throw Error('No rollback release');
-  if(previous.compatibility&&candidate.compatibility!==previous.compatibility)throw Error('Storage/task schema changed; explicit compatible migration required');
+  assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),previous,this.store.get<MigrationIntent>('migrationIntent'));
+  const crossing=candidate.compatibility!==previous.compatibility;
+  if(crossing)assertBridgeActivation(previous,candidate,this.store.get<SupervisorEvidence>('supervisorEvidence'));
+  else assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),candidate,this.store.get<MigrationIntent>('migrationIntent'));
   this.transitioning=true;this.store.set('draining',true);
   try{
    const until=Date.now()+600000;
    while((await this.health()).foreground!==0){if(Date.now()>until)throw Error('Active work did not settle; release remains staged');await sleep(1000);}
-   this.store.set('transition',{previous,candidate});await this.stop();
+   if(crossing)assertBridgeActivation(previous,candidate,this.store.get<SupervisorEvidence>('supervisorEvidence'));
+   this.store.set('transition',{previous,candidate});
+   if(crossing)this.store.set('migrationIntent',{protocol:'bob-pi15-v1',previous,candidate,phase:'intent'} satisfies MigrationIntent);
+   await this.stop();
    try{
-    if(existsSync(join(this.config.stateDir,'durable.sqlite'))){
-     const backup=join(this.home,'backups',candidate.id+'-'+Date.now());mkdirSync(backup,{recursive:true,mode:0o700});
-     for(const name of ['control.sqlite','control.sqlite-wal','durable.sqlite','durable.sqlite-wal','artifacts'])if(existsSync(join(this.config.stateDir,name)))cpSync(join(this.config.stateDir,name),join(backup,name),{recursive:true});
-     for(const name of ['control.sqlite','durable.sqlite']){const db=new DatabaseSync(join(backup,name),{readOnly:true});try{const check=db.prepare('PRAGMA integrity_check').get();if(!check||Object.values(check)[0]!=='ok')throw Error('State backup integrity failed');}finally{db.close();}}
-     this.store.set('lastBackup',backup);
+    if(crossing)preparePi15Floor(this.home,this.config.stateDir,this.store,this.store.get<MigrationIntent>('migrationIntent')!);
+    else{
+     const releaseOwner=acquireOwner(this.config.stateDir);
+     try{
+      assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),candidate,this.store.get<MigrationIntent>('migrationIntent'));
+      this.store.set('lastBackup',verifiedBackup(this.home,this.config.stateDir,candidate.id));
+     }finally{releaseOwner();}
     }
     await this.start(candidate);this.store.set('previous',previous);this.store.set('active',candidate);this.store.set('transition',null);
+    const intent=this.store.get<MigrationIntent>('migrationIntent');
+    if(crossing&&intent)this.store.set('migrationIntent',{...intent,phase:'complete'});
    }
-   catch(error){await this.stop();await this.start(previous);this.store.set('active',previous);this.store.set('transition',null);throw Error('Unhealthy candidate rolled back to previous code; state retained');}
+   catch(error){
+    await this.stop();
+    // This read is mandatory even if migration threw before it could journal its COMMIT.
+    // Unknown/corrupt floors throw here, leaving intent and state intact, with no spawn.
+    const intent=this.store.get<MigrationIntent>('migrationIntent'),floor=readControlFloor(this.config.stateDir,!!intent);
+    if(floor.kind==='pi15'){
+     assertFloorIntent(floor,intent);
+     if(crossing)throw Error('Pi 1.5 floor committed; compatible candidate recovery required. Intent retained; no old restart or database restore.',{cause:error});
+    }
+    if(floor.kind==='legacy'&&intent)assertLegacyIntent(intent);
+    assertReleaseFloor(floor,previous,intent);
+    await this.start(previous);this.store.set('active',previous);this.store.set('transition',null);
+    if(crossing)this.store.set('migrationIntent',null);
+    throw Error('Unhealthy candidate rolled back to previous code; state retained',{cause:error});
+   }
   }finally{this.store.set('draining',false);this.transitioning=false;}
  }
 }
-
