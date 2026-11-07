@@ -57,10 +57,11 @@ git clone https://github.com/followdeKlerk/Bob.git
 cd Bob
 npm ci
 npm run build
-npm test
 node dist/cli.js --state /absolute/path/to/new-bob-state setup --cwd /absolute/path/to/workspace
 node dist/cli.js --state /absolute/path/to/new-bob-state doctor
 ```
+
+For development verification, follow [the contributor checks](CONTRIBUTING.md#development-checks): the full suite additionally needs mobile JavaScript dependencies and Chromium. These are not required merely to build the backend.
 
 Configure your model using one supported authentication path and an exact model ID:
 

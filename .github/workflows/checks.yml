@@ -26,6 +26,8 @@ jobs:
           node-version: '24.22.1'
           cache: npm
       - run: npm ci
+      - name: Install mobile dependencies used by cross-component tests
+        run: npm ci --prefix apps/mobile
       - run: npm run build
       - name: Install browser test runtime
         run: npx playwright install --with-deps chromium

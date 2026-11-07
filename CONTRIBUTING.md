@@ -28,10 +28,13 @@ From the repository root:
 
 ```sh
 npm ci
+npm ci --prefix apps/mobile
 npm run build
 npm test
 node tools/check-package.mjs
 ```
+
+The root suite includes cross-component tests that import mobile JavaScript dependencies, so both dependency installs above are required; no Android SDK is needed for these checks.
 
 Browser tests require Chromium. They use `BOB_TEST_CHROMIUM` when explicitly set, otherwise the system `/usr/bin/chromium` when available, then Playwright's bundled browser. On a clean Linux machine, `npx playwright install --with-deps chromium` installs the browser and required system libraries (system installation may request sudo). The test runner supplies the OS temporary-directory default when `TMPDIR` is unset. These are test settings, not changes to the production browser configuration.
 
