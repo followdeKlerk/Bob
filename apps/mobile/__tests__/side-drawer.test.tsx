@@ -211,7 +211,7 @@ test('global session actions sit in the measured bottom footer with New before M
 });
 
 test('embedded session filters follow the measured heading without an extra screen-specific spacer',async()=>{
- await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="nathan-omarchy.tail7d5b8e.ts.net" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="workstation.example.ts.net" visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
  act(()=>tree.root.findByProps({testID:'drawer-header'}).props.onLayout({nativeEvent:{layout:{height:107}}}));
  expect(tree.root.findByProps({testID:'drawer-scroll-list'}).props.contentContainerStyle.paddingTop).toBe(107);
  expect(tree.root.findByType(SectionSegments).props.label).toBe('Session filters');

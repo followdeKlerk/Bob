@@ -102,7 +102,7 @@ test.each(filterSets.map(options=>[options] as const))('Reusables filters keep s
 });
 test('long workstation subtitles cannot vertically shift header actions and share the full content width',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Sessions" subtitle="nathan-omarchy.tail7d5b8e.ts.net"/><SectionActions><RoundAction label="Schedules" icon={Bell} onPress={()=>{}}/><RoundAction label="Search" icon={Bell} onPress={()=>{}}/><RoundAction label="New" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
+ await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Sessions" subtitle="workstation.example.ts.net"/><SectionActions><RoundAction label="Schedules" icon={Bell} onPress={()=>{}}/><RoundAction label="Search" icon={Bell} onPress={()=>{}}/><RoundAction label="New" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
  try{
   const row=tree.root.findByProps({testID:'section-heading-row'}),subtitle=tree.root.findAllByType(Text).find(node=>node.props.testID==='section-heading-subtitle')!;
   expect(StyleSheet.flatten(row.props.style)).toMatchObject({alignItems:'flex-start',minHeight:35,flexDirection:'row'});

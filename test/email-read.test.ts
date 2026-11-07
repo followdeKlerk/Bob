@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {homedir,tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {Harness,createRegistry,defineExtension} from '@earendil-works/pi-durable';
@@ -10,7 +11,7 @@ import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {createSchedules,Schedules,scheduleAlerts} from '../src/schedules.js';
 import {EmailDelivered} from '../src/email-documents.js';
-import {createEmailRead,emailCommand,projectEnvelopes,projectMessage,mailSourceKey,redactMail,type EmailRunner} from '../src/email-read.js';
+import {createEmailRead,emailCommand,himalayaPath,runHimalaya,projectEnvelopes,projectMessage,mailSourceKey,redactMail,type EmailRunner} from '../src/email-read.js';
 const now=Date.now(),today=new Date(now).toISOString().slice(0,10),old=new Date(now-91*86400000).toISOString().slice(0,10);
 const envelope={id:'123','message-id':'<reply@example.test>',subject:'Re: Your application',from:[{name:'Recruiter',email:'recruiter@example.test'}],date:new Date(now).toISOString(),flags:[{iana:'seen',raw:'\\Seen'}]};
 const mime={text_body:[1],html_body:[2],attachments:[3],parts:[
@@ -25,12 +26,34 @@ const source=mailSourceKey('reply@example.test');
 const reply=(name:string,args:object)=>fauxAssistantMessage([fauxToolCall(name,args)],{stopReason:'toolUse'});
 async function until<T>(read:()=>Promise<T>,done:(v:T)=>boolean){for(let i=0;i<300;i++){const v=await read();if(done(v))return v;await new Promise(r=>setTimeout(r,20));}throw Error('Timed out');}
 
+test('email executable defaults to the host home and accepts only explicit absolute paths',()=>{
+ assert.equal(himalayaPath({}),join(homedir(),'.local','bin','himalaya'));
+ for(const path of ['/opt/mail/bin/himalaya','/opt/mail tools/himalaya; literal'])assert.equal(himalayaPath({BOB_HIMALAYA_PATH:path}),path);
+ for(const path of ['', ' ', 'himalaya', './himalaya', '~/bin/himalaya', '/opt/mail\n/himalaya', '/opt/mail\r/himalaya', '/opt/mail\t/himalaya', '/opt/mail\0/himalaya', '/opt/mail\x7f/himalaya', '/opt/mail\x85/himalaya'])assert.throws(()=>himalayaPath({BOB_HIMALAYA_PATH:path}),/nonempty absolute path without control characters/);
+});
+
+test('email runner uses the host-selected executable and literal argv without shell or stdin',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'bob-email-executable-')),executable=join(dir,'fake himalaya; literal'),previous=process.env.BOB_HIMALAYA_PATH;
+ try{
+  writeFileSync(executable,`#!${process.execPath}\nlet stdin='';\nprocess.stdin.setEncoding('utf8');\nprocess.stdin.on('data',chunk=>{stdin+=chunk;});\nprocess.stdin.on('end',()=>{process.stdout.write(JSON.stringify({argv:process.argv.slice(2),stdin,rustLog:process.env.RUST_LOG}));});\n`,{mode:0o700});
+  process.env.BOB_HIMALAYA_PATH=executable;
+  const args=emailCommand({...search,query:'subject "x; $(touch /never-created)"'}).args;
+  assert.deepEqual(await runHimalaya(args),{argv:args,stdin:'',rustLog:'off'});
+  assert.deepEqual(await runHimalaya(emailCommand(read).args),{argv:['message','read','--account','gmx','--mailbox','Inbox','--json','123'],stdin:'',rustLog:'off'});
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(runHimalaya(args,controller.signal),/cancelled/);
+ }finally{
+  if(previous===undefined)delete process.env.BOB_HIMALAYA_PATH;else process.env.BOB_HIMALAYA_PATH=previous;
+  rmSync(dir,{recursive:true,force:true});
+ }
+});
+
 test('fixed read-only argument vectors reject every mutation, config override and out-of-window request',()=>{
  assert.deepEqual(emailCommand(read).args,['message','read','--account','gmx','--mailbox','Inbox','--json','123']);
  const command=emailCommand({...search,query:'subject "x; touch /tmp/no"'}).args;
  assert.equal(command[0],'envelope');assert.equal(command.at(-2),'--');assert.ok(command.at(-1)!.includes('touch /tmp/no'));
  assert.ok(!command.includes('--seen'));assert.ok(!command.includes('--raw'));
- for(const input of [{action:'send'},{action:'flag'},{...read,seen:true},{...read,id:'123 --seen'},{...read,account:'other'},{...read,mailbox:'--config'},{...read,mailbox:'Drafts'},{...search,fromDate:old},{...search,fromDate:'2026-02-30'},{...search,page:0},{...search,pageSize:101},{...search,query:'x\n--config'}])assert.throws(()=>emailCommand(input));
+ for(const input of [{action:'send'},{action:'flag'},{...read,seen:true},{...read,id:'123 --seen'},{...read,account:'other'},{...read,executable:'/tmp/other'},{...read,BOB_HIMALAYA_PATH:'/tmp/other'},{...read,himalayaPath:'/tmp/other'},{...read,mailbox:'--config'},{...read,mailbox:'Drafts'},{...search,fromDate:old},{...search,fromDate:'2026-02-30'},{...search,page:0},{...search,pageSize:101},{...search,query:'x\n--config'}])assert.throws(()=>emailCommand(input));
 });
 
 test('envelopes are date-filtered and full pages never claim completeness',()=>{

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --import tsx
-/** Opt-in REAL inference; never opens a runtime on owner state. See assets/learning/reuse-evaluation.md. */
+/** Opt-in REAL inference; never opens a runtime on owner state. */
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';

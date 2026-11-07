@@ -4,7 +4,6 @@ The Android app connects to your Bob backends for conversations, files, Notes, d
 
 - [Install Bob](../../INSTALL.md) — install the app, configure a backend and pair your phone.
 - [Features](../../FEATURES.md) — app navigation and everyday workflows.
-- [Operations](../../OPERATIONS.md) — backend configuration, updates and recovery.
 
 ## Updates
 

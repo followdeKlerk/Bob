@@ -64,7 +64,7 @@ cli.json
 *.bak
 *.backup
 
-# Keep ad-hoc captures private; reviewed showcase assets live in assets/showcase/.
+# Keep ad-hoc screenshots and recordings private.
 /screenshots/
 /recordings/
 /captures/

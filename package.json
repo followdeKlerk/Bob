@@ -34,16 +34,19 @@
   "files": [
     "dist/*.js",
     "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    ".mise.toml",
+    "assets/bob-logo.png",
+    "packages/memory/README.md",
+    "apps/mobile/android/app/src/main/assets/fonts/README.md",
+    "apps/mobile/android/app/src/main/assets/fonts/OFL.txt",
     "INSTALL.md",
     "SETUP-AGENT.md",
     "install.sh",
     "FEATURES.md",
-    "PHONE-CAPABILITIES.md",
-    "OPERATIONS.md",
     "THIRD_PARTY_NOTICES.md",
-    "assets/learning",
-    "PI15-MIGRATION.md",
-    "SCHEMA-MIGRATION.md"
+    "assets/learning"
   ],
   "scripts": {
     "build": "npm run build --workspaces && tsc",

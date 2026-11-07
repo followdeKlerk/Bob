@@ -1,5 +1,7 @@
 import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {homedir} from 'node:os';
+import {isAbsolute,join} from 'node:path';
 import {defineExtension,defineTool,section,type Harness} from '@earendil-works/pi-durable';
 import * as schema from '@earendil-works/pi-schema';
 import {z} from 'zod';
@@ -13,11 +15,16 @@ const Search=z.object({action:z.literal('search'),mailbox,fromDate:day,toDate:da
 export const EmailRequest=z.union([z.object({action:z.literal('mailboxes')}).strict(),Search,z.object({action:z.literal('read'),mailbox,id:z.string().regex(/^[1-9]\d{0,19}$/)}).strict()]);
 type Input=z.infer<typeof EmailRequest>;
 export type EmailRunner=(args:readonly string[],signal?:AbortSignal)=>Promise<unknown>;
-export const HIMALAYA='/home/ndk/.local/bin/himalaya';
-/** Fixed executable, argument array, no shell/stdio input/config/log overrides or arbitrary subcommands. */
+/** Only trusted host configuration selects the executable; never tool arguments or PATH. */
+export function himalayaPath(env:NodeJS.ProcessEnv=process.env){
+ const path=env.BOB_HIMALAYA_PATH??join(homedir(),'.local','bin','himalaya');
+ if(!path.trim()||!isAbsolute(path)||/[\x00-\x1f\x7f-\x9f]/.test(path))throw Error('BOB_HIMALAYA_PATH must be a nonempty absolute path without control characters');
+ return path;
+}
+/** Host-selected executable, argument array, no shell/stdio input/config/log overrides or arbitrary subcommands. */
 export const runHimalaya:EmailRunner=(args,signal)=>new Promise((resolve,reject)=>{
  if(signal?.aborted){reject(Error('Read-only email request cancelled'));return;}
- const child=spawn(HIMALAYA,[...args],{shell:false,stdio:['ignore','pipe','pipe'],env:{...process.env,RUST_LOG:'off'}});const chunks:Buffer[]=[];let size=0,failed=false;
+ const child=spawn(himalayaPath(),[...args],{shell:false,stdio:['ignore','pipe','pipe'],env:{...process.env,RUST_LOG:'off'}});const chunks:Buffer[]=[];let size=0,failed=false;
  const stop=()=>{child.kill('SIGTERM');};const timer=setTimeout(()=>{failed=true;stop();},20000);timer.unref();
  const hardStop=setTimeout(()=>{failed=true;child.kill('SIGKILL');},22000);hardStop.unref();
  const onAbort=()=>{failed=true;stop();};signal?.addEventListener('abort',onAbort,{once:true});if(signal?.aborted)onAbort();
