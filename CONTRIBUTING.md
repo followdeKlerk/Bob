@@ -33,6 +33,8 @@ npm test
 node tools/check-package.mjs
 ```
 
+Browser tests require Chromium. They use `BOB_TEST_CHROMIUM` when explicitly set, otherwise the system `/usr/bin/chromium` when available, then Playwright's bundled browser. On a clean Linux machine, `npx playwright install --with-deps chromium` installs the browser and required system libraries (system installation may request sudo). The test runner supplies the OS temporary-directory default when `TMPDIR` is unset. These are test settings, not changes to the production browser configuration.
+
 The checked-in GitHub Actions workflow runs the backend build and test suite (including documentation, repository hygiene and prompt tests), learning-prompt provenance verification, package inventory/link checks, and mobile tests/typecheck without provider credentials. Environment-gated tests may skip; report skips rather than treating them as passes. CI does not build signed Android releases or verify on-device behavior. Run the relevant checks locally and report their results.
 
 For documentation-only changes, run the local link and structure checks:
@@ -44,6 +46,7 @@ node --import tsx --test test/documentation.test.ts
 For mobile changes, install the app's separate dependencies and run its checks:
 
 ```sh
+npm run build
 npm run build:interactive
 cd apps/mobile
 npm ci

@@ -51,7 +51,7 @@
   "scripts": {
     "build": "npm run build --workspaces && tsc",
     "build:interactive": "tsc -p apps/interactive/tsconfig.json && esbuild apps/interactive/host.ts --bundle --minify --platform=browser --format=iife --outfile=apps/mobile/android/app/src/main/assets/bob-host.js",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --import ./test/environment.mjs --test test/*.test.ts",
     "bob": "tsx src/cli.ts"
   },
   "dependencies": {

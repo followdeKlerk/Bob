@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {build} from 'esbuild';
-import {chromium,type Page} from 'playwright';
+import {type Page} from 'playwright';
+import {launchTestChromium} from './chromium.js';
 
 // The actual Android host document/CSP, host bundle and measurement asset. The
 // Native View/gesture dispatch still requires device evidence; this is Chromium.
@@ -31,8 +32,10 @@ const waitFallback=(page:Page)=>page.waitForFunction(()=>document.querySelector(
 export function registerInlineVisualLifecycle(){
 test('inline visual size and data lifecycle in the actual isolated host document',{timeout:120000},async t=>{
  const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,minify:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
- const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true}),scriptErrors:string[]=[];
- t.after(async()=>{await browser.close();assert.deepEqual(scriptErrors,[],'host/fixture scripts must not fail silently');});
+ const scriptErrors:string[]=[];
+ let cleanupBrowser:Awaited<ReturnType<typeof launchTestChromium>>|undefined;
+ t.after(async()=>{await cleanupBrowser?.close();assert.deepEqual(scriptErrors,[],'host/fixture scripts must not fail silently');});
+ const browser=cleanupBrowser=await launchTestChromium();
  async function open(html=compact,options:{measure?:string;inline?:boolean;resize?:boolean;visualData?:unknown}={}){
   const page=await browser.newPage({viewport:{width:313,height:420}});
   page.on('pageerror',error=>scriptErrors.push(error.message));
@@ -158,8 +161,25 @@ test('inline visual size and data lifecycle in the actual isolated host document
     // Exercise the burst window deterministically while retaining real Chromium
     // layout/ACKs. A heavily loaded build host can stretch 20 fast requests past
     // 1500ms, legitimately invoking the continuous guard instead of the burst.
-    // Freeze only this page's guard clock; browser layout and timers remain real.
-    await page.evaluate("(()=>{const now=performance.now();Object.defineProperty(performance,'now',{value:()=>now});})()");
+    // Pause both parent guard clocks: freezing performance.now alone leaves the
+    // 3s unsettled-layout timeout racing the burst under full-suite CPU load,
+    // especially for 100vh+10px, which intentionally never ACKs a stable fit.
+    // Child measurement, animation frames, Chromium layout and native ACKs stay
+    // real. The missing-measurement test above exercises the real deadline.
+    await page.evaluate(`(()=>{
+     let now=performance.now(),next=-1;
+     const timers=new Map(),clear=window.clearTimeout.bind(window);
+     Object.defineProperty(performance,'now',{value:()=>now});
+     window.setTimeout=(callback,delay=0,...args)=>{
+      const id=next--;timers.set(id,{at:now+delay,run:()=>callback(...args)});return id;
+     };
+     window.clearTimeout=id=>{if(!timers.delete(id))clear(id);};
+     window.__advanceOverflowClock=elapsed=>{
+      now+=elapsed;
+      for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.run();}
+      return timers.size;
+     };
+    })()`);
     if(runaway){
      await child.evaluate(()=>{document.body.style.height='calc(100vh + 10px)';});
      await waitFallback(page);
@@ -174,6 +194,9 @@ test('inline visual size and data lifecycle in the actual isolated host document
     }
     const requests=(await state(page)).requests;
     assert.ok(requests.filter(request=>request.payload.method==='layout').length-initialRequests<=16);
+    assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
+    // Advancing the paused deadline cannot cause a second promotion.
+    await page.evaluate('window.__advanceOverflowClock(3001)');
     assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
    }finally{await page.close();}
   }

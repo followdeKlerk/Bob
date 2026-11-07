@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {chromium} from 'playwright';
+import {launchTestChromium} from './chromium.js';
 import {build} from 'esbuild';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
@@ -15,7 +15,7 @@ import {Interactive} from '../src/interactive.js';
 import {createMcpFixture} from './mcp-fixture.js';
 import {registerInlineVisualLifecycle} from './inline-visual-lifecycle.js';
 
-test('real MCP Apps handshake and tools: native Durable records, scoped capabilities, idempotency, sandbox', {timeout:90000},async()=>{
+test('real MCP Apps handshake and tools: native Durable records, scoped capabilities, idempotency, sandbox', {timeout:90000},async t=>{
  const fixture=await createMcpFixture(),state=new State(mkdtempSync(join(process.env.TMPDIR!,'bob-interactive-')));
  state.set('mcpConnections',[{id:'fixture',endpoint:'http://127.0.0.1:49160/mcp',enabled:true,allowedTools:['show','increment']}]);
  const models=createModels(),faux=fauxProvider();models.setProvider(faux.provider);
@@ -24,8 +24,11 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
    fauxAssistantMessage([fauxToolCall('mcp_app',{serverId:'fixture',tool:'show',arguments:{}})],{stopReason:'toolUse'}),fauxAssistantMessage('DETERMINISTIC MODEL: MCP resource created'),
  ]);
  const runtime=await openRuntime(state,models,fixture.transport);
- let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined,site:ReturnType<typeof createServer>|undefined;
- try {
+ let browser:Awaited<ReturnType<typeof launchTestChromium>>|undefined,site:ReturnType<typeof createServer>|undefined;
+ t.after(async()=>{
+   try {await browser?.close();}
+   finally {site?.close();await runtime.close();await fixture.close();state.close();}
+ });
    const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'faux',modelId:'faux-1'}}},ctx);
    const other=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
    for(const content of ['visual','MCP']){await chat.submit({type:'input',content},ctx);await chat.waitForIdle(ctx);}
@@ -51,7 +54,7 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
    const payload={kind:opened.kind,title:opened.title,html:opened.html,input:opened.input,result:opened.result,allowedTools:opened.allowedTools};
    const html=`<!doctype html><div id="status"></div><div id="surface" style="height:600px"></div><script>${host}</script><script>window.BobNative={request:(raw,nonce)=>window.testNative(raw,nonce).then(value=>window.__bobReply(JSON.parse(raw).id,value))};window.startBobSurface(${JSON.stringify(payload).replaceAll('<','\\u003c')},'fixture-nonce')</script>`;
    site=createServer((_req,res)=>{res.setHeader('content-type','text/html');res.end(html);});site.listen(0,'127.0.0.1');await once(site,'listening');
-   browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});const page=await browser.newPage();
+   browser=await launchTestChromium();const page=await browser.newPage();
    await page.exposeFunction('testNative',async(raw:string,nonce:string)=>{
      assert.equal(nonce,'fixture-nonce');const p=JSON.parse(raw);
      try{return {result:await runtime.interactive.call(runtime.harness,chat,app.id,device,{capability:opened.capability,requestId:p.id,...p.params})};}
@@ -86,7 +89,6 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
      await assert.rejects(runtime.interactive.call(runtime.harness,chat,app.id,device,stoppedCall),/no automatic resend/);
      assert.equal(fixture.counter,2);
    }finally{held.release();}
- } finally {await browser?.close();site?.close();await runtime.close();await fixture.close();state.close();}
 });
 registerInlineVisualLifecycle();
 
@@ -97,7 +99,9 @@ test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in hos
  ).join('');
  const native=readFileSync('apps/mobile/android/app/src/main/java/com/bobmobile/BobInteractive.kt','utf8');
  const template=/val html = """([\s\S]*?)"""/.exec(native)![1];
- const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});t.after(()=>browser.close());
+ let cleanupBrowser:Awaited<ReturnType<typeof launchTestChromium>>|undefined;
+ t.after(async()=>{await cleanupBrowser?.close();});
+ const browser=cleanupBrowser=await launchTestChromium();
  const errors:string[]=[],requests:string[]=[];
  async function open(kind:'visual'|'mcp',html:string,fonts=fontCss){
   const page=await browser.newPage();page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>requests.push(request.url()));
