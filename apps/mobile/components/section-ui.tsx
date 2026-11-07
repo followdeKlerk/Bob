@@ -79,7 +79,7 @@ export function RoundAction({label,icon:Icon,onPress,disabled=false,primary=fals
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
- return <Button variant={primary?'default':'ghost'} size="icon" accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} className="rounded-full" style={[s.roundTarget,primary&&{backgroundColor:colors.accent},disabled&&{opacity:.4}]}><View pointerEvents="none"><Icon size={21} color={primary?colors.onAccent:colors.foreground}/></View></Button>;
+ return <Button variant={primary?'default':'ghost'} size="icon" accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} className="rounded-full" style={[s.roundTarget,primary&&s.roundRaised,primary&&{backgroundColor:colors.accent},disabled&&{opacity:.4}]}><View pointerEvents="none"><Icon size={21} color={primary?colors.onAccent:colors.foreground}/></View></Button>;
 }
 /** Text page actions share geometry; keep their full accessible names. */
 export function SectionAction({label,text=label,onPress,disabled=false,busy=false,primary=false}:{label:string;text?:string;onPress:()=>void;disabled?:boolean;busy?:boolean;primary?:boolean}){
@@ -98,7 +98,7 @@ export function SettingsRow({title,label=title,icon:Icon,onPress,disabled=false,
  const off=disabled||loading;
  return <Pressable accessibilityRole={checked===undefined?"button":"switch"} accessibilityLabel={label} accessibilityState={{disabled:off,busy:loading,...(checked===undefined?{}:{checked})}} disabled={off} onPress={onPress} style={[s.row,off&&{opacity:.4}]}><View style={s.rowIcon}><Icon size={20} color={colors.accent}/></View><Text style={s.rowTitle}>{title}</Text>{!!value&&<Text style={s.value}>{value}</Text>}<>{loading?<ActivityIndicator size="small" color={colors.accent}/>:checked===undefined?<ChevronRight size={17} color={colors.muted}/>:<View pointerEvents="none" style={[s.switch,{backgroundColor:checked?colors.accent:colors.border,alignItems:checked?'flex-end':'flex-start'}]}><View style={[s.thumb,{backgroundColor:checked?colors.onAccent:colors.foreground}]}/></View>}</></Pressable>;
 }
-const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({
+const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({
  action:{...menuChrome.control,height:'auto',minHeight:48,minWidth:48,maxWidth:'100%',flexShrink:1,paddingHorizontal:12,paddingVertical:8,justifyContent:'center'},
  actionPrimary:{backgroundColor:colors.accent,borderColor:colors.accent},
  actionText:{color:colors.foreground,fontSize:15,lineHeight:23,fontWeight:'500',flexShrink:1,textAlign:'center'},
@@ -106,6 +106,7 @@ const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  segments:{height:'auto',minHeight:54,width:'100%',marginRight:0,alignItems:'stretch'},
  segment:{height:'auto',flex:1,minWidth:48,minHeight:48,paddingHorizontal:4,paddingVertical:8,justifyContent:'center'},
  segmentLabel:{fontSize:15,lineHeight:23,fontWeight:'500',textAlign:'center',flexShrink:1,minWidth:0},
+ roundRaised:{...shadows.floating},
  roundTarget:{width:48,height:48,minWidth:48,minHeight:48,borderRadius:24,alignItems:'center',justifyContent:'center'},
  group:{gap:9,marginBottom:10},groupTitle:{color:colors.muted,fontSize:12,fontWeight:'600',paddingHorizontal:4,letterSpacing:.3},
  groupBody:{...menuChrome.card,paddingHorizontal:12,paddingVertical:4,gap:2},

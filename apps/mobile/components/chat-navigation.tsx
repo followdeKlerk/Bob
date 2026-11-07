@@ -47,13 +47,13 @@ export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,
   </Modal>
  </>;
 }
-const sTheme=themed(({colors})=>StyleSheet.create({
+const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  trigger:{width:48,height:48,minWidth:48,minHeight:48,padding:0,alignItems:'center',justifyContent:'center'},
  glyph:{width:40,height:48,alignItems:'center',justifyContent:'center'},
  badge:{position:'absolute',right:-3,top:0,minWidth:18,minHeight:18,paddingHorizontal:4,borderRadius:12,backgroundColor:colors.selectedSurface,borderWidth:1,borderColor:colors.foreground,alignItems:'center',justifyContent:'center'},
  badgeText:{color:colors.foreground,fontSize:11,lineHeight:15,fontWeight:'700'},
  overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
- sheet:{width:'100%',maxWidth:760,maxHeight:'85%',alignSelf:'center',backgroundColor:colors.surface,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card},
+ sheet:{...shadows.popup,width:'100%',maxWidth:760,maxHeight:'85%',alignSelf:'center',backgroundColor:colors.surface,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card},
  scroll:{flexGrow:0,flexShrink:1,minHeight:0},
  content:{paddingBottom:12,gap:4},
  row:{marginHorizontal:8,minHeight:56,paddingHorizontal:12,paddingVertical:14,flexDirection:'row',alignItems:'center',gap:16},

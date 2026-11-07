@@ -15,7 +15,7 @@ export function needsWideBubble(text:string):boolean {
 const bubbleTheme=themed(({colors})=>StyleSheet.create({
  base:{minWidth:0},
  owner:{alignSelf:'flex-end',maxWidth:'90%',paddingHorizontal:16,paddingVertical:12,borderRadius:20,borderBottomRightRadius:6,backgroundColor:colors.selectedSurface},
- assistant:{alignSelf:'stretch',marginRight:12,paddingHorizontal:14,paddingVertical:12,borderRadius:20,borderBottomLeftRadius:6,backgroundColor:colors.panel},
+ assistant:{alignSelf:'stretch',marginRight:12,paddingHorizontal:14,paddingVertical:12,borderRadius:20,borderBottomLeftRadius:6,backgroundColor:colors.assistantBubble},
  wide:{marginRight:0},
  activity:{alignSelf:'stretch'},
  upload:{alignSelf:'flex-end',maxWidth:'100%'},

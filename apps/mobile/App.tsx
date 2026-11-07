@@ -142,7 +142,7 @@ function textOf(value: unknown): string {
   return JSON.stringify(value);
 }
 function Main() {
- const {colors,scheme}=useTheme();
+ const {colors,scheme,shadows}=useTheme();
  const styles=useThemedValue(stylesTheme);
 
   useAppDiagnostics();
@@ -958,7 +958,7 @@ function Main() {
                 )}
               </View>
             )}
-            {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,elevation:4}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
+            {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,...shadows.floating}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
 
           </View>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
@@ -1310,7 +1310,7 @@ export default function App() {
     </ThemeProvider></SafeAreaProvider></DiagnosticBoundary>
   );
 }
-const stylesTheme = themed(({colors,menuChrome})=>StyleSheet.create({
+const stylesTheme = themed(({colors,menuChrome,shadows})=>StyleSheet.create({
   welcome: {flexGrow:1,padding:24,gap:32,justifyContent:'space-between'},
   welcomeArt:{minHeight:240,flex:1,alignItems:'center',justifyContent:'center'},
   welcomeLogo:{width:'100%',maxWidth:400,aspectRatio:1},
@@ -1339,12 +1339,12 @@ const stylesTheme = themed(({colors,menuChrome})=>StyleSheet.create({
   composerCompact:{paddingHorizontal:12,paddingBottom:12},
   composerHeading:{minHeight:48,flexDirection:'row',alignItems:'center',gap:8,paddingRight:4},
   composerRow:{flexDirection:'row',alignItems:'flex-end'},
-  composerCapsule:{flex:1,minWidth:0,padding:8,borderRadius:26,borderWidth:1,borderColor:colors.border,backgroundColor:colors.composer,gap:4},
+  composerCapsule:{...shadows.floating,flex:1,minWidth:0,padding:8,borderRadius:26,borderWidth:1,borderColor:colors.border,backgroundColor:colors.composer,gap:4},
   composerCapsuleCompact:{padding:0,gap:0},
   input:{...menuChrome.input,color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
   row:{flexDirection:'row',gap:8,flexWrap:'wrap'},
   overlay:{flex:1,backgroundColor:'#00000088',padding:18,justifyContent:'center'},
   sheet:{height:'80%',width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:menuRadii.card,padding:20},
   actionOverlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
-  actionSheet:{maxHeight:'75%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,padding:20,gap:16},
+  actionSheet:{...shadows.popup,maxHeight:'75%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,padding:20,gap:16},
 }));

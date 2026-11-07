@@ -117,3 +117,25 @@ test('NativeWind palette variables retain opacity and pressed-state utilities in
  expect(result.css).toContain('rgb(var(--color-input) / 0.3)');
  expect(result.css).toContain('active\\:bg-primary\\/90:active');
 });
+
+test('warm stone assistant bubbles separate from cream without changing other panels',()=>{
+ expect(lightColors.assistantBubble).toBe('#e8e3d9');
+ expect(lightColors.background).toBe('#f7f5f0');
+ expect(lightColors.panel).toBe('#fffdf8');
+ expect(lightColors.assistantBubble).not.toBe(lightColors.selectedSurface);
+ const lum=(hex:string)=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
+ for(const ink of [lightColors.foreground,lightColors.body,lightColors.muted])expect((lum(lightColors.assistantBubble)+.05)/(lum(ink)+.05)).toBeGreaterThanOrEqual(4.5);
+ expect(colors.assistantBubble).toBe(colors.panel);
+});
+
+test('delicate shadows are opt-in and do not change native elevation or flat cards',()=>{
+ const {tokens}=require('../theme-context');
+ for(const scheme of ['light','dark']){
+  expect(tokens[scheme].shadows.floating.boxShadow).toContain('0 2px 6px');
+  expect(tokens[scheme].shadows.popup.boxShadow).toContain('0 3px 10px');
+  expect(tokens[scheme].shadows.floating.elevation).toBeUndefined();
+  expect(tokens[scheme].menuChrome.card.boxShadow).toBeUndefined();
+ }
+ expect(source('App.tsx')).toContain('composerCapsule:{...shadows.floating,');
+ for(const file of ['plus-menu','skill-picker','chat-navigation','model-picker','side-drawer'])expect(source(`components/${file}.tsx`)).toContain('...shadows.popup');
+});
