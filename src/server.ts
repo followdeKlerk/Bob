@@ -340,12 +340,12 @@ export async function serve(
             // Skip owned children without stranding older ownerless sessions behind a full raw page.
             // Bound each request; an empty filtered page may still carry a continuation cursor.
             for(let scanned=0;scanned<10;scanned++){
-              const batch=await tx.scanConversations({order:'descending'},100,cursor);
+              const batch=await tx.scanConversations({order:'descending'},100-visible.length,cursor);
               visible.push(...batch.items.filter(c=>c.id!==runtime.library.id&&c.owner===undefined));
               cursor=batch.next;
               if(visible.length>=100||!cursor)break;
             }
-            return {items:visible.slice(0,100),next:cursor};
+            return {items:visible,next:cursor};
           },ctx);
           // Child conversations remain durable and reachable via Agents/direct transcript access;
           // they simply do not belong in the regular top-level Sessions list.

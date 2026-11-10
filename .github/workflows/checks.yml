@@ -29,6 +29,8 @@ jobs:
       - name: Install mobile dependencies used by cross-component tests
         run: npm ci --prefix apps/mobile
       - run: npm run build
+      - name: Interactive host typecheck
+        run: node_modules/.bin/tsc -p apps/interactive/tsconfig.json --noEmit
       - name: Install browser test runtime
         run: npx playwright install --with-deps chromium
       - name: Backend tests (includes documentation, repository hygiene and prompt provenance)

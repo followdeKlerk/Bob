@@ -224,3 +224,15 @@ test('preserved score telemetry never echoes arbitrary server metadata into tool
  assert.deepEqual(result.facts[0].scores,{reranker:0.8,semantic:null,keyword:2,final:1.1});
  assert.doesNotMatch(JSON.stringify(result),/DO_NOT_ECHO|nested|secret/);
 });
+
+test('non-success Hindsight responses release bodies without changing HTTP error semantics',async()=>{
+ for(const status of [401,429,503])for(const fails of [false,true]){
+  let cancelled=0;
+  const body=new ReadableStream({cancel(){cancelled++;if(fails)throw Error('cleanup failed');}});
+  const client=new HindsightClient(memoryConfig(),async()=>new Response(body,{status}));
+  await assert.rejects(client.request('/test'),(error:any)=>error.status===status&&error.retryable===(status!==401)&&error.message===`Hindsight HTTP ${status}`);
+  assert.equal(cancelled,1);
+ }
+ const client=new HindsightClient(memoryConfig(),async()=>new Response(null,{status:503}));
+ await assert.rejects(client.request('/test'),(error:any)=>error.status===503&&error.retryable===true);
+});

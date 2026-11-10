@@ -20,6 +20,23 @@ import { ctx } from "./runtime.js";
 import type { State } from "./state.js";
 import { Attachment as Meta } from "./contracts.js";
 import {retiredInTransaction,retiredMessage} from './retired-chat-profile.js';
+
+// The runtime has one state owner. Serialize only final placement/native publication,
+// not incoming streams; discard queued duplicates rather than replacing the winner.
+const artifactPublications = new Map<string, Promise<void>>();
+async function serializeArtifact<T>(path: string, publish: () => Promise<T>): Promise<T> {
+  const previous = artifactPublications.get(path);
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  artifactPublications.set(path, current);
+  await previous;
+  try { return await publish(); }
+  finally {
+    release();
+    if (artifactPublications.get(path) === current) artifactPublications.delete(path);
+  }
+}
+
 function sniff(bytes: Buffer) {
   if (bytes.subarray(0, 5).toString() === "%PDF-") return "application/pdf";
   if (
@@ -66,14 +83,19 @@ export async function receiveArtifact(
     if (!existing) await chat.submit({type:'write',requestId:`artifact:${id}`,entry:{kind:'bob.artifact',data:meta,model:[{role:'user',timestamp:Date.now(),content:[{type:'text',text}]}]}},ctx);
     return meta;
   };
-  if (uploadId && existsSync(join(dir,id+'.json'))) {
-    // Stable client upload IDs make a lost response safe to replay. Metadata
-    // exists only after the full, validated file has been atomically placed.
+  const dest = join(dir, id), metadata = dest + '.json';
+  const readPublished = () => {
+    const meta = Meta.parse(JSON.parse(readFileSync(metadata, 'utf8')));
+    if (meta.conversationId !== chat.id || meta.id !== id) throw Error('Artifact ownership mismatch');
+    return meta;
+  };
+  if (uploadId && existsSync(metadata)) {
+    // Stable IDs replay the winner, even after a lost response or uncertain submit.
     req.resume();
-    return publish(Meta.parse(JSON.parse(readFileSync(join(dir,id+'.json'),'utf8'))));
+    return serializeArtifact(dest, () => publish(readPublished()));
   }
   const temp = join(dir, id + '.' + randomUUID() + ".part"),
-    dest = join(dir, id);
+    metadataTemp = temp + '.json';
   let size = 0;
   const hash = createHash("sha256");
   const textDecoder = claimed.startsWith("text/") ? new TextDecoder("utf-8", { fatal: true }) : undefined;
@@ -128,13 +150,17 @@ export async function receiveArtifact(
       size,
       sha256: hash.digest("hex"),
     };
-    renameSync(temp, dest);
-    writeFileSync(dest + ".json", JSON.stringify(meta), { mode: 0o600 });
-    await publish(meta);
-    return meta;
-  } catch (e) {
+    return await serializeArtifact(dest, async () => {
+      // Another stream may have won while this request was receiving its body.
+      if (existsSync(metadata)) return publish(readPublished());
+      writeFileSync(metadataTemp, JSON.stringify(meta), { flag: 'wx', mode: 0o600 });
+      renameSync(temp, dest);
+      renameSync(metadataTemp, metadata);
+      return publish(meta);
+    });
+  } finally {
     rmSync(temp, { force: true });
-    throw e;
+    rmSync(metadataTemp, { force: true });
   }
 }
 /** A single bounded byte range; multipart responses are deliberately unsupported. */

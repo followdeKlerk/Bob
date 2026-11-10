@@ -63,7 +63,10 @@ export class HindsightClient {
  async request(path:string,body?:unknown,signal?:AbortSignal,timeout=this.config.requestTimeoutMs,method:'GET'|'POST'|'PATCH'=body===undefined?'GET':'POST'):Promise<any>{
   const abort=AbortSignal.timeout(timeout),combined=signal?AbortSignal.any([signal,abort]):abort;
   const response=await this.transport(this.config.baseUrl+path,{method,headers:{accept:'application/json',...(body===undefined?{}:{'content-type':'application/json'}),...(this.config.apiKey?{authorization:'Bearer '+this.config.apiKey}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:combined,redirect:'error'});
-  if(!response.ok)throw new MemoryHttpError(response.status);
+  if(!response.ok){
+   try{await response.body?.cancel();}catch{/* Cleanup must not replace the original HTTP error. */}
+   throw new MemoryHttpError(response.status);
+  }
   // Bound hostile/misconfigured server output, including its metadata.
   const reader=response.body?.getReader();if(!reader)throw Error('Empty Hindsight response');
   const chunks:Uint8Array[]=[];let size=0;
