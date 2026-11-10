@@ -29,7 +29,6 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 
@@ -38,7 +37,9 @@ private fun TextView.useSurfaceTypeface() {
     typeface = try { ResourcesCompat.getFont(context, R.font.nunito) ?: Typeface.DEFAULT }
         catch (_: Exception) { Typeface.DEFAULT }
 }
-private fun surfaceFontFaces(context: Context): String {
+private val surfaceFontCssCache = SurfaceFontCssCache()
+private fun surfaceFontFaces(context: Context): String = surfaceFontCssCache.get {
+    var complete = true
     // Reuse the exact native TTF resources offline; do not ship a second copy.
     val ui = listOf(
         Triple(R.font.nunito_regular, "400", "normal"), Triple(R.font.nunito_medium, "500", "normal"),
@@ -49,7 +50,7 @@ private fun surfaceFontFaces(context: Context): String {
         try {
             val data = context.resources.openRawResource(font).use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
             "@font-face{font-family:'Nunito';src:url(data:font/ttf;base64,$data) format('truetype');font-weight:$weight;font-style:$style;font-display:swap}"
-        } catch (_: Exception) { "" }
+        } catch (_: Exception) { complete = false; "" }
     }
     val mono = listOf(
         Triple("Regular", "400", "normal"), Triple("Bold", "500 900", "normal"),
@@ -58,13 +59,13 @@ private fun surfaceFontFaces(context: Context): String {
         try {
             val data = context.assets.open("fonts/NordwandMono-$file.woff2").use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
             "@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,$data) format('woff2');font-weight:$weight;font-style:$style;font-display:swap}"
-        } catch (_: Exception) { "" }
+        } catch (_: Exception) { complete = false; "" }
     }
-    return ui + mono
+    SurfaceFontCssCache.Loaded(ui + mono, complete)
 }
 
 internal data class SurfaceSession(val endpoint: String, val identity: String, val token: String, val chat: Long, val id: String, val resource: JSONObject)
-private object SurfaceSessions { val pending = ConcurrentHashMap<String, SurfaceSession>() }
+private val surfaceSessions = SurfacePreparation<SurfaceSession>(8)
 private class SurfaceHttpError(val status: Int) : IllegalStateException("Interactive request rejected (HTTP $status); do not automatically retry a tool action")
 private fun surfaceRequest(endpoint: String, identity: String, token: String, path: String, payload: JSONObject, method: String = "POST", onConnection: ((HttpURLConnection?) -> Unit)? = null): JSONObject {
     val uri = URI(endpoint)
@@ -86,40 +87,60 @@ private fun surfaceRequest(endpoint: String, identity: String, token: String, pa
         return JSONObject(String(output.toByteArray(), Charsets.UTF_8))
     } finally { connection.disconnect(); onConnection?.invoke(null) }
 }
+// Closing is best effort: capabilities also expire server-side. Never retry a tool action.
+private fun closeSurfaceSession(selected: SurfaceSession) {
+    try { surfaceRequest(selected.endpoint, selected.identity, selected.token, "/v1/chats/${selected.chat}/ui/${selected.id}/close", JSONObject().put("capability", selected.resource.getString("capability"))) }
+    catch (_: Exception) { }
+}
+private fun closeSurfaceSessionAsync(selected: SurfaceSession) {
+    try { Thread { closeSurfaceSession(selected) }.start() } catch (_: Exception) { }
+}
 class BobInteractive(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     override fun getName() = "BobInteractive"
     @ReactMethod fun prepare(endpoint: String, identity: String, token: String, chat: Double, id: String, promise: Promise) {
-        Thread {
-            try {
-                require(chat > 0 && chat % 1.0 == 0.0); UUID.fromString(id); UUID.fromString(identity)
-                require(SurfaceSessions.pending.size < 8) { "Too many pending interactive surfaces" }
-                val resource = surfaceRequest(endpoint, identity, token, "/v1/chats/${chat.toLong()}/ui/$id/open", JSONObject())
-                require(resource.getString("id") == id && resource.getString("html").length <= 2097152)
-                VisualActions.fromResource(resource)
-                val handle = UUID.randomUUID().toString()
-                SurfaceSessions.pending[handle] = SurfaceSession(endpoint, identity, token, chat.toLong(), id, resource)
-                promise.resolve(handle)
-            } catch (e: Exception) { promise.reject("interactive", e.message ?: "Unable to open content") }
-        }.start()
+        prepareSession(endpoint, identity, token, chat, id, promise, false)
     }
     @ReactMethod fun releasePrepared(handle: String) {
-        val selected = SurfaceSessions.pending.remove(handle) ?: return
-        Thread { try { surfaceRequest(selected.endpoint, selected.identity, selected.token, "/v1/chats/${selected.chat}/ui/${selected.id}/close", JSONObject().put("capability", selected.resource.getString("capability"))) } catch (_: Exception) {} }.start()
+        surfaceSessions.take(handle)?.let { closeSurfaceSessionAsync(it) }
     }
     @ReactMethod fun open(endpoint: String, identity: String, token: String, chat: Double, id: String, promise: Promise) {
-        Thread {
-            try {
-                require(chat > 0 && chat % 1.0 == 0.0); UUID.fromString(id); UUID.fromString(identity)
-                val resource = surfaceRequest(endpoint, identity, token, "/v1/chats/${chat.toLong()}/ui/$id/open", JSONObject())
-                require(resource.getString("id") == id && resource.getString("html").length <= 2097152)
-                VisualActions.fromResource(resource)
-                require(SurfaceSessions.pending.size < 8) { "Too many pending interactive surfaces" }
-                val session = UUID.randomUUID().toString()
-                SurfaceSessions.pending[session] = SurfaceSession(endpoint, identity, token, chat.toLong(), id, resource)
-                context.startActivity(Intent(context, BobInteractiveActivity::class.java).putExtra("session", session).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                promise.resolve("Opened isolated surface")
-            } catch (e: Exception) { promise.reject("interactive", e.message ?: "Unable to open interactive surface") }
-        }.start()
+        prepareSession(endpoint, identity, token, chat, id, promise, true)
+    }
+    private fun prepareSession(endpoint: String, identity: String, token: String, chat: Double, id: String, promise: Promise, open: Boolean) {
+        // Reserve BEFORE creating a thread or fetching. Both entry points share this budget.
+        val reservation = surfaceSessions.reserve()
+        if (reservation == null) { promise.reject("interactive", "Too many pending interactive surfaces"); return }
+        var started = false
+        try {
+            Thread {
+                var selected: SurfaceSession? = null
+                var published = false
+                var completed = false
+                try {
+                    require(chat > 0 && chat % 1.0 == 0.0); UUID.fromString(id); UUID.fromString(identity)
+                    val resource = surfaceRequest(endpoint, identity, token, "/v1/chats/${chat.toLong()}/ui/$id/open", JSONObject())
+                    // Own the capability before validation, so rejected resources are also closed.
+                    selected = SurfaceSession(endpoint, identity, token, chat.toLong(), id, resource)
+                    require(resource.getString("id") == id && resource.getString("html").length <= 2097152)
+                    VisualActions.fromResource(resource)
+                    val handle = UUID.randomUUID().toString()
+                    reservation.publish(handle, selected)
+                    published = true
+                    if (open) context.startActivity(Intent(context, BobInteractiveActivity::class.java).putExtra("session", handle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    promise.resolve(if (open) "Opened isolated surface" else handle)
+                    completed = true
+                } catch (e: Exception) { promise.reject("interactive", e.message ?: "Unable to open interactive surface") }
+                finally {
+                    if (!completed) {
+                        // If already consumed/released, that owner alone closes the capability.
+                        val abandoned = if (published) reservation.cancel() else { reservation.cancel(); selected }
+                        abandoned?.let { closeSurfaceSession(it) }
+                    }
+                }
+            }.start()
+            started = true
+        } catch (e: Exception) { promise.reject("interactive", e.message ?: "Unable to open interactive surface") }
+        finally { if (!started) reservation.cancel() }
     }
 }
 internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit, private val inline: Boolean = false, private val mountId: String? = null, private val onInlineHeight: ((Int) -> Unit)? = null) : LinearLayout(context), BobAppearance.Listener {
@@ -334,7 +355,8 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
         emit("BobSurfaceOverflow")
     }
     fun show(selected: SurfaceSession) {
-        if (disposed || session != null) return
+        if (disposed || session != null) { closeSurfaceSessionAsync(selected); return }
+        session = selected
         if (inline) ApprovedDiagnostics.record(context, "mount", width, height)
         orientation = LinearLayout.VERTICAL
         BobAppearance.background(this)
@@ -349,59 +371,60 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             status.visibility = View.VISIBLE
             return
         }
-        session = selected
         if (selected.resource.optString("kind") == "visual") selected.resource.optJSONObject("visualData")?.let { dataEnabled = true; acceptVisualData(it) }
         val start: () -> Unit = start@{
             if (disposed) return@start
-            val view = object : WebView(context) {
-                // Scroll belongs to the chat, not a hidden WebView viewport.
-                override fun scrollTo(x: Int, y: Int) {
-                    if (inline) super.scrollTo(0, 0) else super.scrollTo(x, y)
+            try {
+                val view = object : WebView(context) {
+                    // Scroll belongs to the chat, not a hidden WebView viewport.
+                    override fun scrollTo(x: Int, y: Int) {
+                        if (inline) super.scrollTo(0, 0) else super.scrollTo(x, y)
+                    }
+                    override fun overScrollBy(deltaX: Int, deltaY: Int, scrollX: Int, scrollY: Int, scrollRangeX: Int, scrollRangeY: Int, maxOverScrollX: Int, maxOverScrollY: Int, isTouchEvent: Boolean): Boolean {
+                        if (inline) return false
+                        return super.overScrollBy(deltaX, deltaY, scrollX, scrollY, scrollRangeX, scrollRangeY, maxOverScrollX, maxOverScrollY, isTouchEvent)
+                    }
+                }; web = view
+                view.setBackgroundColor(BobAppearance.palette(context).background)
+                view.isVerticalScrollBarEnabled = false; view.isHorizontalScrollBarEnabled = false
+                WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+                view.settings.apply {
+                    javaScriptEnabled = true; allowFileAccess = false; allowContentAccess = false
+                    domStorageEnabled = false; databaseEnabled = false; blockNetworkLoads = true
+                    javaScriptCanOpenWindowsAutomatically = false; setSupportMultipleWindows(false)
+                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    if (android.os.Build.VERSION.SDK_INT >= 26) safeBrowsingEnabled = true
                 }
-                override fun overScrollBy(deltaX: Int, deltaY: Int, scrollX: Int, scrollY: Int, scrollRangeX: Int, scrollRangeY: Int, maxOverScrollX: Int, maxOverScrollY: Int, isTouchEvent: Boolean): Boolean {
-                    if (inline) return false
-                    return super.overScrollBy(deltaX, deltaY, scrollX, scrollY, scrollRangeX, scrollRangeY, maxOverScrollX, maxOverScrollY, isTouchEvent)
+                CookieManager.getInstance().setAcceptCookie(false)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
+                view.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView, url: String) { if (!disposed) { applyAppearance(); pushVisualData(); scheduleData() } }
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream("Network access denied".toByteArray()))
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; actionFooter?.visibility = View.GONE; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
                 }
-            }; web = view
-            view.setBackgroundColor(BobAppearance.palette(context).background)
-            view.isVerticalScrollBarEnabled = false; view.isHorizontalScrollBarEnabled = false
-            WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-            view.settings.apply {
-                javaScriptEnabled = true; allowFileAccess = false; allowContentAccess = false
-                domStorageEnabled = false; databaseEnabled = false; blockNetworkLoads = true
-                javaScriptCanOpenWindowsAutomatically = false; setSupportMultipleWindows(false)
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                if (android.os.Build.VERSION.SDK_INT >= 26) safeBrowsingEnabled = true
-            }
-            CookieManager.getInstance().setAcceptCookie(false)
-            CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
-            view.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String) { if (!disposed) { applyAppearance(); pushVisualData(); scheduleData() } }
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
-                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream("Network access denied".toByteArray()))
-                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { pauseData(); dataEnabled = false; actionFooter?.visibility = View.GONE; layout.removeView(view); view.destroy(); web = null; status.visibility = View.VISIBLE; status.text = "Interactive content stopped. Reopen to try again; no tool action was retried."; return true }
-            }
-            view.webChromeClient = object : WebChromeClient() {
-                override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
-                override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); return true }
-                override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); return true }
-                override fun onJsPrompt(view: WebView, url: String, message: String, defaultValue: String, result: JsPromptResult): Boolean { result.cancel(); return true }
-            }
-            view.addJavascriptInterface(Bridge(), "BobNative")
-            layout.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
-            createActionFooter(actions)?.let { layout.addView(it, LinearLayout.LayoutParams(-1, -2)) }
-            val payload = JSONObject()
-            for (key in listOf("kind", "title", "html", "input", "result", "allowedTools", "visualData")) if (selected.resource.has(key)) payload.put(key, selected.resource.get(key))
-            val bundle = context.assets.open("bob-host.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script")
-            // Only the host substitutes the per-frame layout key. Never give the child
-            // the native bridge nonce (or reports will not match the host's layout key).
-            val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
-            val fontFaceCss = surfaceFontFaces(context)
-            val safePayload = payload.toString().replace("<", "\\u003c")
-            val colors = BobAppearance.palette(context)
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:${colors.backgroundCss};color:${colors.foregroundCss};font:14px Nunito,sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
-window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
-            view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
+                view.webChromeClient = object : WebChromeClient() {
+                    override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
+                    override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); return true }
+                    override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean { result.cancel(); return true }
+                    override fun onJsPrompt(view: WebView, url: String, message: String, defaultValue: String, result: JsPromptResult): Boolean { result.cancel(); return true }
+                }
+                view.addJavascriptInterface(Bridge(), "BobNative")
+                layout.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
+                createActionFooter(actions)?.let { layout.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+                val payload = JSONObject()
+                for (key in listOf("kind", "title", "html", "input", "result", "allowedTools", "visualData")) if (selected.resource.has(key)) payload.put(key, selected.resource.get(key))
+                val bundle = context.assets.open("bob-host.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script")
+                // Only the host substitutes the per-frame layout key. Never give the child
+                // the native bridge nonce (or reports will not match the host's layout key).
+                val inlineMeasure = if (inline) context.assets.open("inline-measure.js").bufferedReader().use { it.readText() }.replace("</script", "<\\/script") else ""
+                val fontFaceCss = surfaceFontFaces(context)
+                val safePayload = payload.toString().replace("<", "\\u003c")
+                val colors = BobAppearance.palette(context)
+                val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:${colors.backgroundCss};color:${colors.foregroundCss};font:14px Nunito,sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+    window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
+                view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
+            } catch (_: Exception) { dispose(); onClose() }
         }
         if (selected.resource.optString("kind") == "mcp") {
             val names = selected.resource.optJSONArray("allowedTools")?.toString() ?: "[]"
@@ -467,9 +490,7 @@ window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "tr
         approval?.setOnCancelListener(null); approval?.dismiss(); approval = null
         web?.removeJavascriptInterface("BobNative"); web?.destroy(); web = null; executor.shutdownNow()
         val selected = session; session = null
-        if (selected != null) Thread {
-            try { surfaceRequest(selected.endpoint, selected.identity, selected.token, "/v1/chats/${selected.chat}/ui/${selected.id}/close", JSONObject().put("capability", selected.resource.getString("capability"))) } catch (_: Exception) { /* Capabilities also expire server-side. */ }
-        }.start()
+        if (selected != null) closeSurfaceSessionAsync(selected)
 
     }
 }
@@ -479,18 +500,26 @@ class BobInteractiveActivity : Activity() {
     private var panel: BobSurfacePanel? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val selected = SurfaceSessions.pending.remove(intent.getStringExtra("session"))
+        val selected = surfaceSessions.take(intent.getStringExtra("session"))
         if (selected == null) {
             setContentView(TextView(this).apply { BobAppearance.background(this); BobAppearance.text(this); useSurfaceTypeface(); textSize = 13f; text = "Content expired. Return to chat and reopen it." }); return
         }
-        val surface = BobSurfacePanel(this, { finish() })
-        panel = surface
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(surface) { view, insets ->
-            val safe = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(safe.left, safe.top, safe.right, safe.bottom); insets
+        var handedOff = false
+        try {
+            val surface = BobSurfacePanel(this, { finish() })
+            panel = surface
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(surface) { view, insets ->
+                val safe = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom); insets
+            }
+            setContentView(surface)
+            handedOff = true
+            surface.show(selected)
+        } catch (e: Exception) {
+            panel?.dispose(); panel = null
+            if (!handedOff) closeSurfaceSessionAsync(selected)
+            finish()
         }
-        setContentView(surface)
-        surface.show(selected)
     }
     override fun onDestroy() { panel?.dispose(); panel = null; super.onDestroy() }
 }
@@ -515,14 +544,22 @@ class BobInlineSurfaceManager : SimpleViewManager<LinearLayout>() {
         if (host.tag == handle) return
         (host.getChildAt(0) as? BobSurfacePanel)?.dispose(); host.removeAllViews(); host.tag = handle
         if (handle == null) return
-        val selected = SurfaceSessions.pending.remove(handle) ?: return
-        val surface = BobSurfacePanel(host.context, {
-            host.removeAllViews()
-            host.addView(TextView(host.context).apply { useSurfaceTypeface(); textSize = 13f; text = "Opening cancelled. Expand to reopen."; BobAppearance.text(this, muted = true) })
-        }, true, handle)
-        surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
-        host.addView(surface, LinearLayout.LayoutParams(-1, -1))
-        surface.show(selected)
+        val selected = surfaceSessions.take(handle) ?: return
+        var surface: BobSurfacePanel? = null
+        var handedOff = false
+        try {
+            surface = BobSurfacePanel(host.context, {
+                host.removeAllViews()
+                host.addView(TextView(host.context).apply { useSurfaceTypeface(); textSize = 13f; text = "Opening cancelled. Expand to reopen."; BobAppearance.text(this, muted = true) })
+            }, true, handle)
+            surface.layoutParams = LinearLayout.LayoutParams(-1, -1)
+            host.addView(surface, LinearLayout.LayoutParams(-1, -1))
+            handedOff = true
+            surface.show(selected)
+        } catch (e: Exception) {
+            surface?.dispose(); host.removeAllViews()
+            if (!handedOff) closeSurfaceSessionAsync(selected)
+        }
     }
     override fun onDropViewInstance(view: LinearLayout) {
         (view.getChildAt(0) as? BobSurfacePanel)?.dispose(); view.removeAllViews()

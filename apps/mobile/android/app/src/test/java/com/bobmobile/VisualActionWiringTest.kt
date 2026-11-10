@@ -19,7 +19,7 @@ class VisualActionWiringTest {
         assertTrue(launch.contains("catch (_: ActivityNotFoundException)")); assertTrue(launch.contains("Nothing was opened."))
     }
     @Test fun webPayloadDoesNotContainActionsAndBridgeCannotLaunch() {
-        val payload = source.substringAfter("val payload = JSONObject()\n            for (key").substringBefore("val bundle =")
+        val payload = source.substringAfter("val payload = JSONObject()").substringBefore("val bundle =")
         assertFalse(payload.contains("actions")); assertFalse(payload.contains("caption"))
         val bridge = source.substringAfter("inner class Bridge").substringBefore("fun dispose()")
         assertFalse(bridge.contains("launchAction")); assertFalse(bridge.contains("startActivity"))
@@ -46,7 +46,7 @@ class VisualActionWiringTest {
         for (forbidden in listOf("actions", "createActionFooter", "launchAction", "removeView")) assertFalse(forbidden, data.contains(forbidden))
         assertTrue(source.contains("if (actions.isEmpty()) return null"))
         assertTrue(source.contains("val actions = try { VisualActions.fromResource(selected.resource) }"))
-        assertTrue(source.contains("if (disposed || session != null) return"))
+        assertTrue(source.contains("if (disposed || session != null) { closeSurfaceSessionAsync(selected); return }"))
         assertTrue(source.contains("minHeight = (48 * resources.displayMetrics.density).toInt()"))
         assertTrue(source.contains("textSize = 16f; isAllCaps = false"))
         assertTrue(source.contains("text = \"Destination: \${action.caption}\""))
