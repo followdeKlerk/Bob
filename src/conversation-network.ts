@@ -6,6 +6,7 @@ import {ChatMeta} from './documents.js';
 import type {State} from './state.js';
 import {encodeCursor,decodeCursor} from './pagination.js';
 import {historyPage} from './history-page.js';
+import {isRetired} from './retired-chat-profile.js';
 
 export const ConversationRequest=z.object({destinationBackendId:z.string().uuid(),conversationId:z.number().int().positive().safe().optional(),originConversationId:z.number().int().positive().safe().optional(),limit:z.number().int().min(1).max(100).optional(),cursor:z.string().max(4096).optional(),query:z.string().max(200).optional(),requestId:z.string().uuid().optional(),text:z.string().min(1).max(200000).optional()}).strict();
 export type ConversationAuthority={originBackendId:string;name:string;allConversations?:boolean;read:number[];message:number[]};
@@ -14,6 +15,7 @@ export async function conversationOperation(state:State,runtime:ConversationRunt
  const p=ConversationRequest.parse({...raw as object,limit:(raw as any)?.limit??100});
  if(p.destinationBackendId!==state.id)throw Error('Wrong destination identity');
  const h=runtime.harness;
+ if(authority.originBackendId===state.id&&p.originConversationId&&await isRetired(h,p.originConversationId as ConversationId))throw Error('Retired chats cannot access other conversations');
  if(action==='conversations'){
   const query=(p.query??'').trim().toLowerCase(),scope=`network:${authority.originBackendId}:conversations:${query}`;
   const page=await h.commit(tx=>tx.scanConversations({order:'descending'},p.limit??50,decodeCursor(state,scope,p.cursor)),ctx);
@@ -52,6 +54,7 @@ export async function conversationOperation(state:State,runtime:ConversationRunt
  };
  if(action==='operation')return receipt();
  if(action!=='message'||!p.text)throw Error('Unsupported conversation operation');
+ if(await isRetired(h,id))throw Error('This local-model integration was removed; history is read-only');
  if(authority.originBackendId===state.id&&p.originConversationId===id)throw Error('Already in this conversation; answer here instead of messaging yourself');
  const existing=await receipt();if(existing.admission)return existing;
  const model=(await chat.agent(ctx)).model;if(!model||!await runtime.models.getAuth(model.provider))throw Error('Provider is not configured');

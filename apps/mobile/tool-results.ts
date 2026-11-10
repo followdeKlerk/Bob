@@ -1,5 +1,5 @@
 import {codemodeAudit,liveNestedActivity,type NestedToolActivity} from './nested-tool-results';
-export type ToolMessage={role:string;content:unknown;toolCallId?:string;toolName?:string;isError?:boolean;details?:unknown};
+export type ToolMessage={role:string;content:unknown;toolCallId?:string;toolName?:string;isError?:boolean;details?:unknown;stopReason?:string};
 export type ToolEntry={id:number;kind:string;model?:ToolMessage[];data?:unknown};
 export type LinkedResult={content:unknown;status:string;isError?:boolean;nested?:NestedToolActivity};
 // Join only by real call identity within the selected conversation. Never by name/order.
@@ -21,7 +21,7 @@ export function linkToolResults(entries:ToolEntry[],live:any) {
  const visible=entries.flatMap(entry=>{
   if(!entry.model?.length)return [entry];
   const model=entry.model.filter(message=>!(message.role==='toolResult'&&message.toolCallId&&callIds.has(message.toolCallId)));
-  return model.length?[{...entry,model}]:[];
+  return model.length===entry.model.length?[entry]:model.length?[{...entry,model}]:[];
  });
  // Unmatched results remain reachable when their call is outside the loaded history.
  const unmatchedLive=(live?.tools??[]).filter((tool:any)=>!callIds.has(tool.callId)&&!persistedIds.has(tool.callId));

@@ -16,7 +16,7 @@ export function migrateControl(state: State) {
     state.db.exec('ALTER TABLE devices ADD COLUMN created_at INTEGER; ALTER TABLE devices ADD COLUMN revoked_at INTEGER;');
     state.db.exec('CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);');
     state.db.prepare('INSERT INTO schema_migrations VALUES(?,?)').run(2,new Date().toISOString());
-    if(Number(state.db.prepare('PRAGMA user_version').get()?.user_version)===3){
+    if([3,4].includes(Number(state.db.prepare('PRAGMA user_version').get()?.user_version))){
       // Runtime compatibility is monotonic; lifecycle migration must not reopen old code.
       const result=state.db.prepare('UPDATE maintenance_runtime_floor SET lifecycle_schema_version=2 WHERE singleton=1').run();
       if(result.changes!==1)throw Error('Missing control runtime floor');

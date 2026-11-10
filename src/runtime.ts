@@ -1,4 +1,6 @@
 import {createLearning} from './learning.js';
+import {createRetiredChatFence,excludeRetiredModels} from './retired-chat-profile.js';
+import {createReplyPresentation} from './reply-presentation.js';
 import {createPush} from './push.js';
 import {watchPushMaintenance} from './push-maintenance.js';
 import {watchMaintenanceReports} from './maintenance-reports.js';
@@ -35,7 +37,7 @@ import {createCodingWithCodemode} from './codemode.js';
 import {createResources,createSoulReader} from "@bob-local/resources";
 import { State } from "./state.js";
 import {acquireOwner} from "./ownership.js";
-import {readControlFloor,prepareFreshPi15Floor} from './maintenance-migration.js';
+import {readControlFloor,prepareFreshPi15Floor,prepareFreshPi151Floor,installedDurableVersion,assertRuntimeFloor,pi151Fingerprint} from './maintenance-migration.js';
 import { ChatMeta, Library, Todos, Questions } from "./documents.js";
 import {encodeCursor,decodeCursor} from './pagination.js';
 import { SubagentTools } from "./subagents.js";
@@ -79,7 +81,14 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   try {
     // This barrier is independent of resume: native storage may migrate on open.
     // Under the owner lock, only an absent native DB may establish a fresh origin.
-    if(readControlFloor(state.dir,true).kind==='legacy')prepareFreshPi15Floor(state.dir);
+    let floor=readControlFloor(state.dir,true);
+    const durableVersion=installedDurableVersion();
+    if(durableVersion==='1.5.1'&&(floor.kind==='legacy'||floor.kind==='pi15-fresh')){
+      floor=prepareFreshPi151Floor(state.dir,{id:'fresh-bootstrap',cli:new URL('./cli.js',import.meta.url).pathname,durableVersion,compatibility:pi151Fingerprint});
+    }else if(durableVersion==='1.5.0'&&floor.kind==='legacy'){
+      prepareFreshPi15Floor(state.dir);floor=readControlFloor(state.dir,true);
+    }
+    assertRuntimeFloor(floor,durableVersion);
     const baseModels = testModels ?? createBackendModels(state);
     const registry = createRegistry();
     const memory=backendMemory(state);
@@ -89,7 +98,8 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     let libraryId: ConversationId;
     const soul=createSoulReader(join(state.dir,'soul.md'));
     const delegation=createDelegation(state,baseModels,registry,()=>libraryId,()=>modules,soul);
-    const models=delegation.models;
+    const retired=createRetiredChatFence(state,registry);
+    const models=excludeRetiredModels(delegation.models);
     const resources = createResources(()=>libraryId,async(source,input,context)=>{
       if(input.mode==='search')return searchHistory({harness,library:{id:libraryId},models} as Runtime,state,input);
       if(input.mode==='page'&&input.conversationId===undefined)throw Error('Specify conversationId for page mode.');
@@ -145,7 +155,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
           await tx.doc(ChatMeta, c.id);
           await tx.doc(Todos, c.id);
           await tx.doc(Questions, c.id);
-          await delegation.created(tx,c);
+          if(!await retired.created(tx,c))await delegation.created(tx,c);
         },
       },
       ctx
@@ -158,6 +168,10 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       await tx.doc(Library, library.id);
     }, ctx);
     // Reinstall persisted, immutable schema/provider aliases before any durable task resumes.
+    const retiredIds=new Set(await retired.restore(harness));
+    const retiredWorkers=await scheduling.retireSources(retiredIds);
+    if(retiredWorkers.length)for(const id of await retired.restore(harness,retiredWorkers))retiredIds.add(id);
+    const retiring=await retired.abortPending(harness,retiredIds);
     await delegation.restore(harness);
     await recoverDelegationCommands(state,harness,delegation);
     if(options.resume!==false&&registry.snapshot().extension(memory.extension.name)){
@@ -171,9 +185,15 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     closePush=()=>push.close();
     const stopPushMaintenance=push.enabled?watchPushMaintenance(state,key=>push.attention(key,'update')):()=>{};
     closePush=async()=>{stopPushMaintenance();await push.close();};
-    if(options.resume!==false){await scheduling.recover();harness.resume();closeMaintenanceReports=watchMaintenanceReports(state,harness).close;}
+    if(options.resume!==false){
+      // All obsolete work was durably abort-marked while scheduling was paused.
+      await scheduling.recover();harness.resume();
+      await Promise.all(retiring.map(id=>harness.waitForTask(id,ctx)));
+      closeMaintenanceReports=watchMaintenanceReports(state,harness).close;
+    }
     return {
       harness,
+      replyPresentation:createReplyPresentation(storage),
       push,
       scheduling,
       learning:{...learning,flush:async()=>{await learningAttached?.flush();}},

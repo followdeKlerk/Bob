@@ -41,6 +41,7 @@
     "packages/memory/README.md",
     "apps/mobile/android/app/src/main/assets/fonts/README.md",
     "apps/mobile/android/app/src/main/assets/fonts/OFL.txt",
+    "apps/mobile/android/app/src/main/assets/fonts/nunito",
     "INSTALL.md",
     "SETUP-AGENT.md",
     "install.sh",
@@ -62,10 +63,10 @@
     "@bob-local/web": "0.1.0",
     "@bob-local/interactive": "0.1.0",
     "@bob-local/peers": "0.1.0",
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-codemode": "1.5.0",
-    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/chord": "1.5.1",
+    "@earendil-works/pi-ai": "1.5.1",
+    "@earendil-works/pi-codemode": "1.5.1",
+    "@earendil-works/pi-durable": "1.5.1",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/core": "2.4.0",
     "@modelcontextprotocol/ext-apps": "2.0.3",
@@ -75,7 +76,7 @@
     "qrcode": "1.5.4",
     "zod": "4.6.7",
     "@bob-local/memory": "0.1.0",
-    "@earendil-works/pi-schema": "1.5.0"
+    "@earendil-works/pi-schema": "1.5.1"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
@@ -83,5 +84,6 @@
     "esbuild": "0.28.2",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
-  }
+  },
+  "bobUpgradeTarget": "durable-1.5.1"
 }

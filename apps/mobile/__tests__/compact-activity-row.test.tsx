@@ -54,3 +54,18 @@ test('the shared header is unboxed, one line, scalable and exposes the contextua
  expect(tree.root.findAllByType(ChevronDown)).toHaveLength(1);
  await act(async()=>tree.unmount());
 });
+
+test.each(['light','dark'] as const)('%s statuses retain accessible truthful symbols with no coloured disc, border or circular spinner',async scheme=>{
+ const {ThemeContext,tokens}=require('../theme-context');let tree!:Renderer.ReactTestRenderer;
+ const render=(status:string)=><ThemeContext.Provider value={tokens[scheme]}><CompactActivityRow title="Tool" status={status} accessibilityLabel="Details" expanded={false} onPress={()=>{}}/></ThemeContext.Provider>;
+ await act(async()=>{tree=Renderer.create(render('done'));});
+ try{
+  for(const [status,glyph] of [['done','✓'],['failed','!'],['running','…'],['unknown','·']]){
+   await act(async()=>tree.update(render(status)));
+   const symbol=tree.root.findByProps({testID:'activity-status-symbol'}),style=StyleSheet.flatten(symbol.props.style),text=symbol.findByType(Text);
+   for(const key of ['backgroundColor','borderColor','borderWidth','borderRadius'])expect(style[key]).toBeUndefined();
+   expect(text.props.accessibilityLabel).toBe(status);expect(text.props.children).toBe(glyph);expect(StyleSheet.flatten(text.props.style).color).toBe(tokens[scheme].colors.foreground);
+   expect(tree.root.findAllByProps({testID:'activity-running-ring'})).toHaveLength(0);
+  }
+ }finally{await act(async()=>tree.unmount());}
+});

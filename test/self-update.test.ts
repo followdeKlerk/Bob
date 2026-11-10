@@ -68,7 +68,10 @@ test('self-update requests survive reopen and duplicate admission cannot start a
   assert.equal(first.status,'queued');
   assert.equal(store.enqueue(request).id,first.id);
   assert.throws(()=>store.enqueue({...request,target:'backend'}),/conflict/i);
+  const validation={lane:'ui-fast',reason:'Supported presentation changes only',baselineId:'full-check',changedFiles:['apps/mobile/theme-tokens.ts']};
+  store.patch(first.id,{validation});
   store.close();store=new m.MaintenanceStore(home);
+  assert.deepEqual(store.jobs()[0].validation,validation,'Validation evidence survives supervisor reopen');
   assert.equal(store.jobs().length,1);
   assert.equal(store.jobs()[0].conversationId,7);
   store.close();

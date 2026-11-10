@@ -1,5 +1,13 @@
 # Third-party notices
 
+## Experimental Android terminal
+
+The arm64 terminal prototype packages [Mosh 1.4.0](https://github.com/mobile-shell/mosh/tree/mosh-1.4.0) as a separate executable communicating through a pseudo-terminal, not as a JNI-linked copy of its protocol code. Mosh retains its **GPLv3-or-later** terms and the specific upstream OpenSSL exception. Bob's MIT licence does not replace those terms or settle the licensing of a combined distribution. Broader redistribution requires review of the actual combined artefact; this is an owner-tested prototype, not a claim of an MIT-only APK.
+
+The native build recipe pins source archives and checksums for Mosh and its static dependencies (Protocol Buffers, OpenSSL and ncurses). The APK includes their licence notices and a corresponding-source archive under `assets/terminal/legal/`. Source URLs, versions, hashes and build instructions are retained in `apps/mobile/android/terminal/` in the source checkout. No Termux application or GPL terminal-view code is copied into Bob.
+
+The dedicated terminal renderer vendors [xterm.js](https://github.com/xtermjs/xterm.js) under its MIT licence. Its unmodified licence is retained alongside the bundled JavaScript and CSS in the APK's `assets/terminal/vendor/` directory. Terminal content is separate from Bob's generated interactive visual viewer.
+
 ## Advanced Delegation
 
 Bob's Advanced Delegation behavior is adapted from the Nous Research Advanced Delegation plugin, reviewed commit [`e404b6816b20237a82f6fbe2749b5a576cf75dba`](https://github.com/NousResearch/hermes-official-plugins/tree/e404b6816b20237a82f6fbe2749b5a576cf75dba/advanced-delegation). Bob uses its own native configuration, credentials and Pi Durable subagent lifecycle, not the Hermes runtime.
@@ -85,3 +93,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## Nunito
+
+Bob bundles unmodified official Google Fonts **Nunito 3.602** static fonts, Copyright 2014 The Nunito Project Authors ([upstream](https://github.com/googlefonts/nunito)), under the SIL Open Font License 1.1. The [full license](apps/mobile/android/app/src/main/assets/fonts/nunito/OFL.txt), [integration/provenance guide](apps/mobile/android/app/src/main/assets/fonts/nunito/README.md), and [pinned download URLs and SHA-256 checksums](apps/mobile/android/app/src/main/assets/fonts/nunito/provenance.json) are shipped with the Android app. Nunito is the rounded UI/chat-prose family; Nordwand Mono remains the code/terminal family. Fonts are bundled offline; no runtime download is required.

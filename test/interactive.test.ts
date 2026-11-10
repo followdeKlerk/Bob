@@ -92,11 +92,16 @@ test('real MCP Apps handshake and tools: native Durable records, scoped capabili
 });
 registerInlineVisualLifecycle();
 
-test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in host styling without new authority',{timeout:60000},async t=>{
+test('bundled Nunito covers owned host UI without overriding authored HTML; MCP retains opt-in mono',{timeout:60000},async t=>{
  const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
- const fontCss=[['Regular','400','normal'],['Bold','500 900','normal'],['Italic','400','italic'],['BoldItalic','500 900','italic']].map(([file,weight,style])=>
+ const monoCss=[['Regular','400','normal'],['Bold','500 900','normal'],['Italic','400','italic'],['BoldItalic','500 900','italic']].map(([file,weight,style])=>
   `@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,${readFileSync(`apps/mobile/android/app/src/main/assets/fonts/NordwandMono-${file}.woff2`).toString('base64')}) format('woff2');font-weight:${weight};font-style:${style};font-display:swap}`
  ).join('');
+ const provenance=JSON.parse(readFileSync('apps/mobile/android/app/src/main/assets/fonts/nunito/provenance.json','utf8'));
+ const uiCss=provenance.fonts.map((font:{file:string;weight:number;style:string})=>
+  `@font-face{font-family:'Nunito';src:url(data:font/ttf;base64,${readFileSync(`apps/mobile/android/app/src/main/res/font/${font.file}`).toString('base64')}) format('truetype');font-weight:${font.weight===700?'700 1000':font.weight};font-style:${font.style};font-display:swap}`
+ ).join('');
+ const fontCss=uiCss+monoCss;
  const native=readFileSync('apps/mobile/android/app/src/main/java/com/bobmobile/BobInteractive.kt','utf8');
  const template=/val html = """([\s\S]*?)"""/.exec(native)![1];
  let cleanupBrowser:Awaited<ReturnType<typeof launchTestChromium>>|undefined;
@@ -114,7 +119,7 @@ test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in hos
   return {page,child:page.frames().find(frame=>frame!==page.mainFrame())!};
  }
  const visual='<style>body{font:16px serif}input,button,select,textarea,code,pre{font-family:serif}#medium{font-weight:500}#semibold{font-weight:600}</style><p>Plain</p><input placeholder="Input"><textarea>Text</textarea><button>Button</button><select><option>Choice</option></select><pre>Pre</pre><code style="font-family:serif">Code</code><span id="medium">Medium</span><span id="semibold">Semibold</span><b>Bold</b><i>Italic</i><b><i>Bold italic</i></b><svg><text x="0" y="20">SVG text</text></svg>';
- await t.test('visual defaults override ordinary author fonts, load normal/bold/italic locally, and preserve sandbox',async()=>{
+ await t.test('authored visual fonts and sandbox remain unchanged while host UI loads local Nunito',async()=>{
   const {page,child}=await open('visual',visual);
   try {
    const fonts=await child.evaluate(async()=>{
@@ -123,24 +128,29 @@ test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in hos
      faces:Array.from(document.fonts).map(font=>({status:font.status,weight:font.weight,style:font.style})),
      parentBlocked:(()=>{try{void parent.document;return false;}catch{return true;}})()};
    });
-   assert.ok(fonts.families.length>=15);assert.ok(fonts.families.every(family=>family==='"Nordwand Mono", monospace'),JSON.stringify(fonts));
-   assert.deepEqual(fonts.faces.map(font=>font.status),['loaded','loaded','loaded','loaded']);
-   assert.deepEqual(fonts.faces.map(font=>[font.weight,font.style]),[['400','normal'],['500 900','normal'],['400','italic'],['500 900','italic']]);
+   assert.ok(fonts.families.length>=15);assert.ok(fonts.families.every(family=>family==='serif'),JSON.stringify(fonts));
+   assert.equal(fonts.faces.length,12); // Definitions do not force author content to use them.
+   assert.ok(fonts.faces.every(font=>font.status==='unloaded'));
    assert.equal(fonts.parentBlocked,true);
-   assert.equal(await page.locator('#status').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');
+   assert.equal(await page.locator('#status').evaluate(element=>getComputedStyle(element).fontFamily),'Nunito, sans-serif');
    assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
    const srcdoc=await page.locator('iframe').getAttribute('srcdoc');
    assert.ok(srcdoc?.includes(visual),'stored HTML is inserted unchanged');assert.ok(!srcdoc?.includes('private-native-nonce'));
    assert.match(srcdoc!,/font-src data:; connect-src 'none'/);
    assert.equal(await child.evaluate(async()=>{try{await fetch('https://example.invalid/blocked');return false;}catch{return true;}}),true);
    await page.locator('#status').evaluate(element=>element.textContent='Interactive app error: fixture');
+   const hostFaces=await page.evaluate(async()=>{
+    for(const weight of [400,500,600,700])for(const style of ['normal','italic'])await document.fonts.load(`${style} ${weight} 16px Nunito`,'Zażółć Привет ệ');
+    return Array.from(document.fonts).filter(font=>font.family==='Nunito'&&font.status==='loaded').map(font=>[font.weight,font.style].join(':'));
+   });
+   assert.equal(new Set(hostFaces).size,8);
    await page.evaluate(()=>document.fonts.ready); // The host status has its own data-URL font face.
-   assert.equal(await page.evaluate(()=>Array.from(document.fonts).find(font=>font.weight==='400'&&font.style==='normal')?.status),'loaded');
+   assert.equal(await page.evaluate(()=>Array.from(document.fonts).some(font=>font.family==='Nunito'&&font.weight==='400'&&font.style==='normal'&&font.status==='loaded')),true);
   } finally {await page.close();}
  });
- await t.test('missing font assets retain readable monospace fallback',async()=>{
+ await t.test('missing font assets retain readable host sans fallback and authored visual fonts',async()=>{
   const {page,child}=await open('visual',visual,'');
-  try {assert.equal(await child.locator('input').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');assert.equal(await child.evaluate(()=>document.fonts.size),0);}
+  try {assert.equal(await child.locator('input').evaluate(element=>getComputedStyle(element).fontFamily),'serif');assert.equal(await child.evaluate(()=>document.fonts.size),0);assert.equal(await page.locator('#status').evaluate(element=>getComputedStyle(element).fontFamily),'Nunito, sans-serif');}
   finally {await page.close();}
  });
  await t.test('MCP SDK exposes font variables and local CSS; third-party author fonts remain their choice',async()=>{
@@ -149,12 +159,13 @@ test('bundled Nordwand fonts cover host and visual text; MCP receives opt-in hos
   const {page,child}=await open('mcp',`<p style="font-family:var(--font-sans)">Opt in</p><code style="font-family:var(--font-mono)">Code</code><p id="owned" style="font-family:serif">App owned</p><script>${app.replaceAll('</script','<\\/script')}</script>`);
   try {
    await child.waitForFunction(()=>Boolean((window as any).fontContext));
-   assert.deepEqual(await child.evaluate(()=>JSON.parse(JSON.stringify((window as any).fontContext.variables))),{'--font-sans':'"Nordwand Mono", monospace','--font-mono':'"Nordwand Mono", monospace'});
+   assert.deepEqual(await child.evaluate(()=>JSON.parse(JSON.stringify((window as any).fontContext.variables))),{'--font-sans':'"Nunito", sans-serif','--font-mono':'"Nordwand Mono", monospace'});
    assert.equal(await child.evaluate(()=>(window as any).fontContext.css.fonts),fontCss);
    await child.evaluate(()=>document.fonts.ready);
+   assert.equal(await child.locator('p').first().evaluate(element=>getComputedStyle(element).fontFamily),'Nunito, sans-serif');
    assert.equal(await child.locator('code').evaluate(element=>getComputedStyle(element).fontFamily),'"Nordwand Mono", monospace');
    assert.equal(await child.locator('#owned').evaluate(element=>getComputedStyle(element).fontFamily),'serif');
-   assert.equal(await child.evaluate(()=>Array.from(document.fonts).find(font=>font.weight==='400'&&font.style==='normal')?.status),'loaded');
+   assert.equal(await child.evaluate(()=>Array.from(document.fonts).some(font=>font.family==='Nunito'&&font.weight==='400'&&font.style==='normal'&&font.status==='loaded')),true);
   } finally {await page.close();}
  });
  assert.deepEqual(errors,[]);

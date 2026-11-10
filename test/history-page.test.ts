@@ -62,7 +62,7 @@ test('native direct and codemode history keep JSON valid, paginate without skips
   // Force a concurrent append precisely between the page scan and the smaller
   // cursor scan. New entries must not shift that boundary and duplicate records.
   let scans=0;
-  const racing={...rt,harness:{conversation:async()=>({entries:async(...args:Parameters<typeof destination.entries>)=>{
+  const racing={...rt,harness:{commit:rt.harness.commit.bind(rt.harness),snapshot:rt.harness.snapshot.bind(rt.harness),conversation:async()=>({entries:async(...args:Parameters<typeof destination.entries>)=>{
    if(++scans===2)await destination.commit(tx=>tx.appendEntry(destination.id,{kind:'fixture.concurrent',data:{text:'arrived between reads'}}),ctx);
    return destination.entries(...args);
   }})}} as any;

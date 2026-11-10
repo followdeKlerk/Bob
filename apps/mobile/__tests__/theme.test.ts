@@ -47,7 +47,10 @@ test('owned native text, controls, surface status and logo tints share the beige
  const palettes=source('android/app/src/main/java/com/bobmobile/BobAppearance.kt');
  for(const color of [colors.background,colors.foreground,lightColors.background,lightColors.foreground,lightColors.onAccent])expect(palettes).toContain(color);
  const preview=source('android/app/src/main/java/com/bobmobile/BobPreviewActivity.kt');
- expect(preview.match(/BobAppearance.button\(this\)/g)).toHaveLength(3);
+ expect(preview.match(/BobAppearance.button\(this\)/g)).toHaveLength(1); // Existing text/image Close button.
+ expect(preview).toContain('it.imageTintList = ColorStateList.valueOf(colors.foreground)');
+ expect(preview).toContain('override fun setTintList(tint: ColorStateList?)');
+ expect(preview).toContain('progress?.indeterminateTintList = ColorStateList.valueOf(colors.foreground)');
  expect(preview).toContain('BobAppearance.background(this)');expect(preview).toContain('BobAppearance.text(this)');
  expect(source('App.tsx')).toContain("welcomeLogo:{width:'100%',maxWidth:400,aspectRatio:1}");
  expect(source('../../tools/generate-mobile-icons.sh')).toContain("warm_white='#e8e0d2'");
@@ -90,11 +93,13 @@ test('no app-owned white literals bypass the theme; drawing paper stays white',(
    return Math.min(...rgb)>=220&&Math.max(...rgb)-Math.min(...rgb)<=15;
   });
   expect({path,whites:whites.map(([hex])=>hex)}).toEqual({path,whites:[]});
-  if(path.endsWith('BobPreviewActivity.kt'))text=text.replace('eraseColor(android.graphics.Color.WHITE)','PDF_PAPER');
+  if(path.endsWith('PdfRenderSession.kt'))text=text.replace('eraseColor(Color.WHITE)','PDF_PAPER');
+  if(path.endsWith('PdfPreviewView.kt'))text=text.replace('private val paper = Paint().apply { color = Color.WHITE }','PDF_PAPER');
   expect({path,whiteUtility:/\b(?:text|bg|border|stroke|fill)-white\b|['"]white['"]|#fff\b|Color\.WHITE|rgba?\(\s*255\s*,\s*255\s*,\s*255/i.test(text)}).toEqual({path,whiteUtility:false});
  }
  expect(source('components/drawing-editor.tsx')).toContain('fill="#ffffff"');
- expect(source('android/app/src/main/java/com/bobmobile/BobPreviewActivity.kt')).toContain('eraseColor(android.graphics.Color.WHITE)');
+ expect(source('android/app/src/main/java/com/bobmobile/PdfRenderSession.kt')).toContain('eraseColor(Color.WHITE)');
+ expect(source('android/app/src/main/java/com/bobmobile/PdfPreviewView.kt')).toContain('private val paper = Paint().apply { color = Color.WHITE }');
 });
 
 
@@ -118,24 +123,32 @@ test('NativeWind palette variables retain opacity and pressed-state utilities in
  expect(result.css).toContain('active\\:bg-primary\\/90:active');
 });
 
-test('warm stone assistant bubbles separate from cream without changing other panels',()=>{
- expect(lightColors.assistantBubble).toBe('#e8e3d9');
- expect(lightColors.background).toBe('#f7f5f0');
- expect(lightColors.panel).toBe('#fffdf8');
+test('beige light backgrounds use dedicated darker beige chat surfaces with readable ink',()=>{
+ expect(lightColors.assistantBubble).toBe('#d5c5ae');
+ expect(lightColors.ownerBubble).toBe('#ddcfbb');
+ expect(lightColors.ownerBubble).not.toBe(lightColors.selectedSurface);
+ expect(lightColors.background).toBe('#e8dfd0');
+ expect(lightColors.panel).toBe('#f0e8dc');
  expect(lightColors.assistantBubble).not.toBe(lightColors.selectedSurface);
  const lum=(hex:string)=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
- for(const ink of [lightColors.foreground,lightColors.body,lightColors.muted])expect((lum(lightColors.assistantBubble)+.05)/(lum(ink)+.05)).toBeGreaterThanOrEqual(4.5);
- expect(colors.assistantBubble).toBe(colors.panel);
+ for(const surface of [lightColors.assistantBubble,lightColors.ownerBubble])for(const ink of [lightColors.foreground,lightColors.body,lightColors.bubbleMuted])expect((lum(surface)+.05)/(lum(ink)+.05)).toBeGreaterThanOrEqual(4.5);
+ for(const surface of [lightColors.assistantBubble,lightColors.ownerBubble])expect(lum(surface)).toBeLessThan(lum(lightColors.background));
+ expect(lightColors.muted).toBe('#655f54'); // Outside bubbles stays unchanged.
+ expect(source('App.tsx')).toContain("style={{color:colors.bubbleMuted,fontSize:11");
+ expect(source('App.tsx')).toContain("style={{color:colors.bubbleMuted,fontSize:12,lineHeight:19}}>{failed.lastError}");
+ expect(colors.assistantBubble).toBe(colors.panel);expect(colors.ownerBubble).toBe(colors.selectedSurface);
 });
 
 test('delicate shadows are opt-in and do not change native elevation or flat cards',()=>{
  const {tokens}=require('../theme-context');
  for(const scheme of ['light','dark']){
-  expect(tokens[scheme].shadows.floating.boxShadow).toContain('0 2px 6px');
-  expect(tokens[scheme].shadows.popup.boxShadow).toContain('0 3px 10px');
+  expect(tokens[scheme].shadows.floating.boxShadow).toContain('0 2px 7px');
+  expect(tokens[scheme].shadows.popup.boxShadow).toContain('0 3px 11px');
   expect(tokens[scheme].shadows.floating.elevation).toBeUndefined();
   expect(tokens[scheme].menuChrome.card.boxShadow).toBeUndefined();
  }
+ expect(tokens.light.shadows.floating.boxShadow).toContain('0.11');
+ expect(tokens.light.shadows.popup.boxShadow).toContain('0.13');
  expect(source('App.tsx')).toContain('composerCapsule:{...shadows.floating,');
  for(const file of ['plus-menu','skill-picker','chat-navigation','model-picker','side-drawer'])expect(source(`components/${file}.tsx`)).toContain('...shadows.popup');
 });

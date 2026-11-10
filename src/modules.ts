@@ -8,16 +8,19 @@ import type {State} from './state.js';
 import type {Runtime} from './runtime.js';
 import {HttpError} from './errors.js';
 import {customCatalog} from './custom-modules.js';
+import {installedDurableVersion,supportedDurableVersion} from './recovery.js';
+import {requireActiveConversation} from './retired-chat-profile.js';
 
 const names:Record<string,string>={coding:'coding-tools',resources:'bob.resources',subagents:'subagent-tools',web:'bob.web',interactive:'bob.interactive',peers:'bob.peers',memory:'bob.memory'};
 export type ModuleId=keyof typeof names;
 export const moduleIds=Object.keys(names) as ModuleId[];
 const Selection=z.array(z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).max(32).refine(ids=>new Set(ids).size===ids.length,'Duplicate module selection');
-const Manifest=z.object({name:z.string(),version:z.literal('0.1.0'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:z.literal('1.5.0'),name:z.string(),requires:Selection}).strict()});
+const Manifest=z.object({name:z.string(),version:z.literal('0.1.0'),dependencies:z.record(z.string(),z.string()),bobExtension:z.object({api:z.literal(1),durable:supportedDurableVersion,name:z.string(),requires:Selection}).strict()});
 export function validateModuleManifest(raw:unknown,id:ModuleId) {
  const manifest=Manifest.parse(raw);
  if(manifest.name!==`@bob-local/${id}`||manifest.bobExtension.name!==names[id])throw Error('Module package or extension identity mismatch');
- if(manifest.dependencies['@earendil-works/pi-durable']!=='1.5.0')throw Error('Module requires the exact validated Durable dependency');
+ const durable=installedDurableVersion();
+ if(manifest.bobExtension.durable!==durable||manifest.dependencies['@earendil-works/pi-durable']!==durable)throw Error('Module requires bobExtension.durable and the exact validated Durable dependency to match installed runtime '+durable);
  return manifest;
 }
 export function moduleCatalog(state?:State) {
@@ -50,6 +53,7 @@ export async function listModules(state:State,runtime:Runtime,chat?:Conversation
  return moduleCatalog(state).map(module=>({...module,available:true,installed:configuration.installed.includes(module.id),registered:!!runtime.registry.snapshot().extension(module.name),defaultSelected:configuration.defaults.includes(module.id),...(selected?{selected:selected.includes(module.name)}:{})}));
 }
 export async function selectModules(state:State,runtime:Runtime,chat:Conversation,raw:unknown) {
+ await requireActiveConversation(runtime.harness,chat.id);
  const ids=Selection.parse(raw),installed=moduleState(state).installed;
  if(ids.some(id=>!installed.includes(id)))throw new HttpError(409,'Install the module on this backend first');
  const inspection=await runtime.harness.inspect(ctx);

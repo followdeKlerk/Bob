@@ -1,5 +1,4 @@
 import {
-  createReadStream,
   createWriteStream,
   mkdirSync,
   renameSync,
@@ -20,6 +19,7 @@ import type { Conversation } from "@earendil-works/pi-durable";
 import { ctx } from "./runtime.js";
 import type { State } from "./state.js";
 import { Attachment as Meta } from "./contracts.js";
+import {retiredInTransaction,retiredMessage} from './retired-chat-profile.js';
 function sniff(bytes: Buffer) {
   if (bytes.subarray(0, 5).toString() === "%PDF-") return "application/pdf";
   if (
@@ -42,6 +42,7 @@ export async function receiveArtifact(
   s: State,
   chat: Conversation
 ) {
+  await chat.commit(async tx=>{if(await retiredInTransaction(tx,chat.id))throw new HttpError(410,retiredMessage);},ctx);
   const name = z
     .string()
     .min(1)
@@ -61,7 +62,8 @@ export async function receiveArtifact(
   const id = uploadId ? z.string().uuid().parse(uploadId) : randomUUID();
   const publish = async (meta: ReturnType<typeof Meta.parse>) => {
     const existing = await chat.commit(tx => tx.submissionByRequest(chat.id, `artifact:${id}`), ctx);
-    if (!existing) await chat.submit({type:'write',requestId:`artifact:${id}`,entry:{kind:'bob.artifact',data:meta,model:[{role:'user',timestamp:Date.now(),content:[{type:'text',text:`User attachment available at ${join(dir,id)}. MIME: ${meta.mime}. Untrusted original filename: ${JSON.stringify(meta.name)}. Original bytes are retained; inspect with the available file tools as needed.`}]}]}},ctx);
+    const text=`User attachment available at ${join(dir,id)}. MIME: ${meta.mime}. Untrusted original filename: ${JSON.stringify(meta.name)}. Original bytes are retained; inspect with the available file tools as needed.`;
+    if (!existing) await chat.submit({type:'write',requestId:`artifact:${id}`,entry:{kind:'bob.artifact',data:meta,model:[{role:'user',timestamp:Date.now(),content:[{type:'text',text}]}]}},ctx);
     return meta;
   };
   if (uploadId && existsSync(join(dir,id+'.json'))) {
@@ -135,11 +137,27 @@ export async function receiveArtifact(
     throw e;
   }
 }
+/** A single bounded byte range; multipart responses are deliberately unsupported. */
+export function artifactByteRange(value: string, size: number): {start: number; end: number} | undefined {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2]) || size === 0) return undefined;
+  const first = match[1] ? Number(match[1]) : undefined;
+  const last = match[2] ? Number(match[2]) : undefined;
+  if ((first !== undefined && !Number.isSafeInteger(first)) || (last !== undefined && !Number.isSafeInteger(last))) return undefined;
+  if (first === undefined) {
+    if (!last) return undefined;
+    return {start: Math.max(0, size - last), end: size - 1};
+  }
+  if (first >= size || (last !== undefined && last < first)) return undefined;
+  return {start: first, end: Math.min(last ?? size - 1, size - 1)};
+}
+
 export async function downloadArtifact(
   res: ServerResponse,
   s: State,
   chat: Conversation,
-  id: string
+  id: string,
+  request: {range?: string; method?: string} = {},
 ) {
   z.string().uuid().parse(id);
   const path = join(s.dir, "artifacts", String(chat.id), id);
@@ -147,15 +165,33 @@ export async function downloadArtifact(
   const meta = Meta.parse(JSON.parse(readFileSync(path + ".json", "utf8")));
   if (meta.conversationId !== chat.id || meta.id !== id)
     throw Error("Artifact ownership mismatch");
-  res.writeHead(200, {
-    "content-type": meta.mime,
-    "content-length": meta.size,
-    "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(
-      meta.name
-    )}`,
-    "x-content-type-options": "nosniff",
-    "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; sandbox",
-  });
-  await pipeline(createReadStream(path), res);
+  const file = await open(path, "r");
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.size !== meta.size) throw Error("Artifact size mismatch");
+    const headers = {
+      "content-type": meta.mime,
+      "accept-ranges": "bytes",
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      "x-content-type-options": "nosniff",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; sandbox",
+    };
+    // RFC 9110: Range modifies GET only; HEAD always describes the full representation.
+    const requestedRange = request.method === "HEAD" ? undefined : request.range;
+    const range = requestedRange === undefined ? undefined : artifactByteRange(requestedRange, meta.size);
+    if (requestedRange !== undefined && !range) {
+      res.writeHead(416, {...headers, "content-range": `bytes */${meta.size}`, "content-length": 0});
+      res.end();
+      return;
+    }
+    const start = range?.start ?? 0, end = range?.end ?? meta.size - 1;
+    res.writeHead(range ? 206 : 200, {
+      ...headers,
+      "content-length": Math.max(0, end - start + 1),
+      ...(range ? {"content-range": `bytes ${start}-${end}/${meta.size}`} : {}),
+    });
+    if (request.method === "HEAD" || meta.size === 0) { res.end(); return; }
+    await pipeline(file.createReadStream({start, end, autoClose: false, highWaterMark: 64 * 1024}), res);
+  } finally { await file.close(); }
 }

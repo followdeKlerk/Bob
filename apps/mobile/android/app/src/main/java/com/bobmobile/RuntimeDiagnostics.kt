@@ -29,7 +29,7 @@ internal object RuntimeDiagnostics {
         val runtime = Runtime.getRuntime()
         val info = ActivityManager.MemoryInfo()
         (context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
-        return JSONObject().put("time", System.currentTimeMillis()).put("versionCode", BuildConfig.VERSION_CODE)
+        return JSONObject().put("time", System.currentTimeMillis()).put("versionCode", InstalledAppVersion.get(context).code)
             .put("diagnosticSessionStarted", diagnosticSessionStarted).put("kind", kind)
             .put("javaUsedKb", (runtime.totalMemory() - runtime.freeMemory()) / 1024)
             .put("javaMaxKb", runtime.maxMemory() / 1024)
@@ -72,7 +72,7 @@ internal object RuntimeDiagnostics {
                 if (DiagnosticPolicy.coordinate(line, column)) frames.put(JSONObject().put("line", line).put("column", column))
             }
             // Reconstruct the allowlist; never retain unknown keys from JS.
-            val record = JSONObject().put("time", System.currentTimeMillis()).put("versionCode", BuildConfig.VERSION_CODE)
+            val record = JSONObject().put("time", System.currentTimeMillis()).put("versionCode", InstalledAppVersion.get(context).code)
                 .put("diagnosticSessionStarted", diagnosticSessionStarted).put("source", source).put("type", type)
                 .put("fatal", raw.getBoolean("fatal")).put("frames", frames)
             try { record.put("memory", memory(context, "js-fault")) } catch (_: Throwable) {}

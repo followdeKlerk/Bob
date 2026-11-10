@@ -7,32 +7,31 @@ import {
 import { join, resolve, relative } from "node:path";
 import type { State } from "./state.js";
 import { acquireOwner } from "./ownership.js";
-import { readControlFloor } from "./maintenance-migration.js";
+import { readControlFloor, installedDurableVersion } from "./maintenance-migration.js";
 import { z } from "zod";
 
-const durableVersion = '1.5.0' as const;
+/** Exact reviewed runtimes, not a semver range. The historical Pi 1.5 floor is
+ * deliberately independent of the installed package version. */
+export const supportedDurableVersion = z.enum(['1.5.0', '1.5.1']);
+export {installedDurableVersion} from './maintenance-migration.js';
+const historicalMinDurable = '1.5.0' as const;
 const lifecycleVersion = z.union([z.literal(0), z.literal(1), z.literal(2)]);
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/);
-const controlVersion = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+const controlVersion = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
 const floorSchema = z.discriminatedUnion('kind', [
+  z.object({kind:z.literal('pi151'), minDurable:z.literal('1.5.1'), protocol:z.literal('bob-pi151-v1'), origin:z.enum(['fresh','migration']), from:fingerprint.optional(), to:fingerprint, migrationReleaseId:z.string().min(1), migrationCli:z.string().min(1), lifecycleSchemaVersion:lifecycleVersion}).strict().refine(floor=>floor.origin==='migration'?floor.from!==undefined:floor.from===undefined,'Patch floor origin/from mismatch'),
   z.object({kind:z.literal('legacy'), lifecycleSchemaVersion:lifecycleVersion}).strict(),
-  z.object({kind:z.literal('pi15-fresh'), origin:z.literal('fresh'), minDurable:z.literal(durableVersion), protocol:z.literal('bob-pi15-v1'), lifecycleSchemaVersion:lifecycleVersion}).strict(),
-  z.object({kind:z.literal('pi15'), minDurable:z.literal(durableVersion), protocol:z.literal('bob-pi15-v1'), from:fingerprint, to:fingerprint, migrationReleaseId:z.string().min(1), migrationCli:z.string().min(1), lifecycleSchemaVersion:lifecycleVersion}).strict(),
+  z.object({kind:z.literal('pi15-fresh'), origin:z.literal('fresh'), minDurable:z.literal(historicalMinDurable), protocol:z.literal('bob-pi15-v1'), lifecycleSchemaVersion:lifecycleVersion}).strict(),
+  z.object({kind:z.literal('pi15'), minDurable:z.literal(historicalMinDurable), protocol:z.literal('bob-pi15-v1'), from:fingerprint, to:fingerprint, migrationReleaseId:z.string().min(1), migrationCli:z.string().min(1), lifecycleSchemaVersion:lifecycleVersion}).strict(),
 ]);
 const manifestSchema = z.object({
-  format:z.literal(2), bob:z.literal('0.3.0'), durable:z.literal(durableVersion),
+  format:z.literal(2), bob:z.literal('0.3.0'), durable:supportedDurableVersion,
   controlSchemaVersion:controlVersion, lifecycleSchemaVersion:lifecycleVersion, floor:floorSchema,
   backendId:z.string().uuid(), createdAt:z.string().datetime(), coverage:z.string(),
   files:z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
 }).strict();
 type Manifest = z.infer<typeof manifestSchema>;
 
-/** Export/restore policy is tied to the installed native runtime, not caller metadata. */
-function assertRuntimeVersion() {
-  const installed = JSON.parse(readFileSync(new URL('../package.json', import.meta.resolve('@earendil-works/pi-durable')), 'utf8'));
-  if (installed.name !== '@earendil-works/pi-durable' || installed.version !== durableVersion)
-    throw Error('Recovery requires the exact validated Pi Durable 1.5.0 runtime');
-}
 const digest = (path:string) => {
   const fd=openSync(path,'r'), hash=createHash('sha256'), buffer=Buffer.alloc(65536);
   try { let size:number; while((size=readSync(fd,buffer,0,buffer.length,null))>0) hash.update(buffer.subarray(0,size)); return hash.digest('hex'); }
@@ -80,7 +79,7 @@ function verifyMetadata(directory:string, manifest:Manifest) {
   if(JSON.stringify(actual.floor)!==JSON.stringify(manifest.floor)) throw Error('Backup control floor metadata mismatch');
 }
 export async function backupState(state:State, destination:string, afterVerifiedBackup?:()=>Promise<void>) {
-  assertRuntimeVersion();
+  const durableVersion=installedDurableVersion();
   const releaseOwner=acquireOwner(state.dir);
   try {
     if(existsSync(destination)) throw Error('Backup destination must not exist');
@@ -131,11 +130,13 @@ export async function backupState(state:State, destination:string, afterVerified
 /** Format 1 retains its historical Pi 1.4 meaning. This release deliberately does not
  * restore it: use the matching Pi 1.4 Bob release into a fresh destination, then the
  * separately authorized explicit migration. Relabeling is not migration. Format 2
- * restore only copies validated bytes; it never starts State or native Durable.
+ * restore accepts only reviewed 1.5.0/1.5.1 export metadata and copies validated
+ * bytes; it never starts State or native Durable. This read-only compatibility
+ * is NOT permission to open a newer physical floor with an older runtime.
  * A legacy control-only database (no native payload) is safe to preserve as such;
  * it is not evidence authorizing an existing native database to cross versions. */
 export function restoreState(source:string,destination:string) {
-  assertRuntimeVersion();
+  installedDurableVersion();
   const root=resolve(source);
   if(lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw Error('Restore source must be a real backup directory');
   const checked=(name:string)=>{

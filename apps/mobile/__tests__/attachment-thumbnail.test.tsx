@@ -24,19 +24,28 @@ test('sent images use paired backend authentication and do not offer draft remov
  await act(async()=>tree.root.findAll(item=>item.props.accessibilityLabel==='Open Screenshot.jpg'&&typeof item.props.onPress==='function')[0].props.onPress());expect(open).toHaveBeenCalledTimes(1);
  await act(async()=>tree.unmount());
 });
-test('chat-style hidden filename suppresses labels in non-image and failed-image fallbacks but draft default stays named',async()=>{
+test('chat-style hidden filename suppresses filenames but keeps readable type badges',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<AttachmentThumbnail name="very-long-confidential-name.pdf" mime="application/pdf" hideFilename onOpen={()=>{}}/>);});
- expect(tree.root.findAllByType(Text)).toHaveLength(0);expect(tree.root.findAll(item=>item.props.accessibilityLabel==='Open attachment'&&typeof item.props.onPress==='function')).toHaveLength(1);
+ expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toEqual(['PDF']);expect(tree.root.findAll(item=>item.props.accessibilityLabel==='Open attachment'&&typeof item.props.onPress==='function')).toHaveLength(1);
  await act(async()=>tree.update(<AttachmentThumbnail name="very-long-confidential-name.jpg" mime="image/jpeg" source={{uri:'file:///missing'}} hideFilename onOpen={()=>{}}/>));
- await act(async()=>tree.root.findByType(Image).props.onError());expect(tree.root.findAllByType(Text)).toHaveLength(0);await act(async()=>tree.unmount());
+ await act(async()=>tree.root.findByType(Image).props.onError());expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toEqual(['JPG']);await act(async()=>tree.unmount());
 });
 test('unreadable images and non-image files retain a compact readable fallback',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<AttachmentThumbnail name="Screenshot.jpg" mime="image/jpeg" source={{uri:'file:///missing'}}/>);});
  await act(async()=>tree.root.findByType(Image).props.onError());
  expect(tree.root.findAllByType(Image)).toHaveLength(0);
- expect(tree.root.findByType(Text).props.children).toBe('Screenshot.jpg');
+ expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toEqual(['JPG','Screenshot.jpg']);
  await act(async()=>tree.update(<AttachmentThumbnail name="notes.txt" mime="text/plain"/>));
- expect(tree.root.findByType(Text).props.children).toBe('notes.txt');
+ expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toEqual(['TXT','notes.txt']);
+ await act(async()=>tree.unmount());
+});
+
+test('generic MIME uses a conservative image extension hint for a real thumbnail, but not over an explicit different type',async()=>{
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'device-token'});
+ let tree!:Renderer.ReactTestRenderer;
+ const props={backend:{backendId:'backend',endpoint:'https://paired.ts.net'},artifact:{id:'image-id',conversationId:12,name:'Screenshot.JPG',mime:'application/octet-stream'},onOpen:()=>{}};
+ await act(async()=>{tree=Renderer.create(<SentAttachmentThumbnail {...props}/>);});expect(tree.root.findByType(Image).props.source.uri).toContain('/artifacts/image-id');
+ await act(async()=>tree.update(<SentAttachmentThumbnail {...props} artifact={{...props.artifact,mime:'application/pdf'}}/>));expect(tree.root.findAllByType(Image)).toHaveLength(0);
  await act(async()=>tree.unmount());
 });

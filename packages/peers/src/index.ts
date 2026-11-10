@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {defineDoc,defineExtension,defineTask,defineTool,section} from '@earendil-works/pi-durable';
 import * as schema from '@earendil-works/pi-schema';
-import type {JsonValue} from '@earendil-works/chord';
+import type {JsonValue} from '@earendil-works/chord/json';
 export type PeerPort={list():unknown;request(id:string,action:'conversations'|'history'|'message'|'operation',request:Record<string,unknown>,signal?:AbortSignal):Promise<any>};
 type Operation={peerId:string;conversationId:number;requestId:string;fingerprint:string;status:'started'|'admitted'|'unknown';reporterId?:number};
 export const PeerOperations=defineDoc<{operations:Record<string,Operation>}>({kind:'bob.peer-operations',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({operations:{}}),checkpointWhen:()=>true});

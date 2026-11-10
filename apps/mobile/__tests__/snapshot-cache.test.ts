@@ -1,3 +1,4 @@
+jest.mock('../history-cache',()=>({readHistoryCache:jest.fn(),writeHistoryCache:jest.fn()}));
 import {reuseSnapshotEntries} from '../snapshot-cache';
 test('immutable stored entries retain object identity while new live documents and entries advance',()=>{
  const original={id:1,data:{text:'Original preserved reply'}},previous={entries:[original],docs:{live:'before'}};
@@ -50,4 +51,16 @@ test('slim server image presentation replaces a same-ID legacy cache once, then 
  const revised={...projected,mobilePresentation:{...projected.mobilePresentation,version:2}};
  expect(reuseSnapshotEntries(current,{...next,entries:[revised,unchanged]}).entries[0]).toBe(revised);
  expect(legacy.model[0].content[0].data).toHaveLength(3170000);
+});
+
+test('native reply associations refresh live and cached entry identities exactly once',()=>{
+ const file={id:3,kind:'bob.file',data:{name:'report.txt'}},answer={id:8,kind:'pi.assistant',model:[{role:'assistant',content:'Done'}]};
+ const previous={entries:[file,answer],docs:{}},mobileReply={version:1,first:1,answer:8};
+ const next={entries:[{...file,mobileReply},{...answer,mobileReply}],docs:{}};
+ const updated=reuseSnapshotEntries(previous,next);
+ expect(updated.entries[0]).toBe(next.entries[0]);expect(updated.entries[1]).toBe(next.entries[1]);
+ expect(reuseSnapshotEntries(updated,JSON.parse(JSON.stringify(updated)))).toBe(updated);
+ const {mergeLatestHistory}=require('../stored-history');
+ const page={backendId:'11111111-1111-4111-8111-111111111111',conversationId:7,coverage:'stored-entries',items:previous.entries};
+ expect(mergeLatestHistory(page,{...page,items:next.entries}).items[0].mobileReply).toEqual(mobileReply);
 });

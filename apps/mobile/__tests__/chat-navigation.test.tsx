@@ -46,19 +46,21 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
  act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:168}}}));
  expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(192);
  expect(sheet.findByType(ScrollView)===scroll).toBe(true);
- const fade=sheet.findByType(require('../components/edge-fade').EdgeFade);
+ const fade=sheet.findAllByType(require('../components/edge-fade').EdgeFade).find(node=>node.props.edge==='bottom')!;
  expect(fade.props).toMatchObject({edge:'bottom',height:180,color:StyleSheet.flatten(sheet.props.style).backgroundColor});
  expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
 
- const destinations=['Sessions','Notes','Workstations','Agents','Settings','Chat'];
+ expect(scroll.findAllByProps({accessibilityLabel:'Sessions'})).toHaveLength(0);
+ expect(scroll.findAllByProps({accessibilityLabel:'Agents'})).toHaveLength(0);
+ const destinations=['Notes','Workstations','Agents','Terminal','Settings','Chat'];
  for(const destination of destinations){
-  const row=scroll.findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0];
+  const row=scroll.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(48);
   expect(StyleSheet.flatten(row.props.style).height).toBeUndefined();
   expect(row.findAllByType(Text).every(text=>!text.props.numberOfLines&&text.props.allowFontScaling!==false)).toBe(true);
   act(()=>row.props.onPress());expect(onSelect).toHaveBeenLastCalledWith(destination);
  }
- expect(scroll.findAll(node=>node.props.accessibilityLabel==='Agents')[0].props.accessibilityValue).toEqual({text:'3 active agents'});
+ expect(scroll.findAll(node=>node.props.accessibilityLabel==='Agents and Sessions')[0].props.accessibilityValue).toEqual({text:'3 active agents'});
  act(()=>modal.props.onRequestClose());
  act(()=>tree.root.findByProps({accessibilityLabel:'Dismiss navigation menu'}).props.onPress());
  act(()=>tree.root.findByProps({accessibilityLabel:'Close navigation menu'}).props.onPress());
@@ -86,7 +88,7 @@ test('menu uses one static icon in the existing trigger with no decorative modal
   const sheet=tree.root.findByProps({testID:'chat-navigation-sheet'});
   expect(sheet.findAllByProps({testID:'section-heading-menu'})).toHaveLength(0);
   expect(sheet.findAllByType(Text).filter(text=>text.props.children==='Menu')).toHaveLength(1);
-  expect(sheet.findAllByProps({accessibilityLabel:'Agents'})[0].findAllByType(Text).map(text=>text.props.children)).toContain(100);
+  expect(sheet.findAllByProps({accessibilityLabel:'Agents and Sessions'})[0].findAllByType(Text).map(text=>text.props.children)).toContain(100);
  }finally{if(tree)await act(async()=>tree.unmount());}
 });
 
@@ -123,8 +125,8 @@ test('hidden trigger leaves the modal and all navigation destinations available'
   expect(tree.root.findAllByProps({testID:'chat-menu-agent-badge'})).toHaveLength(0);
   const modal=tree.root.findByType(Modal);
   expect(modal.props.visible).toBe(true);
-  for(const destination of ['Sessions','Notes','Workstations','Agents','Settings','Chat']){
-   const row=tree.root.findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0];
+  for(const destination of ['Notes','Workstations','Agents','Terminal','Settings','Chat']){
+   const row=tree.root.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0];
    act(()=>row.props.onPress());expect(onSelect).toHaveBeenLastCalledWith(destination);
   }
   expect(onSelect).toHaveBeenCalledTimes(6);
@@ -136,4 +138,56 @@ test('hidden trigger leaves the modal and all navigation destinations available'
   expect(trigger.findAllByType(NavigationMenu)).toHaveLength(1);
   act(()=>trigger.props.onPress());expect(onOpen).toHaveBeenCalledTimes(1);
  }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('read-only chat can still reach the combined session navigator without an activity badge',async()=>{
+ let tree!:Renderer.ReactTestRenderer;const onSelect=jest.fn();
+ await act(async()=>{tree=Renderer.create(<ChatNavigation open readOnly activeAgentCount={4} onOpen={jest.fn()} onClose={jest.fn()} onSelect={onSelect}/>);});
+ const row=tree.root.findByProps({accessibilityLabel:'Agents and Sessions'});
+ expect(row.props.accessibilityValue).toEqual({text:'0 active agents'});
+ act(()=>row.props.onPress());expect(onSelect).toHaveBeenCalledWith('Agents');
+ expect(tree.root.findAllByProps({accessibilityLabel:'Sessions'})).toHaveLength(0);
+ await act(async()=>tree.unmount());
+});
+
+test('menu puts the current chat first and separates workspace and app destinations with only the selected row outlined',async()=>{
+ const {Text:AppText}=require('../components/app-text');
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ChatNavigation open onOpen={()=>{}} onClose={()=>{}} onSelect={()=>{}}/>);});
+ const scroll=tree.root.findByType(ScrollView);
+ const rows=scroll.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
+ expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Chat','Agents and Sessions','Terminal','Notes','Workstations','Settings']);
+ const headers=scroll.findAllByType(Text).filter(node=>node.props.accessibilityRole==='header').map(node=>node.props.children);
+ expect(headers).toEqual(['Workspace','App']);
+ expect(rows[0].props.accessibilityState.selected).toBe(true);
+ for(const row of rows){const style=StyleSheet.flatten(row.props.style);expect(style.borderWidth).toBe(1);expect(style.borderColor==='transparent').toBe(!row.props.accessibilityState.selected);}
+ expect(tree.root.findAllByType(AppText).every(node=>node.props.typography==='ui')).toBe(true);
+ await act(async()=>tree.unmount());
+});
+
+
+test.each(['Notes','Workstations','Agents','Terminal','Settings'] as const)('menu opened from %s marks only that destination selected',async selected=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ChatNavigation selected={selected} open onOpen={()=>{}} onClose={()=>{}} onSelect={()=>{}}/>);});
+ try{
+  const rows=tree.root.findByType(ScrollView).findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function');
+  expect([...new Set(rows.filter(node=>node.props.accessibilityState?.selected).map(node=>node.props.accessibilityLabel))]).toEqual([selected==='Agents'?'Agents and Sessions':selected]);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test.each(['light','dark'] as const)('%s selected menu row uses a thin outline without a filled highlight or remount',async scheme=>{
+ const {ThemeContext,tokens}=require('../theme-context');let tree!:Renderer.ReactTestRenderer;
+ const onSelect=jest.fn();const render=(selected:'Chat'|'Notes')=><ThemeContext.Provider value={tokens[scheme]}><ChatNavigation open selected={selected} onOpen={jest.fn()} onClose={jest.fn()} onSelect={onSelect}/></ThemeContext.Provider>;
+ await act(async()=>{tree=Renderer.create(render('Chat'));});
+ const chat=tree.root.findByProps({accessibilityLabel:'Chat'}),notes=tree.root.findByProps({accessibilityLabel:'Notes'});
+ expect(StyleSheet.flatten(chat.props.style)).toMatchObject({borderWidth:1,borderColor:tokens[scheme].colors.border,borderRadius:14});
+ expect(StyleSheet.flatten(chat.props.style).backgroundColor).toBeUndefined();
+ expect(StyleSheet.flatten(notes.props.style)).toMatchObject({borderWidth:1,borderColor:'transparent'});
+ act(()=>notes.props.onPress());expect(onSelect).toHaveBeenCalledWith('Notes');
+ await act(async()=>tree.update(render('Notes')));
+ expect(tree.root.findByProps({accessibilityLabel:'Chat'})).toBe(chat);expect(tree.root.findByProps({accessibilityLabel:'Notes'})).toBe(notes);
+ expect(chat.props.accessibilityState.selected).toBe(false);expect(notes.props.accessibilityState.selected).toBe(true);
+ expect(StyleSheet.flatten(chat.props.style).borderColor).toBe('transparent');
+ expect(StyleSheet.flatten(notes.props.style).borderColor).toBe(tokens[scheme].colors.border);
+ expect(StyleSheet.flatten(notes.props.style).backgroundColor).toBeUndefined();
+ await act(async()=>tree.unmount());
 });

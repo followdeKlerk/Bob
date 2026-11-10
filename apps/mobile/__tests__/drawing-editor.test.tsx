@@ -162,7 +162,7 @@ test('feedback shrink, failed save and rotation preserve logical paper, bottom s
 });
 
 
-test('drawing keeps Cancel left and primary Add right in a separate bottom footer with standard control chrome while paper stays unoutlined',async()=>{
+test('drawing keeps Cancel left and primary Add right in a separate bottom footer with borderless controls while paper stays unoutlined',async()=>{
  await mount();
  const cancel=find(tree,'Cancel drawing'),add=find(tree,'Add drawing');
  const header=tree.root.findByType(SectionHeading);
@@ -179,15 +179,15 @@ test('drawing keeps Cancel left and primary Add right in a separate bottom foote
  for(const label of ['Undo','Redo','Eraser','Pen width 3'])expect(footer.findAllByProps({accessibilityLabel:label})).toHaveLength(0);
  expect(footer.findByProps({testID:'section-footer-leading'}).findAll(node=>node.props.accessibilityLabel==='Cancel drawing').length).toBeGreaterThan(0);
  expect(footer.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Add drawing').length).toBeGreaterThan(0);
- expect(StyleSheet.flatten(header.findAllByType(require('react-native').View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
+ expect(StyleSheet.flatten(header.findAllByType(require('react-native').View)[0].props.style)).toMatchObject({paddingHorizontal:16,paddingTop:28,paddingBottom:8});
  for(const label of ['Cancel drawing','Undo','Redo','Eraser','Red','Pen width 3']){
-  expect(StyleSheet.flatten(find(tree,label).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  expect(StyleSheet.flatten(find(tree,label).props.style)).toMatchObject({minHeight:48,minWidth:48});
  }
- expect(StyleSheet.flatten(add.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.accent,backgroundColor:colors.accent});
+ expect(StyleSheet.flatten(add.props.style)).toMatchObject({minHeight:48,minWidth:48,backgroundColor:colors.surface,borderRadius:999,borderWidth:1});
  expect(StyleSheet.flatten(canvas(tree).props.style).borderWidth).toBeUndefined();
  expect(tree.root.findAllByType('Path' as any)[0].props.fill).toBe('#ffffff');
  await act(async()=>find(tree,'Eraser').props.onPress());
- expect(StyleSheet.flatten(find(tree,'Eraser').props.style)).toMatchObject({borderRadius:14,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+ expect(StyleSheet.flatten(find(tree,'Eraser').props.style)).toMatchObject({borderRadius:999,backgroundColor:colors.selectedSurface});
 });
 
 
@@ -195,8 +195,37 @@ test('non-scroll drawing paper stays outside measured controls while its strokes
  await mount();await draw();
  const paper=canvas(tree),before=ink(tree)[0].props.d,overlay=tree.root.findByProps({testID:'section-footer-overlay'});
  act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:176}}}));
- expect(StyleSheet.flatten(paper.props.style).marginBottom).toBe(200);
+ expect(StyleSheet.flatten(paper.props.style).marginBottom).toBe(196);
  expect(canvas(tree)===paper).toBe(true);expect(ink(tree)[0].props.d).toBe(before);
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
  expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({position:'absolute',bottom:0});
+});
+
+test('one horizontally reachable toolbar contains history, ink and widths; reflow preserves selected ink and logical coordinates',async()=>{
+ await mount();
+ const toolbar=tree.root.findByProps({testID:'drawing-toolbar'});
+ expect(toolbar.props.horizontal).toBe(true);expect(StyleSheet.flatten(toolbar.props.style)).toMatchObject({flexGrow:0,flexShrink:0});
+ for(const label of ['Undo','Redo','Eraser','Black','Red','Blue','Green','Pen width 3','Pen width 5','Pen width 8'])expect(toolbar.findAllByProps({accessibilityLabel:label}).length).toBeGreaterThan(0);
+ await act(async()=>find(tree,'Blue').props.onPress());await act(async()=>find(tree,'Pen width 8').props.onPress());await draw(300,170);
+ const paper=canvas(tree),path=ink(tree)[0].props.d;
+ act(()=>tree.root.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:224}}}));
+ await resize(337,100);
+ expect(canvas(tree)).toBe(paper);expect(ink(tree)[0].props).toMatchObject({d:path,stroke:'#246bfe',strokeWidth:8});
+ expect(find(tree,'Blue').props.accessibilityState.selected).toBe(true);expect(find(tree,'Pen width 8').props.accessibilityState.selected).toBe(true);
+ await act(async()=>find(tree,'Eraser').props.onPress());await draw(168.5,50);
+ expect(ink(tree)[1].props).toMatchObject({stroke:'#ffffff',strokeWidth:32});
+ expect(svg().props.viewBox).toBe('0 0 320 180');
+ expect(tree.root.findAllByType(require('../components/app-text').Text).every(node=>node.props.typography==='ui')).toBe(true);
+});
+
+
+test('top edge fade never overlays the non-scrolling paper or its ink',async()=>{
+ const {EdgeFade}=require('../components/edge-fade');let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<DrawingEditor visible onCancel={()=>{}} onAdd={async()=>{}}/>);});
+ try{
+  expect(tree.root.findAllByType(EdgeFade).map(node=>node.props.edge)).toEqual(['bottom']);
+  const host=canvas(tree);const before=host;
+  act(()=>tree.root.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:160}}}));
+  expect(canvas(tree)===before).toBe(true);expect(StyleSheet.flatten(host.props.style).marginBottom).toBe(180);
+ }finally{await act(async()=>tree.unmount());}
 });

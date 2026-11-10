@@ -20,7 +20,7 @@ internal object BobAppearance {
         val backgroundCss get() = "#%06x".format(background and 0xffffff)
         val foregroundCss get() = "#%06x".format(foreground and 0xffffff)
     }
-    private val light = Palette(true, Color.parseColor("#f7f5f0"), Color.parseColor("#292720"), Color.parseColor("#655f54"), Color.parseColor("#302d27"), Color.parseColor("#fffdf8"))
+    private val light = Palette(true, Color.parseColor("#e8dfd0"), Color.parseColor("#292720"), Color.parseColor("#655f54"), Color.parseColor("#302d27"), Color.parseColor("#fffdf8"))
     private val dark = Palette(false, Color.parseColor("#000000"), Color.parseColor("#e8e0d2"), Color.parseColor("#a1a1a1"), Color.parseColor("#e8e0d2"), Color.parseColor("#000000"))
     private enum class Role { BACKGROUND, TEXT, MUTED, BUTTON }
     // No value captures its weak key; closed Activities/panels must remain collectible.
@@ -79,4 +79,15 @@ internal object BobAppearance {
             override fun onLowMemory() {}
         })
     }
+}
+
+/** Standard ANSI slots only: programs retain their own true-colour output and backgrounds. */
+internal object BobTerminalColors {
+    private val names = listOf("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+        "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite")
+    private val dark = listOf("#191919", "#ef9a91", "#8dc891", "#dcc487", "#82b5e5", "#c7a0dc", "#83c4c3", "#e8e0d2",
+        "#a1a1a1", "#f2afa8", "#a6d5a9", "#e6d4a3", "#a1c8ec", "#d6b9e5", "#a2d5d3", "#fff4e5")
+    private val light = listOf("#292720", "#9b3f35", "#376844", "#795b1c", "#315e87", "#79518b", "#28666b", "#e8dfd0",
+        "#655f54", "#90382e", "#30613c", "#705214", "#29577f", "#704782", "#205e63", "#fffdf8")
+    fun ansi(isLight: Boolean): Map<String, String> = names.zip(if (isLight) light else dark).toMap()
 }

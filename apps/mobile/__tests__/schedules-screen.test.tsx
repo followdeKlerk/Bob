@@ -1,8 +1,9 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,StyleSheet,View} from 'react-native';
-import {SectionHeading,SectionActions,RoundAction,SectionSegments} from '../components/section-ui';
+import {AppState,StyleSheet,View,Text as NativeText} from 'react-native';
+import {SectionHeading,SectionActions,RoundAction,SectionSegments,SectionAction} from '../components/section-ui';
 import {colors} from '../theme';
+import {APP_FONT_FAMILY,APP_UI_FONT_FAMILY} from '../typography';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert,scheduleFrequency,type ScheduleJob} from '../components/schedules-screen';
 jest.mock('uuid',()=>({v4:()=> '11111111-1111-4111-8111-111111111111'}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -17,8 +18,10 @@ test('schedule list is a full overlay, shows honest timing, details, direct paus
  const compose=jest.fn(),open=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<SchedulesScreen visible request={request} onCompose={compose} onOpenChat={open}/>);});
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'schedules-screen'}).props.style)).toMatchObject({position:'absolute',top:0,bottom:0,zIndex:25});
- expect(text(tree)).toContain('Every 2 days (elapsed)');expect(text(tree)).toContain('Last run: no change');
+ const pauseLabel=tree.root.findAllByType(NativeText).find(node=>node.props.children==='Pause')!;expect(StyleSheet.flatten(pauseLabel.props.style).fontFamily).toBe(APP_UI_FONT_FAMILY);
+ expect(text(tree)).toContain('Next:');expect(text(tree)).not.toContain('Every 2 days (elapsed)');
  await act(async()=>press(tree,'Check release notes, active. Show details'));
+ expect(text(tree)).toContain('Every 2 days (elapsed)');expect(text(tree)).toContain('Last run: no change');
  expect(text(tree)).toContain('delivery is not confirmed here');
  await act(async()=>press(tree,'Open source chat'));expect(open).toHaveBeenCalledWith(9);
  await act(async()=>press(tree,'Edit in chat'));expect(compose.mock.calls[0][0]).toContain(job.id);
@@ -41,6 +44,7 @@ test('errors offer refresh and never retry an uncertain mutation automatically',
 test('receipt and alert are readable without an interactive web surface',async()=>{
  const open=jest.fn();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ScheduleReceipt job={job} onOpen={open}/>);});expect(text(tree)).toContain('Check release notes');expect(text(tree)).toContain('Next:');
+ expect(tree.root.findAllByType(NativeText).every(node=>StyleSheet.flatten(node.props.style).fontFamily===APP_FONT_FAMILY)).toBe(true);
  act(()=>press(tree,'View schedule Check release notes'));expect(open).toHaveBeenCalledTimes(1);
  await act(async()=>tree.update(<ScheduleAlert data={{title:'Reminder',text:'Leave for the appointment'}} onOpen={open}/>));expect(text(tree)).toContain('Leave for the appointment');
  await act(async()=>tree.unmount());
@@ -69,7 +73,7 @@ test('schedule footer has return left and Refresh/Create right below a separate 
  await act(async()=>{tree=Renderer.create(<SchedulesScreen menu={<View testID="schedules-menu-control"/>} visible request={request} onBack={back} onCompose={compose} onOpenChat={()=>{}}/>);});
  try{
   const heading=tree.root.findByType(SectionHeading);
-  expect(heading.props).toMatchObject({title:'Schedules',subtitle:'This workstation'});
+  expect(heading.props).toMatchObject({title:'Schedules'});
   expect(heading.findAllByType(RoundAction)).toHaveLength(0);
   const footer=tree.root.findByType(SectionActions);expect(footer.props.onBack).toBe(back);
   const host=heading.parent!.findByProps({testID:'section-scroll-host'}),body=host.children[0] as Renderer.ReactTestInstance;
@@ -85,16 +89,16 @@ test('schedule footer has return left and Refresh/Create right below a separate 
 
   expect(StyleSheet.flatten(footer.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
   expect(footer.findByProps({testID:'section-footer-menu'}).findAllByProps({testID:'schedules-menu-control'}).length).toBeGreaterThan(0);
-  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules','Create a schedule in chat']);
+  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Back to previous menu','Refresh schedules']);
   const actions=footer.findByProps({testID:'section-footer-actions'});
-  expect(actions.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Refresh schedules','Create a schedule in chat']);
-  expect(actions.findAllByType(RoundAction)[1].props.primary).toBe(true);
+  expect(actions.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Refresh schedules']);
+  expect(actions.findByType(SectionAction).props.primary).toBe(true);
   act(()=>press(tree,'Back to previous menu'));expect(back).toHaveBeenCalledTimes(1);
   await act(async()=>press(tree,'Refresh schedules'));expect(request).toHaveBeenCalledTimes(2);
   act(()=>press(tree,'Create a schedule in chat'));expect(compose).toHaveBeenCalledWith('Create a schedule: ');
   const pause=tree.root.findAll(node=>node.props.accessibilityLabel==='Pause'&&typeof node.props.onPress==='function')[0];
-  expect(StyleSheet.flatten(pause.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
-  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===20&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  expect(StyleSheet.flatten(pause.props.style)).toMatchObject({borderRadius:999,borderWidth:1,borderColor:colors.border});
+  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderBottomColor===colors.subtle;})).toBe(true);
   await act(async()=>tree.update(<ScheduleReceipt job={job} onOpen={()=>{}}/>));
   const receipt=tree.root.findAll(node=>node.props.accessibilityLabel==='View schedule Check release notes'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(receipt.props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});

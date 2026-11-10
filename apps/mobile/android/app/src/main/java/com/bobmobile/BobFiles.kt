@@ -150,7 +150,10 @@ class BobFiles(private val context: ReactApplicationContext) : ReactContextBaseJ
             connection.inputStream.use { copy(it, output, op.limit) }
         } finally { connection.disconnect() }
     }
-    override fun getConstants(): MutableMap<String, Any> = mutableMapOf("versionCode" to BuildConfig.VERSION_CODE, "versionName" to BuildConfig.VERSION_NAME)
+    override fun getConstants(): MutableMap<String, Any> {
+        val version = InstalledAppVersion.get(context)
+        return mutableMapOf("versionCode" to version.code, "versionName" to version.name)
+    }
     private fun updateStatus(value: UpdateStatus): WritableMap = Arguments.createMap().apply {
         putString("state", value.state); putString("message", value.message)
     }

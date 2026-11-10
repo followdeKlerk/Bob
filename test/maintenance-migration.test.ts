@@ -22,7 +22,7 @@ const from='a'.repeat(64),to='b'.repeat(64),other='c'.repeat(64);
 const stage=mkdtempSync(join(tmpdir(),'bob-bridge-policy-'));
 after(()=>rmSync(stage,{recursive:true,force:true}));
 writeFileSync(join(stage,'package.json'),'{"type":"module"}');
-for(const file of ['maintenance.ts','maintenance-migration.ts','ownership.ts','maintenance-build.ts','maintenance-runner.ts','maintenance-loader.ts']){
+for(const file of ['maintenance.ts','maintenance-migration.ts','ownership.ts','maintenance-build.ts','maintenance-ui.ts','maintenance-runner.ts','maintenance-loader.ts']){
  let source=readFileSync(new URL('../src/'+file,import.meta.url),'utf8');
  if(file==='maintenance-migration.ts'){
   const before=source;
@@ -207,7 +207,7 @@ test('unchanged stable loader recovers candidate, hands off to its real runner, 
   f.store.set('migrationIntent',{...f.store.get('migrationIntent'),phase:'backed-up'});
   f.store.set('previous',f.previous);
   const dist=join(f.dir,'old','dist');
-  for(const directory of [dist,join(f.dir,'new','dist')])for(const name of ['maintenance','maintenance-migration','ownership','maintenance-build','maintenance-runner','maintenance-loader'])writeFileSync(join(directory,name+'.js'),readFileSync(join(stage,name+'.js')));
+  for(const directory of [dist,join(f.dir,'new','dist')])for(const name of ['maintenance','maintenance-migration','ownership','maintenance-build','maintenance-ui','maintenance-runner','maintenance-loader'])writeFileSync(join(directory,name+'.js'),readFileSync(join(stage,name+'.js')));
   writeFileSync(join(f.home,'config.json'),JSON.stringify(f.supervisor.config));
   runner=spawn(process.execPath,[join(dist,'maintenance-loader.js'),f.home],{stdio:['ignore','pipe','pipe']});
   let diagnostics='';runner.stderr!.on('data',chunk=>{diagnostics+=String(chunk);});
@@ -266,7 +266,7 @@ test('missing control with custom-module archives is not a fresh bootstrap',asyn
 });
 
 function installRunner(dist:string,pinned:boolean){
- for(const name of ['maintenance','maintenance-migration','ownership','maintenance-build','maintenance-runner','maintenance-loader']){
+ for(const name of ['maintenance','maintenance-migration','ownership','maintenance-build','maintenance-ui','maintenance-runner','maintenance-loader']){
   const source=pinned?readFileSync(join(stage,name+'.js'),'utf8'):transformSync(readFileSync(new URL('../src/'+name+'.ts',import.meta.url),'utf8'),{loader:'ts',format:'esm',target:'node24'}).code;
   writeFileSync(join(dist,name+'.js'),source);
  }

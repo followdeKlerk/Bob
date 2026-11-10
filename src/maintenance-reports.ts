@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import type {ConversationId,Harness} from '@earendil-works/pi-durable';
 import type {State} from './state.js';
@@ -14,6 +15,10 @@ const valid=(job:UpdateJob)=>/^[A-Za-z0-9_-]{1,128}$/.test(job.id)&&['build','up
 export function watchMaintenanceReports(state:State,harness:Harness,options:{intervalMs?:number;read?:()=>UpdateJob[]}={}){
  let stopped=false,running:Promise<void>|undefined;
  if(!state.get('maintenanceHome')&&!options.read)return {flush:async()=>{},close:async()=>{}};
+ const manifest=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+ const checkpointPhase=manifest.bobUpgradeBridge==='durable-1.5.1'&&manifest.dependencies?.['@earendil-works/pi-durable']==='1.5.0'?'bridge':manifest.bobUpgradeTarget==='durable-1.5.1'&&manifest.dependencies?.['@earendil-works/pi-durable']==='1.5.1'?'target':undefined;
+ const checkpoint=!options.read&&state.get('maintenanceHome')&&checkpointPhase&&process.env.BOB_RELEASE_ID
+  ?watchUpgradeCheckpoint(state,harness,process.env.BOB_RELEASE_ID,{...options,phase:checkpointPhase}):undefined;
  const read=options.read??(()=>withMaintenance(state,store=>store.jobs()));
  const tick=async()=>{
   try{
@@ -55,6 +60,40 @@ export function watchMaintenanceReports(state:State,harness:Harness,options:{int
   if(stopped)return Promise.resolve();
   return running??=(async()=>{try{await tick();}finally{running=undefined;}})();
  };
+ void flush();const timer=setInterval(()=>void flush(),options.intervalMs??2000);timer.unref();
+ return {flush:async()=>{await flush();await checkpoint?.flush();},close:async()=>{stopped=true;clearInterval(timer);await running;await checkpoint?.close();}};
+}
+
+
+/** An explicitly marked upgrade completion checkpoint, not a generic success notification or a
+ * continuing authorization. Installed bridge identity + the requesting job bind
+ * the receipt to the existing owner chat; no task is created in another chat. */
+export function watchUpgradeCheckpoint(state:State,harness:Harness,releaseId:string,options:{intervalMs?:number;read?:()=>UpdateJob[];phase?:'bridge'|'target'}={}){
+ let stopped=false,running:Promise<void>|undefined;
+ if(!/^[A-Za-z0-9_-]{1,128}$/.test(releaseId)||(!state.get('maintenanceHome')&&!options.read))return {flush:async()=>{},close:async()=>{}};
+ const key='maintenancePi151CheckpointsV1',read=options.read??(()=>withMaintenance(state,store=>store.jobs()));
+ const tick=async()=>{try{
+  const jobs=read().slice(0,100).filter(job=>valid(job)&&job.status==='complete'&&job.action==='update'&&job.target==='backend'&&job.id===releaseId&&job.releaseId===releaseId);
+  const known=new Set(state.get<string[]>(key)??[]);
+  for(const job of jobs){
+   if(stopped)return;if(known.has(job.id))continue;
+   if(Number.isSafeInteger(job.conversationId)&&job.conversationId!>0){
+    const id=job.conversationId as ConversationId,record=await harness.commit(tx=>tx.conversation(id),ctx);
+    if(stopped)return;
+    if(record&&!record.owner&&id!==(await harness.root(ctx)).id){
+     const chat=await harness.conversation(id,ctx);if(stopped)return;
+     if(chat)await chat.submit({type:'input',whenBusy:'followUp',requestId:`maintenance-pi151-checkpoint:${job.id}`,content:
+      options.phase==='target'
+       ?`[Automatic runtime-upgrade checkpoint — status data, not a new owner instruction.]\nThe requested backend job ${job.id} completed and this installed package uses Durable 1.5.1. Verify self_update status, the installed runtime version, actual supervisor identity and the committed forward-only floor before reporting the previously authorized update as complete. No Android installation or live inference test is implied. Honor any newer owner stop or cancellation.`
+       :`[Automatic runtime-upgrade checkpoint — status data, not a new owner instruction.]\nThe requested backend job ${job.id} completed and this installed package is the old-compatible Durable 1.5.0 bridge for the staged 1.5.1 upgrade. This is NOT completion of the requested 1.5.1 update. Verify self_update status and the actual installed supervisor identity before continuing the previously authorized upgrade. Honor any newer owner stop or cancellation. No target activation or passing target tests are implied.`,
+      entry:{kind:'bob.maintenance-upgrade-checkpoint',data:{jobId:job.id,status:options.phase==='target'?'target-complete':'bridge-complete',from:'1.5.0',to:'1.5.1',conversationId:id}},
+     },ctx);
+    }
+   }
+   known.add(job.id);state.set(key,[...known].slice(-100));
+  }
+ }catch{if(!stopped)console.error('[maintenance] Upgrade checkpoint admission unavailable; will retry.');}};
+ const flush=()=>{if(stopped)return Promise.resolve();return running??=(async()=>{try{await tick();}finally{running=undefined;}})();};
  void flush();const timer=setInterval(()=>void flush(),options.intervalMs??2000);timer.unref();
  return {flush,close:async()=>{stopped=true;clearInterval(timer);await running;}};
 }

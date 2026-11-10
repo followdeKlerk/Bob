@@ -1,3 +1,4 @@
+import {ActivityDisclosure} from './activity-disclosure';
 import React,{useState} from 'react';
 import {StyleSheet,View} from 'react-native';
 import {CompactActivityRow} from './compact-activity-row';
@@ -12,7 +13,7 @@ function PassiveActivity({title,detail,status,accessibilityLabel,children}:{titl
  const [expanded,setExpanded]=useState(false);
  return <View>
   <CompactActivityRow title={title} detail={detail} status={status} accessibilityLabel={accessibilityLabel} expanded={expanded} onPress={()=>setExpanded(!expanded)}/>
-  {expanded&&<View style={styles.details}>{children}</View>}
+  {expanded&&<ActivityDisclosure style={styles.details}>{children}</ActivityDisclosure>}
  </View>;
 }
 

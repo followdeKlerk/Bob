@@ -124,7 +124,7 @@ test('small picker controls are at least 48dp and selected files have checked st
  const initial=StyleSheet.flatten(find(tree,'report.pdf').props.style);
  await act(async()=>find(tree,'report.pdf').props.onPress());
  const selected=find(tree,'report.pdf');expect(selected.props.accessibilityState.checked).toBe(true);
- expect(StyleSheet.flatten(selected.props.style)).toMatchObject({borderWidth:1,borderColor:colors.selectedBorder});
+ expect(StyleSheet.flatten(selected.props.style)).toMatchObject({borderColor:colors.selectedBorder});
  expect(StyleSheet.flatten(selected.props.style).backgroundColor).not.toBe(initial.backgroundColor);
  expect(find(tree,'Files tab').props.accessibilityState.selected).toBe(true);expect(find(tree,'Gallery tab').props.accessibilityState.selected).toBe(false);
  const controls=tree.root.findAll(node=>typeof node.props.onPress==='function'&&!!node.props.style);
@@ -151,14 +151,14 @@ test('attachment modal keeps Close left and Add right in a separate bottom foote
   expect(list.parent!.props.testID).toBe('section-scroll-host');
   expect(list.findAllByProps({testID:'section-footer'})).toHaveLength(0);
   expect(footer.findByProps({testID:'section-footer-leading'}).findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Close add files']);
-  expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:20,paddingTop:16,paddingBottom:12});
-  expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
-  expect(StyleSheet.flatten(find(tree,'Gallery tab').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  expect(StyleSheet.flatten(heading.findAllByType(View)[0].props.style)).toMatchObject({paddingHorizontal:16,paddingTop:28,paddingBottom:8});
+  expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({minHeight:64});
+  expect(StyleSheet.flatten(find(tree,'Gallery tab').props.style)).toMatchObject({borderRadius:999,minHeight:48});
   expect(footer.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Add 0 attachments').length).toBeGreaterThan(0);
-  expect(StyleSheet.flatten(find(tree,'Add 0 attachments').props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.accent,backgroundColor:colors.accent});
-  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===14&&style.borderColor===colors.border&&style.borderWidth===1&&style.marginTop===14;})).toBe(true);
+  expect(StyleSheet.flatten(find(tree,'Add 0 attachments').props.style)).toMatchObject({borderRadius:999,borderWidth:1,borderColor:colors.foreground,backgroundColor:colors.surface});
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'page-search'}).props.style)).toMatchObject({borderRadius:12,backgroundColor:colors.surface});
   await act(async()=>find(tree,'report.pdf').props.onPress());
-  expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+  expect(StyleSheet.flatten(find(tree,'report.pdf').props.style)).toMatchObject({borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
   await act(async()=>find(tree,'Close add files').props.onPress());expect(close).toHaveBeenCalledTimes(1);
  }finally{await act(async()=>tree.unmount());}
 });
@@ -195,7 +195,7 @@ test('selection summary and Add/Close share one measured overlay; browser viewpo
    expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(height+28);
    expect(tree.root.findByType(require('react-native').FlatList)===list).toBe(true);
    expect(find(tree,'report.pdf').props.accessibilityState.checked).toBe(true);
-   expect(tree.root.findByType(require('../components/edge-fade').EdgeFade).props.height).toBe(height+12);
+   expect(tree.root.findAllByType(require('../components/edge-fade').EdgeFade).find(node=>node.props.edge==='bottom')!.props.height).toBe(height+12);
   }
   await act(async()=>find(tree,'Clear selection').props.onPress());
   expect(find(tree,'report.pdf').props.accessibilityState.checked).toBe(false);

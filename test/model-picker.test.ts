@@ -22,6 +22,18 @@ test('model picker exposes real effort capabilities and persists only the select
   assert.equal((await put(a.id,{model:{provider:'openai',modelId:'gpt-6-astra'},thinkingLevel:'high'})).status,200);
   let selected=await read(`/chats/${a.id}/configure`);assert.equal(selected.model.modelId,'gpt-6-astra');assert.equal(selected.thinkingLevel,'high');assert.equal(selected.instructions,'Keep these instructions');
   assert.equal((await read(`/chats/${b.id}/configure`)).thinkingLevel,'medium');
+  // Backend defaults apply only at creation; never overwrite existing choices.
+  s.set('model',{provider:'openai',modelId:'gpt-6.1-terra'});s.set('thinkingLevel','medium');
+  const created=await fetch(base+'/chats',{method:'POST',headers,body:JSON.stringify({title:'Default model fixture'})});assert.equal(created.status,201);
+  const fresh=await created.json() as {id:number},defaults=await read(`/chats/${fresh.id}/configure`);
+  assert.deepEqual(defaults.model,{provider:'openai',modelId:'gpt-6.1-terra'});assert.equal(defaults.thinkingLevel,'medium');
+  assert.equal((await read(`/chats/${a.id}/configure`)).thinkingLevel,'high');
+  const override=await fetch(base+'/chats',{method:'POST',headers,body:JSON.stringify({title:'Non-reasoning override',model:{provider:'openai',modelId:'gpt-4.1'}})});assert.equal(override.status,201);
+  const overrideConfig=await read(`/chats/${(await override.json() as {id:number}).id}/configure`);assert.equal(overrideConfig.model.modelId,'gpt-4.1');assert.equal(overrideConfig.thinkingLevel,'off','Never pass an unsupported default effort to an explicit override');
+  s.delete('thinkingLevel');
+  const legacy=await fetch(base+'/chats',{method:'POST',headers,body:JSON.stringify({title:'No thinking default fixture'})});assert.equal(legacy.status,201);
+  assert.equal((await read(`/chats/${(await legacy.json() as {id:number}).id}/configure`)).thinkingLevel,'off');
+
   assert.equal((await put(a.id,{thinkingLevel:'off'})).status,400);assert.equal((await read(`/chats/${a.id}/configure`)).thinkingLevel,'high');
   assert.equal((await put(a.id,{thinkingLevel:'bogus'})).status,400);
   assert.equal((await put(a.id,{model:{provider:'openai',modelId:'not-a-real-model'}})).status,400);

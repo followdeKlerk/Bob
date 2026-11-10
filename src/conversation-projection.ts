@@ -1,4 +1,4 @@
-import type {Context} from '@earendil-works/chord';
+import type {Context} from '@earendil-works/chord/context';
 import type {Conversation, ConversationView, EntryId, EntryRecord} from '@earendil-works/pi-durable';
 
 /** Pi 1.4 clients expect the active context, not Pi 1.5's bounded history window.

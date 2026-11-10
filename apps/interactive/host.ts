@@ -13,13 +13,13 @@ declare global {
 }
 type VisualValue={revision:number;data:Record<string,unknown>|null;updatedAt:number|null};
 type Surface={kind:'visual'|'mcp';title:string;html:string;input?:Record<string,unknown>;result?:CallToolResult;allowedTools:string[];visualData?:VisualValue};
-// Shared by the Bob-owned host and visual document. MCP apps receive these
-// preferences through the SDK host context instead of forced third-party CSS.
-const surfaceFontFamily='"Nordwand Mono", monospace';
-const surfaceTypographyCss=`html,body,body *,body *::before,body *::after,body *::placeholder{font-family:${surfaceFontFamily}!important}`;
+// Bob-owned host defaults only. Authored visual/MCP HTML keeps its own fonts.
+const surfaceFontFamily='"Nunito", sans-serif';
+const surfaceMonoFontFamily='"Nordwand Mono", monospace';
+const surfaceTypographyCss=`html{font-family:${surfaceFontFamily}}button,input,select,textarea{font-family:inherit}code,pre,kbd,samp{font-family:${surfaceMonoFontFamily}}`;
 // The SDK models optional variable values as a required-key Record. Unset
 // variables remain undefined; Bob only supplies its two font preferences.
-const surfaceFontVariables={'--font-sans':surfaceFontFamily,'--font-mono':surfaceFontFamily} as McpUiStyles;
+const surfaceFontVariables={'--font-sans':surfaceFontFamily,'--font-mono':surfaceMonoFontFamily} as McpUiStyles;
 const pending=new Map<string,{resolve:(value:CallToolResult)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 window.__bobReply=(id,payload)=>{
   const item=pending.get(id);if(!item)return;
@@ -143,5 +143,5 @@ window.startBobSurface=async(payload,nonce,inline=false,inlineMeasure='',fontFac
     window.addEventListener('pagehide',()=>{void bridge.teardownResource({}, {timeout:1000}).catch(()=>{}).finally(()=>bridge.close());},{once:true});
   } else status.textContent='';
   // The child remains an opaque origin. CSP is additive and cannot be weakened by later app markup.
-  frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+(payload.kind==='visual'?'<style>'+fontFaceCss+'</style>':'')+measureScript+dataScript+payload.html+'<style>html{overflow-anchor:none}'+scrollbarCss+(payload.kind==='visual'?surfaceTypographyCss:'')+'</style>';
+  frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; form-action \'none\'; base-uri \'none\'">'+(payload.kind==='visual'?'<style>'+fontFaceCss+'</style>':'')+measureScript+dataScript+payload.html+'<style>html{overflow-anchor:none}'+scrollbarCss+'</style>';
 };

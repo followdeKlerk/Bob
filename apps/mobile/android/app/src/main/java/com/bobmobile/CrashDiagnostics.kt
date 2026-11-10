@@ -40,8 +40,11 @@ internal object CrashDiagnostics {
         val previous = Thread.getDefaultUncaughtExceptionHandler() ?: return
         val app = context.applicationContext
         val mainThread = Looper.getMainLooper().thread
+        // Prime before a fatal error. A later successful ordinary lookup can
+        // recover a failed startup read; the handler only peeks, never uses Binder.
+        InstalledAppVersion.get(app)
         val handler = CrashFingerprints.handler(previous) { thread, error ->
-            save(app, CrashFingerprints.capture(error, System.currentTimeMillis(), BuildConfig.VERSION_CODE, thread === mainThread))
+            save(app, CrashFingerprints.capture(error, System.currentTimeMillis(), InstalledAppVersion.cached().code, thread === mainThread))
         }
         Thread.setDefaultUncaughtExceptionHandler(handler)
         captureHandler = handler

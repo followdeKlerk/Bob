@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {installedDurableVersion} from './recovery.js';
 import {describeDelegationBehavior,readDelegationBehavior,saveDelegationBehavior} from './delegation-behavior.js';
 import {describeDelegation,readDelegationConfig,saveDelegationConfig,setDelegationSecret} from './delegation-config.js';
 import { Command } from "commander";
@@ -55,7 +56,7 @@ cli
         backendId: s.id,
         state: s.dir,
         node: process.version,
-        durable: "1.5.0",
+        durable: installedDurableVersion(),
         provider: "not configured",
       })
     );

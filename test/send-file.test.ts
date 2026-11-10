@@ -25,10 +25,18 @@ test('native send_file publishes downloadable original bytes, scoped to the conv
   await chat.waitForIdle(ctx);
   const history=await (await fetch(base+`/chats/${id}/history`,{headers})).json() as any;
   const files=history.items.filter((entry:any)=>entry.kind==='bob.file');assert.equal(files.length,1);
+  const final=history.items.find((entry:any)=>entry.kind==='pi.assistant'&&entry.model?.some((message:any)=>message.role==='assistant'&&JSON.stringify(message.content).includes('Attached.')));
+  assert.ok(final);assert.equal(files[0].mobileReply.answer,final.id);assert.deepEqual(files[0].mobileReply,final.mobileReply);
+  const original=(await chat.entries({},100,undefined,ctx)).items.find(entry=>entry.id===files[0].id) as any;assert.equal(original.mobileReply,undefined,'reply association is display-only');
   const meta=files[0].data;assert.equal(meta.name,'My CV.pdf');assert.equal(meta.mime,'application/pdf');assert.equal(meta.sha256,createHash('sha256').update(bytes).digest('hex'));
   const url=base+`/chats/${id}/artifacts/${meta.id}`;
   const download=await fetch(url,{headers});assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),bytes);
   assert.match(download.headers.get('content-disposition')!,/My%20CV.pdf/);
+  const part=await fetch(url,{headers:{...headers,range:'bytes=2-6'}});assert.equal(part.status,206);assert.deepEqual(Buffer.from(await part.arrayBuffer()),bytes.subarray(2,7));assert.equal(part.headers.get('content-range'),`bytes 2-6/${bytes.length}`);
+  const head=await fetch(url,{method:'HEAD',headers:{...headers,range:'bytes=2-6'}});assert.equal(head.status,200);assert.equal(head.headers.get('content-length'),String(bytes.length));assert.equal((await head.arrayBuffer()).byteLength,0);
+  const unsatisfied=await fetch(url,{headers:{...headers,range:'bytes=999999-'}});assert.equal(unsatisfied.status,416);assert.equal((await unsatisfied.arrayBuffer()).byteLength,0);
+  assert.equal((await fetch(url,{method:'HEAD'})).status,401);
+  assert.equal((await fetch(url,{headers:{...headers,'x-bob-backend':randomUUID(),range:'bytes=0-2'}})).status,409);
   assert.equal((await fetch(url)).status,401);
   const other=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
   assert.equal((await fetch(base+`/chats/${other.id}/artifacts/${meta.id}`,{headers})).status,404);

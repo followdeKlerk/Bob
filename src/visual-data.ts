@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
-import type {JsonValue} from '@earendil-works/chord';
+import type {JsonValue} from '@earendil-works/chord/json';
 import {defineDoc,defineTool,section,type Conversation,type Harness} from '@earendil-works/pi-durable';
 import * as schema from '@earendil-works/pi-schema';
 import {Interactive} from '@bob-local/interactive';

@@ -1,4 +1,4 @@
-type Entry={id:number;kind?:string;model?:unknown[];data?:unknown;mobilePresentation?:unknown};
+type Entry={id:number;kind?:string;model?:unknown[];data?:unknown;mobilePresentation?:unknown;mobileReply?:unknown};
 const serialized=new WeakMap<object,string|undefined>();
 function fingerprint(value:unknown){
  if(value&&typeof value==='object'){
@@ -15,7 +15,7 @@ export function reusePresentedEntry<T extends Entry>(previous:T|undefined,next:T
  if(!previous)return next;
  // Drop an old cached encoded-image payload as soon as its server presentation
  // arrives. Compare only the tiny marker, never stringify multi-megabyte images.
- if(!same(previous.mobilePresentation,next.mobilePresentation))return next;
+ if(!same(previous.mobilePresentation,next.mobilePresentation)||!same(previous.mobileReply,next.mobileReply))return next;
  if(previous.kind==='bob.memory-status'&&next.kind==='bob.memory-status'&&!previous.model?.length&&!next.model?.length&&!same(previous.data,next.data))return next;
  return previous;
 }

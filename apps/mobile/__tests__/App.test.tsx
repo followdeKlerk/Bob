@@ -1,7 +1,7 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image,Text,Keyboard,Modal,Dimensions,ScrollView} from 'react-native';
+import {Alert,AppState,DeviceEventEmitter,NativeModules,Platform,StyleSheet,TextInput,Image,Text,Keyboard,Modal,Dimensions,ScrollView} from 'react-native';
 import {CompactActivityRow} from '../components/compact-activity-row';
 import {ModelContent} from '../components/model-content';
 import {ChatBubble} from '../components/chat-bubble';
@@ -19,6 +19,7 @@ import {ChatNavigation} from '../components/chat-navigation';
 import {SkillPicker} from '../components/skill-picker';
 import {SettingsGroup,SectionHeading,SectionActions,SectionBody} from '../components/section-ui';
 import {SideDrawer} from '../components/side-drawer';
+import {AgentsScreen} from '../components/agents-screen';
 import {DrawingEditor} from '../components/drawing-editor';
 import App from '../App';
 // Native platform boundaries only; exercise Main's real hooks and navigation tree.
@@ -39,8 +40,9 @@ afterEach(()=>jest.restoreAllMocks());
 // Exercise the actual menu trigger/rows on Chat, and real tabs elsewhere.
 function visibleNavigation(tree:Renderer.ReactTestRenderer){return tree.root.findAllByType(ChatNavigation).find(node=>node.props.showTrigger!==false)!;}
 async function navigateTo(tree:Renderer.ReactTestRenderer,destination:BottomDestination){
+ if(destination==='Sessions')destination='Agents';
  if(!visibleNavigation(tree).props.open)await act(async()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());
- await act(async()=>tree.root.findByProps({testID:'chat-navigation-sheet'}).findAll(node=>node.props.accessibilityLabel===destination&&typeof node.props.onPress==='function')[0].props.onPress());
+ await act(async()=>tree.root.findByProps({testID:'chat-navigation-sheet'}).findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0].props.onPress());
 }
 test('unpaired app mounts the real screen and history/navigation hooks without a blank screen',async()=>{
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
@@ -71,9 +73,22 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   expect(editor.props.compact).toBe(false);expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);
   const check=()=>{
    expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my unsent draft');
+   expect(StyleSheet.flatten(plus.props.style)).toMatchObject({width:48,height:48,borderRadius:24,backgroundColor:'transparent'});
+   expect(StyleSheet.flatten(plus.props.style).borderWidth??0).toBe(0);
    expect(tree.root.findByType(DraftInput)).toBe(editor);expect(tree.root.findByProps({accessibilityLabel:'Chat actions'})).toBe(plus);expect(tree.root.findByProps({accessibilityLabel:'Send message'})).toBe(send);
    expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
   };
+  // The popup shares the composer's coordinate space, not a resized Modal window.
+  act(()=>tree.root.findByProps({testID:'composer-row'}).props.onLayout({nativeEvent:{layout:{height:50}}}));
+  await act(async()=>plus.props.onPress());
+  const popup=()=>tree.root.findByProps({testID:'plus-menu-popup'});
+  expect(StyleSheet.flatten(popup().props.style).bottom).toBe(348);check();
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:0}));
+  expect(StyleSheet.flatten(popup().props.style).bottom).toBe(68);check();
+  act(()=>tree.root.findByProps({testID:'composer-row'}).props.onLayout({nativeEvent:{layout:{height:100}}}));
+  expect(StyleSheet.flatten(popup().props.style).bottom).toBe(118);check();
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Dismiss chat actions'}).props.onPress());
+  expect(tree.root.findAllByProps({testID:'chat-actions-overlay'})).toHaveLength(0);check();
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());
   expect(dismissKeyboard).toHaveBeenCalled();expect(tree.root.findByProps({testID:'chat-navigation-sheet'})).toBeDefined();check();
   // Model the native IME hide after opening the menu, then the Modal's Android Back callback.
@@ -85,21 +100,21 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
    await act(async()=>tree.root.findByProps({accessibilityLabel:label}).props.onPress());
    expect(visibleNavigation(tree).props.open).toBe(false);check();
   }
-  for(const destination of ['Sessions','Notes','Workstations','Agents','Settings'] as const){
+  for(const destination of ['Notes','Workstations','Agents','Terminal','Settings'] as const){
    await navigateTo(tree,destination);expect(visibleNavigation(tree).props.open).toBe(false);
    expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);
-   const header=tree.root.findAllByType(SectionHeading).find(node=>node.props.title===destination)!;
+   const header=destination==='Agents'?tree.root.findByProps({testID:'sessions-heading'}):destination==='Terminal'?tree.root.findAllByProps({testID:'terminal-header'})[0]:tree.root.findAllByType(SectionHeading).find(node=>node.props.title===destination)!;
    expect(header.findAllByType(ChatNavigation)).toHaveLength(0);
    expect(tree.root.findAllByType(SectionActions).some(footer=>footer.findAllByType(ChatNavigation).includes(visibleNavigation(tree)))).toBe(true);
    expect(tree.root.findAllByType(ChatNavigation).filter(node=>node.props.showTrigger!==false)).toHaveLength(1);check();
-   if(destination==='Notes'||destination==='Agents'||destination==='Settings'){
-    const root=tree.root.findByProps({testID:destination==='Notes'?'notes-screen':destination==='Agents'?'agents-screen':'section-overlay'});
+   if(destination==='Notes'||destination==='Settings'){
+    const root=tree.root.findByProps({testID:destination==='Notes'?'notes-screen':'section-overlay'});
     const host=root.findByType(SectionBody),overlay=host.findByProps({testID:'section-footer-overlay'});
     act(()=>overlay.props.onLayout({nativeEvent:{layout:{height:184}}}));
-    expect(host.findByType(EdgeFade).props.height).toBe(196);
+    expect(host.findAllByType(EdgeFade).find(node=>node.props.edge==='bottom')!.props.height).toBe(196);
     expect(StyleSheet.flatten(host.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
-    if(destination==='Notes')expect(StyleSheet.flatten(root.findByType(require('react-native').FlatList).props.contentContainerStyle).paddingBottom).toBe(224);
-    if(destination==='Settings')expect(StyleSheet.flatten(root.findByProps({testID:'section-body'}).props.contentContainerStyle).paddingBottom).toBe(224);
+    if(destination==='Notes')expect(StyleSheet.flatten(root.findByType(require('react-native').FlatList).props.contentContainerStyle).paddingBottom).toBe(212);
+    if(destination==='Settings')expect(StyleSheet.flatten(root.findByProps({testID:'section-body'}).props.contentContainerStyle).paddingBottom).toBe(220);
    }
 
    await navigateTo(tree,'Chat');expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);check();
@@ -112,10 +127,21 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-overlay'}).props.style).bottom).toBe(280);
   expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionActions)).toBe(settingsFooter);
   act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:0}));
+  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Appearance'&&typeof node.props.onPress==='function')[0].props.onPress());
   for(const mode of ['Dark','Light','System'] as const){
    await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel===`${mode} theme`&&typeof node.props.onPress==='function')[0].props.onPress());
    expect(await AsyncStorage.getItem('appearance')).toBe(mode.toLowerCase());check();
    expect(tree.root.findAll(node=>node.props.accessibilityLabel===`${mode} theme`&&node.props.accessibilityRole==='radio')[0].props.accessibilityState.checked).toBe(true);
+  }
+
+  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Back to previous menu'&&typeof node.props.onPress==='function')[0].props.onPress());
+  for(const page of ['Appearance','Conversation settings','Notifications','Voice','Phone & location','Connection','App & updates','Advanced']){
+   expect(tree.root.findAllByType(SectionHeading).some(node=>node.props.title==='Settings')).toBe(true);
+   await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel===page&&typeof node.props.onPress==='function')[0].props.onPress());
+   expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionHeading).props.title).toBe(page);
+   expect(visibleNavigation(tree).props.selected).toBe('Settings');check();
+   await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Back to previous menu'&&typeof node.props.onPress==='function')[0].props.onPress());
+   expect(tree.root.findByProps({testID:'section-overlay'}).findByType(SectionHeading).props.title).toBe('Settings');check();
   }
 
   await navigateTo(tree,'Chat');check();
@@ -125,8 +151,8 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   expect(moreHeading.props.title).toBe('More actions');
   const more=tree.root.findAllByType(SectionBody).find(host=>host.findAllByProps({accessibilityLabel:'Close actions'}).length>0)!,moreScroll=more.findByType(ScrollView);
   act(()=>more.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:168}}}));
-  expect(StyleSheet.flatten(moreScroll.props.contentContainerStyle).paddingBottom).toBe(200);
-  expect(more.findByType(EdgeFade).props.color).toBeUndefined(); // action sheet uses the default background token
+  expect(StyleSheet.flatten(moreScroll.props.contentContainerStyle).paddingBottom).toBe(204);
+  expect(more.findAllByType(EdgeFade).find(node=>node.props.edge==='bottom')!.props.color).toBeUndefined(); // action sheet uses the default background token
   expect(StyleSheet.flatten(more.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
   check();
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Close actions'}).props.onPress());check();
@@ -139,12 +165,13 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
   const fetchMock=globalThis.fetch as jest.Mock,normalFetch=fetchMock.getMockImplementation()!;
   let releaseModules!:(response:any)=>void;
   fetchMock.mockImplementation((url:any,...args:any[])=>String(url).endsWith('/modules')?new Promise(resolve=>{releaseModules=resolve;}):normalFetch(url,...args));
+  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Advanced'&&typeof node.props.onPress==='function')[0].props.onPress());
   await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Advanced modules'&&typeof node.props.onPress==='function')[0].props.onPress());
   const loading=tree.root.findByProps({testID:'section-loading-overlay'});
   expect(StyleSheet.flatten(loading.props.style).position).not.toBe('absolute');
   const moduleHost=tree.root.findByProps({testID:'section-overlay'}).findByType(SectionBody),moduleScroll=moduleHost.findByProps({testID:'section-body'});
   act(()=>moduleHost.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:176}}}));
-  expect(StyleSheet.flatten(moduleScroll.props.contentContainerStyle).paddingBottom).toBe(216);
+  expect(StyleSheet.flatten(moduleScroll.props.contentContainerStyle).paddingBottom).toBe(212);
   expect(moduleHost.findByProps({testID:'section-body'})===moduleScroll).toBe(true);
 
   expect(tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='Modules')!.findAllByType(ChatNavigation)).toHaveLength(0);
@@ -174,7 +201,7 @@ test.each(['no conversation','opening','offline'])('Chat menu stays available wi
   await act(async()=>{tree=Renderer.create(<App/>);});
   if(mode!=='offline')expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(false);
   await act(async()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());expect(visibleNavigation(tree).props.open).toBe(true);
-  await navigateTo(tree,'Sessions');expect(tree.root.findByType(SideDrawer)).toBeDefined();
+  await navigateTo(tree,'Agents');expect(tree.root.findByType(AgentsScreen).props.visible).toBe(true);
   await navigateTo(tree,'Chat');await act(async()=>tree.root.findByProps({accessibilityLabel:'Menu'}).props.onPress());
   (NativeModules.BobPlatform.takeNotificationTarget as jest.Mock).mockResolvedValue({backendId:backend.backendId,conversationId:8});
   await act(async()=>DeviceEventEmitter.emit('BobNotificationOpen'));
@@ -230,11 +257,11 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  expect(tree.root.findAllByProps({accessibilityLabel:'Select workstation'})).toHaveLength(0);
  expect(tree.root.findAllByType(BottomTabs)).toHaveLength(0);expect(tree.root.findByProps({accessibilityLabel:'Menu'})).toBeDefined();
  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];expect(list).toBeDefined();
- expect(list.props.inverted).toBe(true);expect(list.props.initialScrollIndex).toBe(0);expect(list.props.data.map((entry:any)=>entry.id)).toEqual([3,1]);
+ expect(list.props.inverted).toBe(true);expect(list.props.initialScrollIndex).toBe(0);expect(list.props.data.filter((entry:any)=>!entry.inlineSurfaceId).map((entry:any)=>entry.id)).toEqual([3,1]);expect(list.props.data[1].inlineSurfaceSource).toBe(1);
  const latest=jest.spyOn(list.instance,'scrollToOffset').mockImplementation(()=>{});
  const scroll=jest.spyOn(list.instance,'scrollToEnd').mockImplementation(()=>{}),nativeEnd=jest.fn();jest.spyOn(list.instance,'getScrollResponder').mockReturnValue({scrollToEnd:nativeEnd});
  act(()=>{list.props.onLayout({nativeEvent:{layout:{height:600}}});list.props.onContentSizeChange(300,2000);});
- const inlineSurface=tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface);
+ const inlineSurface=tree.root.findByType(InlineSurface);
  expect(tree.root.findByProps({testID:'history-entry-3'}).findAllByType(InlineSurface)).toHaveLength(0);
  expect(tree.root.findAllByType(InlineSurface)).toHaveLength(1);
  expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
@@ -266,18 +293,20 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect((globalThis.fetch as jest.Mock).mock.calls.filter(([url,options])=>String(url).endsWith('/configure')&&options?.method==='GET')).toHaveLength(configurationReadsBefore);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
-   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Appearance','This conversation','Notifications','Keep connected','Voice','Phone tools','Location','Schedules','App','Advanced']);
+   expect(tree.root.findAllByType(SettingsGroup).map(group=>group.props.title)).toEqual(['Preferences','Conversation & tools','App & workstation']);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
-   expect(tree.root.findAllByProps({accessibilityLabel:'Model & thinking'}).length).toBeGreaterThan(0);
+   expect(tree.root.findByProps({testID:'section-overlay'}).findAllByProps({accessibilityLabel:'Model & thinking'})).toHaveLength(0);
    const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
    const fetchMock=globalThis.fetch as jest.Mock,normalFetch=fetchMock.getMockImplementation()!;
    let releaseConfiguration!:()=>void;
    const delayedConfiguration=new Promise<void>(resolve=>{releaseConfiguration=resolve;});
    fetchMock.mockImplementation(async(url:any,options:any)=>{if(String(url).endsWith('/configure')&&options?.method==='GET')await delayedConfiguration;return normalFetch(url,options);});
-   await act(async()=>press('Instructions & folder'));
+   await act(async()=>press('Conversation settings'));
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'}).length).toBeGreaterThan(0);
    expect(tree.root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
+   await act(async()=>press('Back to previous menu'));
+   await act(async()=>press('Notifications'));
    const notifications=tree.root.findAll(node=>String(node.props.accessibilityLabel).startsWith('Last reply notifications:')&&typeof node.props.onPress==='function')[0];
    expect(notifications.props.disabled).toBe(false);
    act(()=>press('About notifications'));
@@ -287,6 +316,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    expect(fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/configure'))).toHaveLength(pendingCalls);
    await act(async()=>releaseConfiguration());fetchMock.mockImplementation(normalFetch);
    expect(tree.root.findAllByProps({testID:'conversation-settings-loading'})).toHaveLength(0);
+   await act(async()=>press('Conversation settings'));
    act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('Concise replies'));
    await act(async()=>press('Save conversation override'));
    expect((globalThis.fetch as jest.Mock).mock.calls.some(([url,options])=>String(url).includes('/chats/7/configure')&&options?.method==='PUT'&&JSON.parse(options.body).instructions==='Concise replies')).toBe(true);
@@ -297,13 +327,13 @@ test.each([true,false])('menus and background/foreground preserve the native lis
    act(()=>tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.onChangeText('/retained-draft'));
    await navigateTo(tree,'Chat');
    await navigateTo(tree,'Settings');
-   await act(async()=>press('Instructions & folder'));
+   await act(async()=>press('Conversation settings'));
    expect(tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.value).toBe('Retain unsaved instructions');
    expect(tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.value).toBe('/retained-draft');
    await act(async()=>press('Save conversation override'));
    expect(conversationConfiguration.instructions).toBe('Retain unsaved instructions');
    expect(tree.root.findByProps({accessibilityLabel:'Backend working directory'}).props.value).toBe('/retained-draft');
-   await act(async()=>press('Instructions & folder'));
+   await act(async()=>press('Back to previous menu'));
    expect(tree.root.findAllByProps({accessibilityLabel:'Conversation instructions'})).toHaveLength(0);
   }
   await navigateTo(tree,'Chat');
@@ -312,11 +342,11 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  }
  // The schedules overlay must also retain the same native chat list and scroll state.
  await navigateTo(tree,'Sessions');
- await act(async()=>tree.root.findByType(SideDrawer).props.onSchedules());
+ await act(async()=>tree.root.findByType(AgentsScreen).props.onSchedules());
  expect(tree.root.findByProps({testID:'schedules-screen'})).toBeDefined();
  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Back to previous menu'&&typeof node.props.onPress==='function')[0].props.onPress());
- expect(tree.root.findByType(SideDrawer).props.mode).toBe('sessions');
- await act(async()=>tree.root.findByType(SideDrawer).props.onSchedules());
+ expect(tree.root.findByType(AgentsScreen).props.visible).toBe(true);
+ await act(async()=>tree.root.findByType(AgentsScreen).props.onSchedules());
  expect(tree.root.findByProps({testID:'schedules-screen'})).toBeDefined();
  expect(tree.root.findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');
  expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
@@ -324,8 +354,8 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  // Machine browsing is a distinct destination and selecting the current machine opens its sessions.
  await navigateTo(tree,'Workstations');
  expect(tree.root.findByType(SideDrawer).props.mode).toBe('workstations');
- act(()=>tree.root.findByType(SideDrawer).props.workspaces[0].onPress());
- expect(tree.root.findByType(SideDrawer).props.mode).toBe('sessions');
+ await act(async()=>tree.root.findByType(SideDrawer).props.workspaces[0].onPress());
+ expect(tree.root.findByProps({testID:'agents-screen'})).toBeDefined();
  await navigateTo(tree,'Chat');
  expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
  expect(draft.props.value).toBe('/delegation ');
@@ -339,12 +369,12 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  }
  expect(historyCalls()).toBeGreaterThan(before);expect(latest).not.toHaveBeenCalled();expect(nativeEnd).not.toHaveBeenCalled();expect(scroll).not.toHaveBeenCalled();expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(1);
  expect(tree.root.findByProps({testID:'bob-inline-native-surface'})).toBe(nativeSurface);
- expect(tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface)).toBe(inlineSurface);
+ expect(tree.root.findByType(InlineSurface)).toBe(inlineSurface);
  // A genuine native promotion removes the inline child, retaining exactly one
  // title/expand action on its original producing history entry.
  act(()=>DeviceEventEmitter.emit('BobSurfaceOverflow',{backendId:backend.backendId,conversationId:7,id:surface.id,session:'prepared-visual'}));
  expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
- expect(tree.root.findByProps({testID:'history-entry-1'}).findByType(InlineSurface).findByProps({accessibilityLabel:'Expand visual: Solar system'})).toBeDefined();
+ expect(tree.root.findByType(InlineSurface).findByProps({accessibilityLabel:'Expand visual: Solar system'})).toBeDefined();
  expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('prepared-visual');
  if(readingEarlier)expect(tree.root.findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();await act(async()=>tree.unmount());
 });
@@ -367,13 +397,13 @@ test('cold launch, session switches, and reopening from cache start with the new
  const findList=()=>tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
  const check=(id:number)=>{const list=findList();expect(list.props.inverted).toBe(true);expect(list.props.initialScrollIndex).toBe(0);expect(list.props.data[0].id).toBe(id*1000+150);expect(list.props.data.at(-1).id).toBe(id*1000+1);return list;};
  const first=check(7);expect(tree.root.findAllByProps({testID:'history-entry-7150'}).length).toBeGreaterThan(0);
- const userBubble=tree.root.findByProps({testID:'history-entry-7150'}).findAll(node=>{const style=StyleSheet.flatten(node.props.style);return [colors.selectedSurface,lightColors.selectedSurface].includes(style?.backgroundColor)&&style?.borderRadius===20;})[0];const padding=StyleSheet.flatten(userBubble.props.style);expect(padding.paddingVertical).toBe(12);expect(padding.paddingHorizontal).toBe(16);
+ const userBubble=tree.root.findByProps({testID:'history-entry-7150'}).findAll(node=>{const style=StyleSheet.flatten(node.props.style);return [colors.ownerBubble,lightColors.ownerBubble].includes(style?.backgroundColor)&&style?.borderRadius===20;})[0];const padding=StyleSheet.flatten(userBubble.props.style);expect(padding.paddingVertical).toBe(12);expect(padding.paddingHorizontal).toBe(16);
  const sent=tree.root.findByProps({testID:'history-entry-7150'}).find(node=>node.props.selectable===true&&typeof node.props.children==='string');expect(StyleSheet.flatten(sent.props.style)).toMatchObject({fontSize:15,lineHeight:25});
 expect(tree.root.findAllByProps({testID:'history-entry-7001'})).toHaveLength(0);
- await navigateTo(tree,'Sessions');await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
+ await navigateTo(tree,'Sessions');await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(8));
  const waiting=findList();expect(waiting).not.toBe(first);expect(waiting.props.inverted).toBe(true);expect(waiting.props.data).toHaveLength(0);expect(finishSecond).toBeDefined();
  await act(async()=>finishSecond!(response(pages.get(8))));check(8);
- await navigateTo(tree,'Sessions');await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='7').onPress());check(7);
+ await navigateTo(tree,'Sessions');await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));check(7);
  await act(async()=>tree.unmount());holdCached=true;await act(async()=>{tree=Renderer.create(<App/>);});
  check(7);expect(finishCached).toBeDefined();expect(findList().props.data).toHaveLength(150);
  await act(async()=>finishCached!(response(pages.get(7))));check(7);await act(async()=>tree.unmount());
@@ -491,7 +521,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  const EventSource=require('react-native-sse');const snapshots=new Map<string,(value:any)=>void>();const closes=new Map<string,jest.Mock>();
  EventSource.mockImplementation((url:string)=>{const close=jest.fn();closes.set(url,close);return{addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshots.set(url,callback);}),close};});
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
-  const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[]} as Response;
+  const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:7,title:'Test chat',status:'working',agents:[{name:'Audit helper',conversationId:8,status:'working'},{name:'Second helper',conversationId:9,status:'idle'}]}]}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:entries}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:[]} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
  try{
@@ -532,18 +562,15 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  act(()=>draft.props.onChangeText('Draft stays here'));
  await navigateTo(tree,'Agents');
  expect(tree.root.findByProps({testID:'agents-screen'})).toBeDefined();
+ expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
+ await act(async()=>tree.root.findByProps({accessibilityLabel:'Expand agents for Test chat'}).props.onPress());
+ await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent Audit helper'}).props.onPress());
  expect(tree.root.findByProps({testID:'child-history-list'})).toBeDefined();
- const childList=tree.root.findByProps({testID:'child-history-list'}),agentHost=tree.root.findByProps({testID:'agents-screen'}).findByType(SectionBody);
+ const childList=tree.root.findByProps({testID:'child-history-list'});
  expect(childList.props.inverted).toBe(true);
- for(const height of [184,96]){
-  act(()=>agentHost.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height}}}));
-  // Inverted lists need physical-bottom clearance in paddingTop, not paddingBottom.
-  expect(StyleSheet.flatten(childList.props.contentContainerStyle).paddingTop).toBe(height+28);
-  expect(childList.props.scrollIndicatorInsets.bottom).toBe(height+12);
-  expect(tree.root.findByProps({testID:'child-history-list'})===childList).toBe(true);
-  expect(tree.root.findByProps({testID:'chat-history-list'})===list).toBe(true);
-  expect(draft.props.value).toBe('Draft stays here');
- }
+ expect(StyleSheet.flatten(childList.props.contentContainerStyle).paddingTop).toBe(16);
+ expect(childList.props.scrollIndicatorInsets.bottom).toBe(0);
+ expect(tree.root.findByProps({testID:'sessions-bottom-bar'})).toBeDefined();
 
  expect(tree.root.findByProps({testID:'chat-history-list'})).toBe(list);
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'chat-composer'}).props.style).opacity).toBe(0);
@@ -553,13 +580,16 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  const firstStreamClose=closes.get(`${backend.endpoint}/v1/chats/8/events`);
  await publish('idle');
  expect(tree.root.findAllByProps({testID:'active-agent-badge'})).toHaveLength(0);
+ // Completion must not close a transcript that the owner deliberately opened.
+ expect(firstStreamClose).not.toHaveBeenCalled();
+ expect(tree.root.findByProps({testID:'child-history-list'})).toBe(childList);
+ await act(async()=>tree.root.findByProps({accessibilityLabel:'Back to agent list'}).props.onPress());
  expect(firstStreamClose).toHaveBeenCalled();
  expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
- expect(tree.root.findAllByProps({accessibilityLabel:'View agent Audit helper'})).toHaveLength(0);
+ expect(tree.root.findByProps({accessibilityLabel:'View agent Audit helper'})).toBeDefined();
  await publish('stopping');
  expect(tree.root.findByProps({accessibilityLabel:'View agent Audit helper'})).toBeDefined();
- expect(tree.root.findAllByProps({accessibilityLabel:'View agent Second helper'})).toHaveLength(0);
- await act(async()=>tree.root.findByProps({accessibilityLabel:'Agent history'}).props.onPress());
+ expect(tree.root.findByProps({accessibilityLabel:'View agent Second helper'})).toBeDefined();
  await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent Second helper'}).props.onPress());
  expect(closes.get(`${backend.endpoint}/v1/chats/8/events`)).toHaveBeenCalled();
  expect(tree.root.findByProps({accessibilityLabel:'View agent Second helper'}).props.accessibilityState.selected).toBe(true);
@@ -574,11 +604,67 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  expect(tree.root.findByProps({testID:'chat-history-list'})).toBe(list);
  expect(draft.props.value).toBe('Draft stays here');
  await navigateTo(tree,'Agents');
- expect(tree.root.findByProps({accessibilityLabel:'Agent history'}).props.accessibilityState.checked).toBe(false);
- expect(tree.root.findAllByProps({accessibilityLabel:'View agent Audit helper'})).toHaveLength(0);
+ expect(tree.root.findAllByProps({accessibilityLabel:'Agent history'})).toHaveLength(0);
+ expect(tree.root.findByProps({accessibilityLabel:'View agent Audit helper'})).toBeDefined();
  expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
  await navigateTo(tree,'Chat');
  expect(fetch).not.toHaveBeenCalledWith(expect.anything(),expect.objectContaining({method:'POST'}));
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('agent tree opens another session helper without changing the main draft or admitting work',async()=>{
+ jest.replaceProperty(Platform,'OS','android');
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const snapshots=new Map<string,(event:any)=>void>(),closes=new Map<string,jest.Mock>();
+ require('react-native-sse').mockImplementation((url:string)=>{const close=jest.fn();closes.set(url,close);return {addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshots.set(url,callback);}),close};});
+ const fetch=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:7,title:'Main session',status:'working',agents:[]},{conversationId:20,title:'Other session',status:'working',agents:[{name:'Other helper',conversationId:21,status:'working'}]}]}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Main session'}},{id:20,meta:{title:'Other session'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'}),list=tree.root.findByProps({testID:'chat-history-list'});
+  act(()=>draft.props.onChangeText('Unsent message in main session'));
+  await act(async()=>snapshots.get(`${backend.endpoint}/v1/chats/7/events`)!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[],docs:{'app.subagents':{agents:{'Unverified helper':{conversationId:99,status:'working'}}}},work:[]}})}));
+  await navigateTo(tree,'Agents');expect(tree.root.findByProps({accessibilityLabel:'Open Bob session Other session'})).toBeDefined();
+  expect(tree.root.findAllByProps({accessibilityLabel:'View agent Unverified helper'})).toHaveLength(0);
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280}));
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'agents-screen'}).props.style).bottom).toBe(280);
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:0}));
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Expand agents for Other session'}).props.onPress());
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent Other helper'}).props.onPress());
+  const callback=snapshots.get(`${backend.endpoint}/v1/chats/21/events`)!;expect(callback).toBeDefined();
+  await act(async()=>callback({data:JSON.stringify({backendId:backend.backendId,conversationId:21,view:{entries:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:'Other session helper work'}]}],docs:{},work:[]}})}));
+  expect(tree.root.findByProps({testID:'child-history-list'}).props.data.some((entry:any)=>entry.id===1)).toBe(true);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Unsent message in main session');expect(tree.root.findByProps({testID:'chat-history-list'})).toBe(list);
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Back to agent list'}).props.onPress());expect(closes.get(`${backend.endpoint}/v1/chats/21/events`)).toHaveBeenCalled();
+  await act(async()=>callback({data:JSON.stringify({backendId:backend.backendId,conversationId:21,view:{entries:[],docs:{},work:[]}})}));expect(tree.root.findAllByProps({testID:'child-history-list'})).toHaveLength(0);
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Open Bob session Other session'}).props.onPress());
+  expect(tree.root.findByProps({testID:'agents-screen'}).props.pointerEvents).toBe('none');
+  expect(snapshots.has(`${backend.endpoint}/v1/chats/20/events`)).toBe(true);
+  expect(fetch.mock.calls.some(([,options])=>options&&['POST','PUT','DELETE'].includes(options.method??''))).toBe(false);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('workstation agent overview remains reachable before a conversation is selected',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+  const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:20,title:'Another session',status:'idle',agents:[]}]}:url.endsWith('/chats')?{items:[{id:20,meta:{title:'Another session'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  await navigateTo(tree,'Agents');
+  expect(tree.root.findByProps({testID:'agents-screen'}).props.pointerEvents).toBe('auto');
+  expect(tree.root.findByProps({accessibilityLabel:'Open Bob session Another session'})).toBeDefined();
+  expect(tree.root.findAllByType(ChatNavigation).filter(node=>node.props.showTrigger!==false)).toHaveLength(1);
+  await navigateTo(tree,'Chat');expect(tree.root.findByProps({testID:'agents-screen'}).props.pointerEvents).toBe('none');
  }finally{await act(async()=>tree.unmount());}
 });
 
@@ -639,7 +725,7 @@ test('rapid A-to-B-to-A switching keeps the composer locked until the new draft 
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(true);hold=true;
   const choose=async(id:string)=>{
    await navigateTo(tree,'Sessions');
-   await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id===id).onPress());
+   await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(Number(id)));
   };
   await choose('8');await choose('7');
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(false);
@@ -676,7 +762,7 @@ test('Sessions assigns working state by Durable conversation ID, not by the sele
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
-  const url=String(input),data=url.endsWith('/status')?{backendId:backend.backendId,inspection:{tasks:[{record:{conversationId:8,background:false}},{record:{conversationId:7,background:true}}],submissions:[{conversationId:9}]}}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[7,8,9].map(id=>({id,meta:{title:`Chat ${id}`}}))}:url.endsWith('/updates')?{enabled:false}:[];
+  const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[7,8,9].map(id=>({conversationId:id,title:`Chat ${id}`,status:id===7?'idle':'working',agents:[]}))}:url.endsWith('/status')?{backendId:backend.backendId,inspection:{tasks:[{record:{conversationId:8,background:false}},{record:{conversationId:7,background:true}}],submissions:[{conversationId:9}]}}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[7,8,9].map(id=>({id,meta:{title:`Chat ${id}`}}))}:url.endsWith('/updates')?{enabled:false}:[];
   return {ok:true,status:200,json:async()=>data} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;
@@ -684,8 +770,8 @@ test('Sessions assigns working state by Durable conversation ID, not by the sele
   await act(async()=>{tree=Renderer.create(<App/>);});
   expect((globalThis.fetch as jest.Mock).mock.calls.some(([url])=>String(url).endsWith('/status'))).toBe(false);
   await navigateTo(tree,'Sessions');
-  expect(tree.root.findByType(SideDrawer).props.conversations.map(({id,selected,working}:any)=>({id,selected,working}))).toEqual([
-   {id:'7',selected:true,working:false},{id:'8',selected:false,working:true},{id:'9',selected:false,working:true},
+  expect(tree.root.findByType(AgentsScreen).props.sessions.map(({conversationId,status}:any)=>({conversationId,status}))).toEqual([
+   {conversationId:7,status:'idle'},{conversationId:8,status:'working'},{conversationId:9,status:'working'},
   ]);
  }finally{if(tree)await act(async()=>tree.unmount());}
 });
@@ -726,7 +812,9 @@ test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe r
    expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
    expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.value).toBe('Keep my draft');
   }else{
-   expect(tree.root.findByProps({testID:`history-entry-${placement==='parent'?1:2}`}).findAllByType(InlineSurface)).toHaveLength(1);
+   expect(tree.root.findAllByType(InlineSurface)).toHaveLength(1);
+   const data=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0].props.data;
+   const index=data.findIndex((entry:any)=>entry.inlineSurfaceId);expect(data[index].inlineSurfaceSource).toBe(placement==='parent'?1:2);if(placement==='parent')expect(data[index+1].id).toBe(1);
    expect(tree.root.findAllByProps({accessibilityLabel:'Other interactive surfaces'})).toHaveLength(0);
    await act(async()=>press('Expand visual: Nested visual'));
   }
@@ -780,7 +868,7 @@ test('delayed Use default verification never discards a newer reopened instructi
  try{
   await act(async()=>{tree=Renderer.create(<App/>);});
   const press=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
-  const reopen=async()=>{await navigateTo(tree,'Chat');await navigateTo(tree,'Settings');await act(async()=>press('Instructions & folder'));};
+  const reopen=async()=>{await navigateTo(tree,'Chat');await navigateTo(tree,'Settings');await act(async()=>press('Conversation settings'));};
   await reopen();act(()=>tree.root.findByProps({accessibilityLabel:'Conversation instructions'}).props.onChangeText('A'));
   await act(async()=>press('Use backend default instructions'));expect(release).toBeDefined();expect(configured.instructions).toBeNull();
   await reopen();
@@ -815,7 +903,7 @@ test('drawing attachment propagates transfer/staging failures and cleans up a fi
   let result!:Promise<unknown>;
   await act(async()=>{result=add('data:image/png;base64,png').catch((error:Error)=>error);});expect(finish).toBeDefined();
   await navigateTo(tree,'Sessions');
-  await act(async()=>tree.root.findByType(SideDrawer).props.conversations.find((row:any)=>row.id==='8').onPress());
+  await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(8));
   await act(async()=>finish({id:'5aaee20e-e260-4403-80da-b97ce80664a1',name:'drawing.png',mime:'image/png',uri:'file:///draft'}));
   expect(await result).toEqual(Error('Conversation changed. Drawing was not attached.'));
   expect(remove).toHaveBeenCalledWith('5aaee20e-e260-4403-80da-b97ce80664a1');
@@ -1038,7 +1126,7 @@ test('real App wires source snapshot phone requests once and keeps controls in S
   expect(posts.find(post=>post.body.action==='claim').headers.Authorization).toBe('Bearer paired-device-token');
   await act(async()=>publish({data:JSON.stringify({...snapshot,conversationId:8,view:{entries:[],docs:{'bob.phone-tools':{requests:[{...request,id:'cd'.repeat(32)}]}}}})}));expect(phoneNative.execute).toHaveBeenCalledTimes(1);
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft intact');
-  await navigateTo(tree,'Settings');expect(tree.root.findAll(node=>node.props.accessibilityLabel==='Disable phone tools'&&typeof node.props.onPress==='function')).toHaveLength(1);
+  await navigateTo(tree,'Settings');await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Phone & location'&&typeof node.props.onPress==='function')[0].props.onPress());expect(tree.root.findAll(node=>node.props.accessibilityLabel==='Disable phone tools'&&typeof node.props.onPress==='function')).toHaveLength(1);
   await navigateTo(tree,'Chat');expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft intact');
  }finally{if(tree)await act(async()=>tree.unmount());if(previous===undefined)delete NativeModules.BobPhoneTools;else NativeModules.BobPhoneTools=previous;}
 });
@@ -1064,7 +1152,7 @@ test('real App keeps the native connection separate from foreground-only phone t
   await act(async()=>{tree=Renderer.create(<App/>);});
   const draft=tree.root.findByProps({accessibilityLabel:'Message draft'}),list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
   await act(async()=>draft.props.onChangeText('Keep this unsent draft'));
-  await navigateTo(tree,'Settings');await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Enable keep connected'&&typeof node.props.onPress==='function')[0].props.onPress());
+  await navigateTo(tree,'Settings');await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Connection'&&typeof node.props.onPress==='function')[0].props.onPress());await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Enable keep connected'&&typeof node.props.onPress==='function')[0].props.onPress());
   expect(native.start).toHaveBeenCalledWith(backend.endpoint,backend.backendId,'paired-token',7,true);await navigateTo(tree,'Chat');
   const old=streams[streams.length-1];
   await act(async()=>{(AppState as any).currentState='background';for(const listener of listeners)listener('background');});
@@ -1097,4 +1185,166 @@ test.each([false,true])('update notification respects workstation-scoped convers
   expect(native.start).toHaveBeenCalledTimes(1);
   expect(native.start).toHaveBeenLastCalledWith(one.endpoint,one.backendId,'paired-token',7,false);
  }finally{if(tree)await act(async()=>tree.unmount());delete NativeModules.BobConnection;}
+});
+
+test('live reply keeps its native row through completion; generated files move beneath only that proven answer',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
+ NativeModules.BobInteractive={prepare:jest.fn(async()=> 'retained-surface'),releasePrepared:jest.fn()};
+ const surface={id:'a941d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Report chart',kind:'visual',presentation:'inline',allowedTools:[]};
+ let snapshot:((event:any)=>void)|undefined;
+ require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/ui')?[surface]:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const file={id:3,kind:'bob.file',data:{id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,name:'report.txt',mime:'text/plain',size:12,sha256:'a'.repeat(64)}};
+ const owner={id:1,kind:'bob.user',data:{text:'Make a report'}},upload={...file,id:2,kind:'bob.artifact'};
+ const source={id:4,byTaskId:77,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual',name:'render_visual',arguments:{title:surface.title,html:'<p>Chart</p>'}}]}]},result={id:5,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Report chart. Open from the conversation’s interactive surfaces.`}]}]};
+ const publish=async(entries:any[],live:any)=>act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'pi.live':live}}})}));
+ try{
+  await publish([owner,upload,file,source,result],{run:{taskId:99,first:1},generation:{message:{role:'assistant',content:[{type:'text',text:'Here is'}]}}});
+  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  expect(list.props.data[0].liveResponse).toBe(true);
+  const liveRow=tree.root.findByProps({testID:'history-entry--99'}),fileRow=tree.root.findByProps({testID:'history-entry-3'}),visual=tree.root.findByType(InlineSurface),draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
+  act(()=>draft.props.onChangeText('Keep my draft'));
+  const scroll=jest.spyOn(list.instance,'scrollToOffset').mockImplementation(()=>{});act(()=>list.props.onScrollBeginDrag());
+  const mobileReply={version:1,first:1,answer:8},answer={id:8,kind:'pi.assistant',byTaskId:99,mobileReply,model:[{role:'assistant',content:[{type:'text',text:'Here is the report.'}]}]};
+  await publish([owner,upload,{...file,mobileReply},source,result,answer],{});
+  const finalRow=tree.root.findByProps({testID:'history-entry-8'});expect(finalRow).toBe(liveRow);
+  expect(tree.root.findByProps({testID:'history-entry-3'})).toBe(fileRow);expect(fileRow.findByType(require('../components/file-attachment').FileAttachment).props.artifact.name).toBe('report.txt');
+  expect(list.props.data.filter((entry:any)=>!entry.inlineSurfaceId).map((entry:any)=>entry.id)).toEqual([3,8,4,2,1]);expect(tree.root.findByType(InlineSurface)).toBe(visual);expect(list.props.data[0].inlineSurfaceId).toBe(surface.id);expect(tree.root.findByProps({testID:'history-entry-2'})).toBeDefined();
+  act(()=>list.props.onContentSizeChange(337,1800));expect(scroll).not.toHaveBeenCalled();
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft');
+  const later={id:10,kind:'pi.assistant',byTaskId:101,mobileReply:{version:1,first:9,answer:10},model:[{role:'assistant',content:'Different reply'}]};
+  await publish([owner,upload,{...file,mobileReply},source,result,answer,{id:9,kind:'bob.user',data:{text:'Next question'}},later],{});
+  expect(list.props.data.filter((entry:any)=>!entry.inlineSurfaceId).map((entry:any)=>entry.id)).toEqual([10,9,3,8,4,2,1]);expect(tree.root.findByType(InlineSurface)).toBe(visual);expect(list.props.data[2].inlineSurfaceId).toBe(surface.id);expect(tree.root.findByProps({testID:'history-entry-3'})).toBe(fileRow);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('inline tree controls complete the session lifecycle without a management screen or draft switch',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ let meta={title:'Manage me',pinned:false,archived:false,trashed:false};const mutations:string[]=[];
+ const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
+  const url=String(input),method=options?.method??'GET';
+  if(url.includes('/chats/8')&&method!=='GET'){mutations.push(method);meta=method==='DELETE'?{...meta,trashed:true}:{...meta,...JSON.parse(options.body)};return response({id:8,meta});}
+  if(url.includes('/agent-overview')){const filter=new URL(url).searchParams.get('filter');const include=filter==='trash'?meta.trashed:filter==='archived'?meta.archived&&!meta.trashed:!meta.archived&&!meta.trashed;return response({backendId:backend.backendId,sessions:include?[{conversationId:8,status:'idle',agents:[],...meta}]:[]});}
+  return response(url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Current'}},{id:8,meta}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:{});
+ });
+ const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});let tree!:Renderer.ReactTestRenderer;
+ const press=async(label:string)=>act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress());
+ const filter=async(value:string)=>{const trigger=tree.root.findAll(node=>String(node.props.accessibilityLabel??'').startsWith('Session filter:')&&typeof node.props.onPress==='function')[0];await act(async()=>trigger.props.onPress());await press(value==='all'?'Active':value==='trash'?'Trash':'Archived');};
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});act(()=>draft.props.onChangeText('Keep this draft'));const list=tree.root.findByProps({testID:'chat-history-list'});
+  await navigateTo(tree,'Agents');expect(tree.root.findAllByType(SideDrawer)).toHaveLength(0);expect(tree.root.findAllByProps({accessibilityLabel:'Manage sessions'})).toHaveLength(0);
+  await press('Session controls for Manage me');expect(tree.root.findByProps({testID:'agent-screen-content'}).props.importantForAccessibility).toBe('no-hide-descendants');await press('Rename');act(()=>tree.root.findByProps({accessibilityLabel:'Conversation name'}).props.onChangeText('Renamed'));
+  await press('Save conversation name');expect(tree.root.findByProps({accessibilityLabel:'Open Bob session Renamed'})).toBeDefined();
+  await press('Session controls for Renamed');await press('Pin to top');expect(meta.pinned).toBe(true);
+  await press('Session controls for Renamed');await press('Archive');expect(tree.root.findAllByProps({accessibilityLabel:'Open Bob session Renamed'})).toHaveLength(0);
+  await filter('archived');await press('Session controls for Renamed');await press('Unarchive');expect(meta.archived).toBe(false);
+  await filter('all');await press('Session controls for Renamed');await press('Delete');expect(alert).toHaveBeenCalled();await act(async()=>alert.mock.calls.at(-1)![2]!.find(item=>item.text==='Move to Trash')!.onPress?.());
+  expect(meta.trashed).toBe(true);await filter('trash');await press('Session controls for Renamed');await press('Restore conversation');expect(meta.trashed).toBe(false);
+  await filter('all');expect(tree.root.findByProps({accessibilityLabel:'Open Bob session Renamed'})).toBeDefined();expect(mutations).toEqual(['PUT','PUT','PUT','PUT','DELETE','PUT']);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep this draft');expect(tree.root.findByProps({testID:'chat-history-list'})).toBe(list);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test.each(['create','refresh'])('New prevents duplicate creation and stale navigation after workstation switch (%s)',async(stage)=>{
+ const a={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://a.test',name:'A'},b={backendId:'22222222-2222-4222-8222-222222222222',endpoint:'https://b.test',name:'B'};
+ await AsyncStorage.setItem('backends',JSON.stringify([a,b]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:a.backendId,chat:7}));(Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ let finish!:(result:Response)=>void,posted=false,posts=0;const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
+  const url=String(input),backend=url.startsWith(a.endpoint)?a:b;
+  if(url===a.endpoint+'/v1/chats'&&options?.method==='POST'){posts++;posted=true;if(stage==='create')return new Promise(resolve=>{finish=resolve;});return response({id:10});}
+  if(stage==='refresh'&&posted&&url===a.endpoint+'/v1/chats'&&options?.method==='GET')return new Promise(resolve=>{finish=resolve;});
+  return response(url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[]}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Current'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/peers')?{inbound:[],outbound:[]}:{});
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});await navigateTo(tree,'Agents');const onPress=tree.root.findAll(node=>node.props.accessibilityLabel==='New session'&&typeof node.props.onPress==='function')[0].props.onPress;
+  await act(async()=>{onPress();onPress();});expect(posts).toBe(1);expect(finish).toBeDefined();
+  await navigateTo(tree,'Workstations');await act(async()=>tree.root.findByType(SideDrawer).props.workspaces.find((row:any)=>row.id===b.backendId).onPress());expect(tree.root.findByType(AgentsScreen).props.visible).toBe(true);
+  await act(async()=>finish(response(stage==='create'?{id:10}:{items:[]})));expect(tree.root.findByType(AgentsScreen).props.visible).toBe(true);expect(tree.root.findByType(AgentsScreen).props.workstation).toBe('B');expect(posts).toBe(1);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('real Menu → Terminal embeds directly, reserves IME once and returns to the same draft/list',async()=>{
+ jest.replaceProperty(Platform,'OS','android');(AppState as any).currentState='active';
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const native={capabilities:jest.fn(async()=>({available:true})),prepare:jest.fn(async()=> 'terminal-handle'),releasePrepared:jest.fn(async()=>{})};NativeModules.BobTerminal=native;
+ const connection={sessionId:'session-1',host:'100.64.0.1',port:60020,key:'abcdefghijklmnopqrstuv',cwd:'/tmp/project'};
+ const calls:{url:string;method:string}[]=[];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options:any)=>{
+  const url=String(input),method=options?.method??'GET';calls.push({url,method});
+  const data=url.endsWith('/terminal')?(method==='POST'?connection:{available:true,cwd:'/tmp/project'}):url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'bob.user',data:{text:'Preserved history'}}]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Long unrelated conversation title'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<App/>);});
+  const draft=tree.root.findByProps({accessibilityLabel:'Message draft'}),list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  await act(async()=>draft.props.onChangeText('Unsent draft stays here'));
+  expect(native.prepare).not.toHaveBeenCalled();
+  await navigateTo(tree,'Terminal');
+  const screen=tree.root.findAllByProps({testID:'terminal-screen'})[0],view=tree.root.findAllByProps({testID:'embedded-terminal'})[0];
+  expect(view.props.session).toBe('terminal-handle');expect(native.prepare).toHaveBeenCalledTimes(1);
+  expect(calls.filter(call=>call.url.endsWith('/terminal')&&call.method==='POST')).toHaveLength(1);
+  await act(async()=>{view.props.onState({nativeEvent:{session:'terminal-handle',phase:'running'}});DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});});
+  expect(StyleSheet.flatten(screen.props.style).bottom).toBe(280);
+  expect(tree.root.findAllByProps({testID:'embedded-terminal'})[0]).toBe(view);
+  await navigateTo(tree,'Chat');
+  expect(tree.root.findAllByProps({testID:'embedded-terminal'})).toHaveLength(0);expect(native.releasePrepared).toHaveBeenCalledWith('terminal-handle');
+  expect(calls.filter(call=>call.url.endsWith('/terminal')&&call.method==='DELETE')).toHaveLength(0);
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Unsent draft stays here');
+  expect(tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0]).toBe(list);
+ }finally{if(tree)await act(async()=>tree.unmount());delete NativeModules.BobTerminal;}
+});
+
+test('sent image decks preserve their row, draft and selected image; original preview/save actions remain correctly scoped',async()=>{
+ const {AccessibilityInfo}=require('react-native');jest.spyOn(AccessibilityInfo,'isReduceMotionEnabled').mockResolvedValue(true);
+ const {ImageAttachments}=require('../components/image-attachments'),{ImageAttachmentStack}=require('../components/image-attachment-stack'),{AttachmentDetails}=require('../components/attachment-details');
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={preview:jest.fn(async()=>{}),save:jest.fn(async()=>{})};delete NativeModules.BobOutbox;
+ const photo=(id:number,kind='bob.artifact')=>({id,kind,data:{id:`a841d08a-8b83-42cd-b8a7-${String(id).padStart(12,'0')}`,conversationId:7,name:`photo-${id}.png`,mime:'image/png',size:12,sha256:'a'.repeat(64)}});
+ const one=photo(11),two=photo(12),three=photo(13),owner={id:14,kind:'bob.user',data:{text:'Look at my photos'}};
+ let snapshot:((event:any)=>void)|undefined;
+ require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[one,two,owner]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Photos'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/transfer-limits')?{uploadLimit:1048576}:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const publish=async(entries:any[])=>act(async()=>snapshot!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries,docs:{'pi.live':{}}}})}));
+ try{
+  const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0],draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
+  const row=tree.root.findByProps({testID:'history-entry-11'}),group=row.findByType(ImageAttachments),deck=row.findByType(ImageAttachmentStack);
+  expect(group.props.fromBob).toBe(false);expect(deck.props.images).toHaveLength(2);expect(deck.props.onSave).toBeUndefined();expect(tree.root.findAllByProps({testID:'history-entry-12'})).toHaveLength(0);
+  expect(StyleSheet.flatten(row.findByType(ChatBubble).props.style).width).toBe('100%');
+  act(()=>{draft.props.onChangeText('Keep my draft');list.props.onScrollBeginDrag();});
+  await act(async()=>deck.findByProps({accessibilityLabel:'Next image'}).props.onPress());
+  expect(deck.findByProps({testID:'image-stack-front'}).props.accessibilityValue.text).toBe('Image 2 of 2');
+  await publish([one,two,three,owner]);
+  expect(tree.root.findByProps({testID:'history-entry-11'})).toBe(row);expect(row.findByType(ImageAttachmentStack)).toBe(deck);expect(deck.findByProps({testID:'image-stack-front'}).props.accessibilityValue.text).toBe('Image 2 of 3');
+  await act(async()=>deck.findByProps({accessibilityLabel:'Attachment details: photo-12.png'}).props.onPress());
+  expect(tree.root.findByType(AttachmentDetails).props.artifact.id).toBe(two.data.id);expect(NativeModules.BobFiles.preview).not.toHaveBeenCalled();
+  await act(async()=>tree.root.findByType(AttachmentDetails).props.onClose());
+  await act(async()=>deck.findByProps({accessibilityLabel:'Open photo-12.png'}).props.onPress());
+  expect(NativeModules.BobFiles.preview).toHaveBeenCalledWith(`${backend.endpoint}/v1/chats/7/artifacts/${two.data.id}`,'test-token',backend.backendId,'image/png',1048576);
+  const earlier=photo(10);await publish([earlier,one,two,three,owner]);
+  expect(tree.root.findByProps({testID:'history-entry-11'})).toBe(row);expect(row.findByType(ImageAttachmentStack)).toBe(deck);expect(deck.findByProps({testID:'image-stack-front'}).props.accessibilityValue.text).toBe('Image 3 of 4');
+  const a=photo(15,'bob.file'),b=photo(16,'bob.file'),answer={id:17,kind:'pi.assistant',byTaskId:99,mobileReply:{version:1,first:14,answer:17},model:[{role:'assistant',content:'Here are your edited pictures.'}]};
+  await publish([earlier,one,two,three,owner,a,b,answer]);
+  expect(list.props.data.map((entry:any)=>entry.id)).toEqual([15,17,14,11]);
+  const output=tree.root.findByProps({testID:'history-entry-15'}).findByType(ImageAttachmentStack);
+  expect(output.props.images).toHaveLength(2);expect(typeof output.props.onSave).toBe('function');
+  await act(async()=>output.findByProps({accessibilityLabel:'Next image'}).props.onPress());
+  await act(async()=>output.findByProps({accessibilityLabel:'Save photo-16.png'}).props.onPress());
+  expect(NativeModules.BobFiles.save).toHaveBeenCalledWith(`${backend.endpoint}/v1/chats/7/artifacts/${b.data.id}`,'test-token',backend.backendId,'photo-16.png','image/png',1048576);
+  expect(row.findByType(ImageAttachmentStack)).toBe(deck);expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft');
+ }finally{await act(async()=>tree.unmount());}
 });

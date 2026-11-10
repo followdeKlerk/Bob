@@ -18,6 +18,9 @@ class MainApplication : Application(), ReactApplication {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           add(BobPlatformPackage())
           add(BobOutboxPackage())
+          add(BobMediaPackage())
+          add(BobImageGesturePackage())
+          add(BobTerminalPackage())
         },
     )
   }
@@ -33,6 +36,7 @@ class MainApplication : Application(), ReactApplication {
   }
   override fun onCreate() {
     super.onCreate()
+    com.facebook.react.common.assets.ReactFontManager.getInstance().addCustomFont(this, "Nunito", R.font.nunito)
     com.facebook.react.common.assets.ReactFontManager.getInstance().addCustomFont(this, "Nordwand Mono", R.font.nordwand_mono)
     CrashDiagnostics.install(this)
     BobFullscreen.install(this)

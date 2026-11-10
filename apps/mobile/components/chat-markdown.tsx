@@ -1,28 +1,53 @@
-import {APP_FONT_FAMILY} from '../typography';
+import {APP_FONT_FAMILY,APP_MONO_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
-import React,{memo,useMemo,useState} from 'react';
+import React,{memo,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Linking,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
-import Markdown,{MarkdownIt,type ASTNode,type RenderRules} from 'react-native-markdown-display';
+import Markdown,{type ASTNode,type RenderRules} from 'react-native-markdown-display';
 import {themed,useThemedValue} from '../theme';
 import {markdownTableWidths,markdownCodeLanguage} from '../markdown-layout';
 import {CopyAction} from './message-actions';
 
-const parser=new MarkdownIt({html:false,linkify:false,typographer:false});
+import {createStreamingMarkdownParser,proseText,arrivingTextStart} from '../streaming-markdown';
+import {markdownLinks,safeHttpDestination} from '../markdown-links';
+import {StreamingText} from './streaming-text';
+import {LinkPreviewFooter} from './link-preview-footer';
+
+function openLink(url:string){
+ const destination=safeHttpDestination(url);
+ if(destination)void Linking.openURL(destination.url).catch(()=>{});
+ return false;
+}
 function CodeBlock({content,info}:{content:string;info?:unknown}) {
  const layout=useThemedValue(layoutTheme);
 
  return <View testID="markdown-code-block" style={layout.codeBlock}>
   <View style={layout.codeHeader}><Text style={layout.codeLabel}>{markdownCodeLanguage(info)}</Text><CopyAction text={content} label="Copy code"/></View>
   <ScrollView horizontal nestedScrollEnabled directionalLockEnabled showsHorizontalScrollIndicator style={layout.horizontal} contentContainerStyle={layout.codeContent}>
-   <Text selectable style={layout.codeText}>{content.replace(/\n$/,'')}</Text>
+   <Text typography="mono" selectable style={layout.codeText}>{content.replace(/\n$/,'')}</Text>
   </ScrollView>
  </View>;
 }
 // Native rendering only: never execute code/HTML or load remote images.
-export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
+export const ChatMarkdown=memo(function ChatMarkdown({text,streaming=false,linkPreviews=false}:{text:string;streaming?:boolean;linkPreviews?:boolean}) {
  const layout=useThemedValue(layoutTheme);
  const styles=useThemedValue(stylesTheme);
-
+ const [parser]=useState(createStreamingMarkdownParser);
+ const ast=useMemo(()=>parser.parse(text),[parser,text]);
+ const prose=useMemo(()=>proseText(ast),[ast]);
+ const previous=useRef<{source:string;prose:string;streaming:boolean}|null>(null);
+ const start=arrivingTextStart(previous.current,text,prose,streaming);
+ const edges=useMemo(()=>{
+  const result=new Map<string,number>();let offset=0;
+  const visit=(nodes:ASTNode[])=>nodes.forEach(node=>{
+   if(node.type==='text'){
+    if(start!==null&&offset+node.content.length>start)result.set(node.key,Math.max(0,start-offset));
+    offset+=node.content.length;
+   }else visit(node.children);
+  });
+  visit(ast);return result;
+ },[ast,start]);
+ useLayoutEffect(()=>{previous.current={source:text,prose,streaming};},[text,prose,streaming]);
+ const links=useMemo(()=>linkPreviews?markdownLinks(ast):[],[ast,linkPreviews]);
  const window=useWindowDimensions(),[measured,setMeasured]=useState(0);
  const width=measured||Math.max(1,window.width-48);
  const rules=useMemo<RenderRules>(()=>{
@@ -37,11 +62,17 @@ export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
    return <View key={node.key} testID={header?'markdown-th':'markdown-td'} style={[layout.cell,header&&layout.headerCell,{width:table?widths(table)[node.index]:160}]}>{children}</View>;
   };
   return {
+   // The library's default body uses a fresh random key on every render. A
+   // stable root/AST path keeps existing native text mounted during appends.
+   body:(_node,children,_parents,style)=><View key="markdown-body" style={style._VIEW_SAFE_body}>{children}</View>,
+   text:(node,_children,_parents,style,inherited)=>
+    <StreamingText key={node.key} text={node.content} start={edges.get(node.key)??null} style={[inherited,style.text]}/>,
    textgroup:(node,children,parents,style)=>{
     const alignment=parents.find(parent=>parent.type==='th'||parent.type==='td')?.attributes.style;
     const textAlign=typeof alignment==='string'&&alignment.includes('center')?'center':typeof alignment==='string'&&alignment.includes('right')?'right':'left';
     return <Text key={node.key} selectable style={[style.textgroup,layout.textGroup,{textAlign}]}>{children}</Text>;
    },
+   code_inline:(node,_children,_parents,style,inherited)=><Text key={node.key} typography="mono" style={[inherited,style.code_inline]}>{node.content}</Text>,
    code_block:node=><CodeBlock key={node.key} content={node.content}/>,
    fence:node=><CodeBlock key={node.key} content={node.content} info={(node as ASTNode&{sourceInfo?:string}).sourceInfo}/>,
    image:node=><Text key={node.key} style={styles.body}>[Image: {node.attributes.alt||'image'}]</Text>,
@@ -62,12 +93,10 @@ export const ChatMarkdown=memo(function ChatMarkdown({text}:{text:string}) {
    th:(node,children,parents)=>cell(node,children,parents,true),
    td:(node,children,parents)=>cell(node,children,parents,false),
   };
- },[width,window.fontScale,layout,styles]);
+ },[width,window.fontScale,layout,styles,edges]);
  return <View testID="markdown-content" style={layout.root} onLayout={event=>{const next=event.nativeEvent.layout.width;if(Number.isFinite(next)&&next>0)setMeasured(previous=>Math.abs(previous-next)>.5?next:previous);}}>
-  <Markdown markdownit={parser} style={styles} mergeStyle rules={rules} onLinkPress={url=>{
-   if(/^https?:\/\//i.test(url))void Linking.openURL(url).catch(()=>{});
-   return false;
-  }}>{text}</Markdown>
+  <Markdown markdownit={parser.markdownit} style={styles} mergeStyle rules={rules} onLinkPress={openLink}>{ast as any}</Markdown>
+  {linkPreviews&&<LinkPreviewFooter links={links}/>}
  </View>;
 });
 const layoutTheme=themed(({colors,menuChrome})=>StyleSheet.create({
@@ -85,7 +114,7 @@ const layoutTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  codeHeader:{minHeight:44,paddingLeft:12,paddingRight:4,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:colors.border},
  codeLabel:{color:colors.muted,fontSize:11,lineHeight:18,flexShrink:1},
  codeContent:{padding:12},
- codeText:{fontFamily:APP_FONT_FAMILY,fontSize:13,lineHeight:22,color:colors.foreground,flexShrink:0},
+ codeText:{fontFamily:APP_MONO_FONT_FAMILY,fontSize:13,lineHeight:22,color:colors.foreground,flexShrink:0},
 }));
 const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  body:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:15,lineHeight:25,minWidth:0,width:'100%'},
@@ -99,7 +128,7 @@ const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  heading6:{flexDirection:'column',color:colors.foreground,fontSize:15,lineHeight:24,fontWeight:'600',marginTop:8,marginBottom:6},
  strong:{fontWeight:'700'},em:{fontStyle:'italic'},s:{textDecorationLine:'line-through'},
  link:{color:colors.accent,textDecorationLine:'underline'},
- code_inline:{fontFamily:APP_FONT_FAMILY,backgroundColor:colors.surface,color:colors.foreground,borderWidth:0,padding:0,borderRadius:3},
+ code_inline:{fontFamily:APP_MONO_FONT_FAMILY,backgroundColor:colors.surface,color:colors.foreground,borderWidth:0,padding:0,borderRadius:3},
  blockquote:{backgroundColor:colors.surface,borderColor:colors.accent,borderLeftWidth:3,paddingHorizontal:12,paddingVertical:8,marginLeft:0,marginVertical:8},
  hr:{backgroundColor:colors.border,height:1,marginVertical:12},
  th:{fontWeight:'600'},

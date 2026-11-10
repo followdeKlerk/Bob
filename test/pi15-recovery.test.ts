@@ -13,9 +13,9 @@ import {createModels} from '@earendil-works/pi-ai/models';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {State} from '../src/state.js';
 import {migrateControl} from '../src/control-migrations.js';
-import {prepareFreshPi15Floor,readControlFloor} from '../src/maintenance-migration.js';
+import {prepareFreshPi15Floor,prepareFreshPi151Floor,pi151Fingerprint,readControlFloor} from '../src/maintenance-migration.js';
 import {acquireOwner} from '../src/ownership.js';
-import {backupState,restoreState} from '../src/recovery.js';
+import {backupState,restoreState,installedDurableVersion} from '../src/recovery.js';
 
 const RecoveryDoc=defineDoc<{text:string}>({kind:'pi15.recovery-fixture',version:1,scope:'conversation',history:'rewindable',fork:'current',initial:()=>({text:''}),checkpointWhen:()=>true});
 const HeldTask=defineTask<null,{phase:'held'},null>({name:'pi15.recovery-held',version:1,initial:()=>({phase:'held'}),phases:{held:async()=>{throw Error('Restore must never execute this paused task');}},abort:async()=>{}});
@@ -25,13 +25,16 @@ async function nativeOpen(directory:string) {
   const registry=createRegistry(); registry.install(FixtureExtension);
   return Harness.open(await openNodeSqliteStorage(join(directory,'durable.sqlite')),{registry,models:createModels(),settings:{extensions:[FixtureExtension]}},ctx);
 }
-async function fixture() {
+async function fixture(patchFloor=false) {
   const dir=mkdtempSync(join(tmpdir(),'bob-pi15-recovery-')),state=new State(join(dir,'source'));
   migrateControl(state);
   const grant=state.pair(state.invite().token,'Recovery fixture phone');
   state.set('recoverySentinel',{text:'configured',revision:7});
   const release=acquireOwner(state.dir);
-  try { prepareFreshPi15Floor(state.dir); } finally { release(); }
+  try {
+    if(patchFloor)prepareFreshPi151Floor(state.dir,{id:'recovery-fixture',cli:join(dir,'fixture/dist/cli.js'),durableVersion:'1.5.1',compatibility:pi151Fingerprint});
+    else prepareFreshPi15Floor(state.dir);
+  } finally { release(); }
   const native=await nativeOpen(state.dir);
   try {
     const c=await native.createConversation({ownership:{kind:'ownerless'}},ctx);
@@ -58,11 +61,11 @@ function payloadBytes(directory:string,files:Record<string,string>) {
 }
 
 test('actual pinned native 1.5 backup/restore is byte-preserving, read-only until explicit reopen, and retains history/documents/tasks/grants',async()=>{
-  assert.equal(JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('@earendil-works/pi-durable')),'utf8')).version,'1.5.0');
+  assert.equal(JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('@earendil-works/pi-durable')),'utf8')).version,installedDurableVersion());
   const f=await fixture(),backup=join(f.dir,'backup'),destination=join(f.dir,'restored');
   try {
     const manifest=await backupState(f.state,backup);
-    assert.equal(manifest.format,2); assert.equal(manifest.durable,'1.5.0');
+    assert.equal(manifest.format,2); assert.equal(manifest.durable,installedDurableVersion());
     assert.equal(manifest.controlSchemaVersion,3); assert.equal(manifest.lifecycleSchemaVersion,2);
     assert.deepEqual(manifest.floor,readControlFloor(f.state.dir,true));
     const before=payloadBytes(backup,manifest.files);
@@ -101,7 +104,7 @@ test('strict format-2 metadata refuses runtime, control, lifecycle, identity and
       ['native-as-pi14',{...original,durable:'1.4.0'},/1.5.0/],
       ['future-runtime',{...original,durable:'1.6.0'},/1.5.0/],
       ['future-format',{...original,format:3},/2/],
-      ['future-control',{...original,controlSchemaVersion:4},/Invalid/],
+      ['future-control',{...original,controlSchemaVersion:5},/Invalid/],
       ['control-disagreement',{...original,controlSchemaVersion:2},/control\/lifecycle metadata mismatch/],
       ['lifecycle-disagreement',{...original,lifecycleSchemaVersion:1},/control\/lifecycle metadata mismatch/],
       ['future-lifecycle',{...original,lifecycleSchemaVersion:3},/Invalid/],
@@ -205,4 +208,53 @@ test('migrated format-2 floor restores only under the same compiled exact pair p
     try {assert.equal((await reopened.snapshot(RecoveryDoc,f.conversationId,ctx))?.text,'native document survives');}
     finally {await reopened.close(ctx);}
   } finally {f.state.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test('reviewed 1.5.0 and 1.5.1 export metadata restores read-only without relabeling payloads or granting runtime-open permission',async()=>{
+ const f=await fixture(),backup=join(f.dir,'backup');
+ try{
+  const manifest=await backupState(f.state,backup),bytes=payloadBytes(backup,manifest.files),path=join(backup,'manifest.json');
+  assert.equal(manifest.durable,installedDurableVersion());
+  assert.equal(manifest.floor.kind,'pi15-fresh');
+  if(manifest.floor.kind==='pi15-fresh')assert.equal(manifest.floor.minDurable,'1.5.0','historical minimum is not the exporter runtime version');
+  // This checks the read-only metadata contract, not cross-runtime native opens.
+  // Native upgrade/rollback compatibility is a separate physical-floor gate.
+  for(const durable of ['1.5.0','1.5.1']){
+   writeFileSync(path,JSON.stringify({...manifest,durable}));
+   const originalManifest=readFileSync(path),destination=join(f.dir,'restored-'+durable);
+   restoreState(backup,destination);
+   assert.deepEqual(payloadBytes(destination,manifest.files),bytes);
+   assert.deepEqual(payloadBytes(backup,manifest.files),bytes);
+   assert.deepEqual(readFileSync(path),originalManifest,'restore never relabels an old export');
+   assert.deepEqual(readControlFloor(destination,true),manifest.floor,'restore never installs or rewrites a floor');
+  }
+ }finally{f.state.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test('physical 1.5.1 control-v4 floor is exported and restored strictly, retaining the original 1.5.0 floor table unchanged',async()=>{
+ const f=await fixture(true),backup=join(f.dir,'backup');
+ try{
+  const originalHistorical=readControlFloor(f.state.dir,true,true),manifest=await backupState(f.state,backup);
+  assert.equal(manifest.controlSchemaVersion,4);assert.equal(manifest.floor.kind,'pi151');
+  assert.equal(manifest.durable,installedDurableVersion());
+  if(manifest.floor.kind!=='pi151')throw Error('Expected patch floor');
+  assert.equal(manifest.floor.minDurable,'1.5.1');assert.equal(manifest.floor.origin,'fresh');
+  assert.equal(originalHistorical.kind,'pi15-fresh');
+  if(originalHistorical.kind==='pi15-fresh')assert.equal(originalHistorical.minDurable,'1.5.0');
+  const bytes=payloadBytes(backup,manifest.files),destination=join(f.dir,'restored');
+  restoreState(backup,destination);assert.deepEqual(payloadBytes(destination,manifest.files),bytes);
+  assert.deepEqual(readControlFloor(destination,true,true),originalHistorical);
+  assert.deepEqual(readControlFloor(destination,true),manifest.floor);
+  const path=join(backup,'manifest.json');
+  for(const [label,floor] of [
+   ['historical-minimum',{...manifest.floor,minDurable:'1.5.0'}],
+   ['forged-target',{...manifest.floor,to:'f'.repeat(64)}],
+   ['mixed-origin',{...manifest.floor,from:'a'.repeat(64)}],
+   ['unknown-protocol',{...manifest.floor,protocol:'bob-pi152-v1'}],
+  ] as const){
+   writeFileSync(path,JSON.stringify({...manifest,floor}));
+   const rejected=join(f.dir,label);assert.throws(()=>restoreState(backup,rejected));assert.equal(existsSync(rejected),false);
+   assert.deepEqual(payloadBytes(backup,manifest.files),bytes);
+  }
+ }finally{f.state.close();rmSync(f.dir,{recursive:true,force:true});}
 });

@@ -10,7 +10,7 @@ import {CHAT_CONTENT_GAP} from '../tool-presentation';
 import type {LinkedResult} from '../tool-results';
 import {ChatBubble,needsWideBubble} from './chat-bubble';
 type Group={kind:'text';text:string;key:number}|{kind:'block';block:any;key:number};
-function Content({value,results,showTools=true,quietTools=false,speakable=true,bubbleText=false}:{value:unknown;results?:Map<string,LinkedResult>;showTools?:boolean;quietTools?:boolean;speakable?:boolean;bubbleText?:boolean}){
+function Content({value,results,showTools=true,quietTools=false,speakable=true,bubbleText=false,streaming=false}:{value:unknown;results?:Map<string,LinkedResult>;showTools?:boolean;quietTools?:boolean;speakable?:boolean;bubbleText?:boolean;streaming?:boolean}){
 
  const groups:Group[]=[];
  const blocks=Array.isArray(value)?value:[{type:'text',text:replyText(value)}];
@@ -31,7 +31,7 @@ function Content({value,results,showTools=true,quietTools=false,speakable=true,b
   const key=group.kind==='block'?group.block?.id??group.key:group.key;
   let body:React.ReactNode;
   if(group.kind==='text'){
-   const text=<ChatMarkdown text={group.text}/>;
+   const text=<ChatMarkdown text={group.text} streaming={streaming} linkPreviews={bubbleText}/>;
    body=<View style={{gap:0}}>{bubbleText?<ChatBubble wide={needsWideBubble(group.text)}>{text}</ChatBubble>:text}<ActionRow><CopyAction text={group.text}/>{speakable&&<SpeechAction text={group.text}/>}</ActionRow></View>;
   }
   else {
@@ -43,7 +43,7 @@ function Content({value,results,showTools=true,quietTools=false,speakable=true,b
 }
 
 export const ModelContent=React.memo(Content,(before,after)=>{
- if(before.speakable!==after.speakable||before.bubbleText!==after.bubbleText)return false;
+ if(before.speakable!==after.speakable||before.bubbleText!==after.bubbleText||before.streaming!==after.streaming)return false;
  if(before.value!==after.value||before.showTools!==after.showTools||before.quietTools!==after.quietTools)return false;
  if(after.showTools===false)return true;
  if(before.results===after.results)return true;

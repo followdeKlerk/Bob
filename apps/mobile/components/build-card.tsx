@@ -15,7 +15,9 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
 
  const [busy,setBusy]=useState(false),[note,setNote]=useState(''),[failure,setFailure]=useState(''),[details,setDetails]=useState(false),[collapsed,setCollapsed]=useState(false),[request,setRequest]=useState<Request>(),[installVersion,setInstallVersion]=useState<number>(),[dismissed,setDismissed]=useState('');
  const key=`bob.update-request.${backend.backendId}`,installed=Number(NativeModules.BobFiles.versionCode??0),apk=state?.apk,job=activeBuild(state),failed=!job&&state?.jobs?.[0]?.status==='failed'?state.jobs[0]:undefined;
- const ready=!!apk&&apk.versionCode>installed,success=!!installVersion&&installed>=installVersion&&!ready;
+ const installedKnown=Number.isSafeInteger(installed)&&installed>0;
+ const ready=installedKnown&&!!apk&&apk.versionCode>installed,success=installedKnown&&!!installVersion&&installed>=installVersion&&!ready;
+ const versionUnavailable=!!apk&&!installedKnown;
  const [downloadState,setDownloadState]=useState('');
  const downloadScope=JSON.stringify([backend.backendId,backend.endpoint,apk?.releaseId,apk?.sha256,apk?.size]),scopeRef=useRef(downloadScope),receipt=useRef(0),mounted=useRef(true),installingScope=useRef<string|null>(null);
  scopeRef.current=downloadScope;
@@ -45,7 +47,7 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
  useEffect(()=>{if(job)setNote('');},[job?.id]);
  async function credential(){const c=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});if(!c)throw Error('Pairing credential unavailable');return c.password;}
  async function install(){
-  if(!apk||busy||downloading)return;const scope=downloadScope;const ticket=++receipt.current;
+  if(!ready||!apk||busy||downloading)return;const scope=downloadScope;const ticket=++receipt.current;
   const current=()=>mounted.current&&scopeRef.current===scope&&ticket===receipt.current;
   installingScope.current=scope;setBusy(true);setFailure('');setNote('Starting update…');
   try{
@@ -67,17 +69,18 @@ export function BuildCard({backend,state,error,focus=false,onDismiss,onRefresh}:
   }catch(e){setFailure(`${String((e as Error).message??e)}. The same request is retained; no automatic resend.`);}finally{clearTimeout(timeout);setBusy(false);}
  }
  const identity=success?`installed:${installVersion}`:failed?`failed:${failed.id}`:apk?.releaseId??'';
- const visible=focus||!!job||!!request||((ready||success||!!failed)&&dismissed!==identity);
+ const visible=focus||!!job||!!request||((ready||success||!!failed||versionUnavailable)&&dismissed!==identity);
  if(!visible)return null;
  const dismiss=()=>{if(job||request){setCollapsed(value=>!value);return;}setDismissed(identity);void AsyncStorage.setItem(`build-dismissed:${backend.backendId}`,identity).catch(()=>{});if(success)void AsyncStorage.removeItem(`pending-install:${backend.backendId}`).catch(()=>{});onDismiss();};
  return <View style={s.card}>
-  <View style={s.header}>{job||request||busy||downloading?<ActivityIndicator color={colors.accent}/>:success?<Check size={21} color={colors.accent}/>:<Download size={21} color={colors.muted}/>}<View style={{flex:1,gap:4}}><Text style={s.label}>App update · {backend.name}</Text><Text style={s.title}>{job?'Building update':request?'Build requested':failed?'Build needs attention':success?`App ${NativeModules.BobFiles.versionName} installed`:ready?`App ${apk!.versionName} ready`:state?.enabled===false?'Build service unavailable':'Build & install'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={job||request?(collapsed?'Expand build card':'Collapse build card'):'Dismiss build card'} onPress={dismiss} style={s.icon}>{job||request?(collapsed?<ChevronRight size={20} color={colors.muted}/>:<ChevronDown size={20} color={colors.muted}/>):<X size={20} color={colors.muted}/>}</Pressable></View>
+  <View style={s.header}>{job||request||busy||downloading?<ActivityIndicator color={colors.accent}/>:success?<Check size={21} color={colors.accent}/>:<Download size={21} color={colors.muted}/>}<View style={{flex:1,gap:4}}><Text style={s.label}>App update · {backend.name}</Text><Text style={s.title}>{job?'Building update':request?'Build requested':failed?'Build needs attention':success?`App ${NativeModules.BobFiles.versionName} installed`:versionUnavailable?'Installed app version unavailable':ready?`App ${apk!.versionName} ready`:state?.enabled===false?'Build service unavailable':'Build & install'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={job||request?(collapsed?'Expand build card':'Collapse build card'):'Dismiss build card'} onPress={dismiss} style={s.icon}>{job||request?(collapsed?<ChevronRight size={20} color={colors.muted}/>:<ChevronDown size={20} color={colors.muted}/>):<X size={20} color={colors.muted}/>}</Pressable></View>
   {!collapsed&&<View style={s.body}>
    {!!job&&<Text accessibilityLiveRegion="polite" style={s.text}>{job.stage}</Text>}
    {!job&&!!failed&&<Text style={s.text}>{failed.error&&failed.error.length>260&&!details?failed.error.slice(0,260)+'…':failed.error??failed.stage}</Text>}
    {!!request&&!retryable(request)&&<Text style={s.text}>A previous {request.action} request is retained. Refresh to check its recorded result; it will not be resent from this card.</Text>}
    {!!note&&<Text style={s.text}>{note}</Text>}{!!failure&&<Text style={s.text}>{failure}</Text>}
    {!!error&&<Text style={s.text}>Status unavailable · {error}</Text>}
+   {versionUnavailable&&<Text accessibilityRole="alert" style={s.text}>Fully close and reopen Bob to read the installed app version before installing an update.</Text>}
    {ready&&!job&&!request&&<Pressable accessibilityRole="button" accessibilityLabel={`Install ${apk!.versionName}`} disabled={busy||downloading} onPress={()=>void install()} style={[s.primary,(busy||downloading)&&{opacity:0.5}]}><Download size={18} color={colors.onAccent}/><Text style={s.primaryText}>{downloading?'Downloading…':busy?'Please wait…':`Install ${apk!.versionName}`}</Text></Pressable>}
    {(focus||!!failed)&&<><Pressable accessibilityRole="button" accessibilityLabel="Build options" accessibilityState={{expanded:details}} onPress={()=>setDetails(value=>!value)} style={s.option}><Text style={s.text}>Build options</Text>{details?<ChevronDown size={17} color={colors.muted}/>:<ChevronRight size={17} color={colors.muted}/>}</Pressable>{details&&<View style={{gap:8}}><Pressable accessibilityRole="button" accessibilityLabel={request?'Retry same build request':'Build app'} disabled={busy||downloading||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('android')} style={s.secondary}><Text style={s.text}>{request?'Retry same build request':'Build app'}</Text></Pressable>{!request&&<Pressable accessibilityRole="button" accessibilityLabel="Build app and backend" disabled={busy||downloading||!!job||!state?.enabled||!!request&&!retryable(request)} onPress={()=>void queue('all')} style={s.secondary}><Text style={s.text}>Build app & backend</Text></Pressable>}</View>}</>}
    {(focus||!!failure||!!error)&&<Pressable accessibilityRole="button" accessibilityLabel="Refresh build status" onPress={onRefresh} style={s.option}><RefreshCw size={16} color={colors.muted}/><Text style={s.label}>Refresh</Text></Pressable>}

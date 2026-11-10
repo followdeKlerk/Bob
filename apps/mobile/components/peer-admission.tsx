@@ -1,4 +1,4 @@
-import {APP_FONT_FAMILY} from '../typography';
+import {APP_MONO_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
@@ -22,8 +22,8 @@ export function PeerAdmission({data,peerName}:{data:unknown;peerName?:string}){
    <Text style={s.destination}>{peerName?`${peerName} · `:''}{conversation?`Conversation ${conversation}`:'Connected conversation'}</Text>
    <View style={{flexDirection:'row',gap:7,alignItems:'center'}}><Check size={15} color={colors.accent}/><Text style={s.caption}>Receipt confirmed{status?` · ${status}`:''}</Text></View>
    <Text style={s.caption}>Admission confirms receipt, not a completed reply.</Text>
-   {open&&<><Text style={s.label}>Recorded details</Text><Text selectable style={s.code}>{JSON.stringify(data,null,2)??'No additional details recorded.'}</Text></>}
+   {open&&<><Text style={s.label}>Recorded details</Text><Text typography="mono" selectable style={s.code}>{JSON.stringify(data,null,2)??'No additional details recorded.'}</Text></>}
   </View>
  </View>;
 }
-const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:13,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:13,lineHeight:21,color:colors.body},caption:{fontSize:12,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:APP_FONT_FAMILY,fontSize:12,lineHeight:20,color:colors.body}}));
+const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({card:{borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.surface,overflow:'hidden'},header:{minHeight:60,flexDirection:'row',alignItems:'center',gap:10,padding:12},label:{fontSize:11,lineHeight:18,color:colors.muted},title:{fontSize:13,lineHeight:21,color:colors.body},body:{paddingHorizontal:12,paddingBottom:12,gap:9},destination:{fontSize:13,lineHeight:21,color:colors.body},caption:{fontSize:12,lineHeight:20,color:colors.muted,flexShrink:1},code:{fontFamily:APP_MONO_FONT_FAMILY,fontSize:12,lineHeight:20,color:colors.body}}));

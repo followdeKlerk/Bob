@@ -1,0 +1,65 @@
+{
+  "family": "Nunito",
+  "version": "3.602",
+  "cssRequest": "https://fonts.googleapis.com/css?family=Nunito:400,400i,500,500i,600,600i,700,700i&subset=latin-ext,cyrillic-ext,vietnamese",
+  "googleFontsRevision": "8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5",
+  "licenseSha256": "580df76c95a1ec5ab878ceb25bb3d85c6a076804e9c970c8c6972aea775fdf65",
+  "fonts": [
+    {
+      "file": "nunito_regular_italic.ttf",
+      "weight": 400,
+      "style": "italic",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNirXA3ig.ttf",
+      "sha256": "49a2a2cbe1e0b58a4313217cc74fc122c8a4e5ba1539e67f2a87e0832d881281"
+    },
+    {
+      "file": "nunito_medium_italic.ttf",
+      "weight": 500,
+      "style": "italic",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNin3A3ig.ttf",
+      "sha256": "330c7673b5890a37e8c01c515fe7d98b4b72b96c85ef63c5ffba55a013a0c502"
+    },
+    {
+      "file": "nunito_semi_bold_italic.ttf",
+      "weight": 600,
+      "style": "italic",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNic3c3ig.ttf",
+      "sha256": "79b0eb3b5e6e684d501890f0adc9b435fec688b4fccf303c2e7646cb776885a8"
+    },
+    {
+      "file": "nunito_bold_italic.ttf",
+      "weight": 700,
+      "style": "italic",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNiSnc3ig.ttf",
+      "sha256": "4d6c0d42a74b753d33fba2c33f117264ca8c0e3f40df7a4313419ad5e6c95eae"
+    },
+    {
+      "file": "nunito_regular.ttf",
+      "weight": 400,
+      "style": "normal",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDLshRTM.ttf",
+      "sha256": "9ecbdba35fa74f10a1a916c31649b802a12deb9e66c7b1fe4650afcfd4d16971"
+    },
+    {
+      "file": "nunito_medium.ttf",
+      "weight": 500,
+      "style": "normal",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDIkhRTM.ttf",
+      "sha256": "ceb6eec0a584cae83e8f3ab868e2f03977b38ff6e78632bc8a7ec69dcf9f7c18"
+    },
+    {
+      "file": "nunito_semi_bold.ttf",
+      "weight": 600,
+      "style": "normal",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDGUmRTM.ttf",
+      "sha256": "1506fc96971e84d1a4ca89f0d1157a881b9ce217bbfa05d2b3c9e3c8f6723091"
+    },
+    {
+      "file": "nunito_bold.ttf",
+      "weight": 700,
+      "style": "normal",
+      "url": "https://fonts.gstatic.com/s/nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDFwmRTM.ttf",
+      "sha256": "1a025dfce6e6e03bbe31ba82277ec5ed96df8b8dd58b3df6267269490b90b1dc"
+    }
+  ]
+}

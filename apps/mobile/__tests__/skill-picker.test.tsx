@@ -2,6 +2,7 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Pressable,ScrollView,StyleSheet} from 'react-native';
 import {SkillPicker} from '../components/skill-picker';
+jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 import {skillQuery,skillRequest,pickerSkills,filterSkills,pickerEntries,pickerRequest} from '../skill-picker';
 
 const library={skills:{'minimal-skill-authoring':{description:'Create small useful skills',enabled:true},'bob-application-guide':{description:'Read Bob documentation',enabled:true},'disabled-skill':{description:'Not enabled',enabled:false}}};
@@ -76,5 +77,27 @@ test('native command rows filter and select like skills without submitting or ch
  await act(async()=>tree.update(<SkillPicker {...props} query="bro"/>));
  expect(tree.root.findAllByProps({accessibilityLabel:'Insert command delegation'})).toHaveLength(0);
  expect(loadLibrary).toHaveBeenCalledTimes(1);
+ await act(async()=>tree.unmount());
+});
+
+test('suggestions have a fixed heading and Cancel-left footer outside the scalable, unboxed results',async()=>{
+ const {Text:AppText}=require('../components/app-text');
+ const {SectionActions}=require('../components/section-ui');
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<SkillPicker scope="layout" query="" loadLibrary={async()=>library} bottom={300} maxHeight={220} onSelect={()=>{}} onDismiss={()=>{}}/>);});
+ const scroll=tree.root.findByType(ScrollView),footer=tree.root.findByType(SectionActions);
+ expect(scroll.findAllByProps({testID:'skill-picker-heading'})).toHaveLength(0);
+ expect(scroll.findAllByType(SectionActions)).toHaveLength(0);
+ expect(footer.findByProps({testID:'section-footer-leading'}).findAll(node=>node.props.accessibilityLabel==='Dismiss command suggestions').length).toBeGreaterThan(0);
+ expect(footer.parent!.props.testID).toBe('section-footer-overlay');
+ const before=StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom;
+ act(()=>footer.parent!.props.onLayout({nativeEvent:{layout:{height:144}}}));
+ expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBeGreaterThan(before);
+ expect(tree.root.findByType(ScrollView)).toBe(scroll);
+ for(const row of scroll.findAllByType(Pressable)){
+  expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(48);
+  expect(StyleSheet.flatten(row.props.style).borderTopWidth).toBeUndefined();
+ }
+ expect(tree.root.findAllByType(AppText).every(node=>node.props.typography==='ui')).toBe(true);
  await act(async()=>tree.unmount());
 });

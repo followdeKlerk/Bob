@@ -49,7 +49,7 @@ test('paired source, fresh availability, atomic claim, result identity and isola
  }finally{await f.close();}
 });
 
-test('Stop, expiry, late results and disabled/stale devices never authorize repeat mutations',{timeout:20000},async()=>{
+test('Stop, expiry, late results and disabled/stale devices never authorize repeat mutations',{timeout:20000},async(t)=>{
  const f=await fixture(),{runtime:r,state,chat,device}=f;
  try{
   await phoneToolsAvailability(r.library,device.deviceId,{enabled:true},ctx);
@@ -62,8 +62,17 @@ test('Stop, expiry, late results and disabled/stale devices never authorize repe
   assert.equal((await phoneOperation(state,r.harness,r.library,chat,'202',event,ctx)).status,'unknown');
   await claimPhoneTool(r.harness,r.library,chat,device.deviceId,{id:handed.id,action:'result',result:{status:'ok',data:{eventId:'789'}}},ctx);
   assert.equal((await phoneOperation(state,r.harness,r.library,chat,'202',event,ctx)).status,'ok','late proof reconciles original receipt only');
-  const timeout=phoneOperation(state,r.harness,r.library,chat,'203',event,ctx,{timeoutMs:40,pollMs:5}),expiring=await next(r,chat,device.deviceId);assert.equal((await timeout).status,'unavailable');
-  assert.equal((await claimPhoneTool(r.harness,r.library,chat,device.deviceId,{id:expiring.id,action:'claim'},ctx)).execute,false);
+  // Observe admission before advancing the expiry clock. A 40ms wall-clock
+  // window can disappear under parallel suite load before next() sees it.
+  // Keep real polling/commits and the original deadline; mock only Date.
+  const admittedAt=Date.now();t.mock.timers.enable({apis:['Date'],now:admittedAt});
+  try{
+   const timeout=phoneOperation(state,r.harness,r.library,chat,'203',event,ctx,{timeoutMs:40,pollMs:5});
+   await new Promise(resolve=>setTimeout(resolve,65)); // A delayed observer must still see the pending fixture.
+   const expiring=await next(r,chat,device.deviceId);assert.equal(expiring.expiresAt,admittedAt+40);
+   t.mock.timers.tick(41);assert.equal((await timeout).status,'unavailable');
+   assert.equal((await claimPhoneTool(r.harness,r.library,chat,device.deviceId,{id:expiring.id,action:'claim'},ctx)).execute,false);
+  }finally{t.mock.timers.reset();}
   await r.library.commit(async tx=>{(await tx.doc(PhoneAvailability,r.library.id)).devices[device.deviceId].at=1;},ctx);
   assert.equal((await phoneOperation(state,r.harness,r.library,chat,'204',event,ctx)).status,'unavailable');
  }finally{await f.close();}

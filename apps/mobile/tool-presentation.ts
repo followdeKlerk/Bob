@@ -11,6 +11,11 @@ export function toolPresentation(name:string,content:string):{title:string;detai
  const args=parse(content),tool=name.replace(/^functions\./,'').split(' · ')[0];
  if(!args)return {title:tool==='Result'?'Tool result':'Tool output',detail:toolResultPreview(content)};
  const path=typeof args.path==='string'?args.path:undefined;
+ if(tool==='render_visual')return {title:'Create visual',detail:typeof args.title==='string'?args.title:undefined};
+ if(tool==='send_file')return {title:'Attach file',detail:typeof args.name==='string'?args.name:path?.split('/').pop()};
+ if(tool==='codemode')return {title:'Run tool script'};
+ if(tool==='skills_list')return {title:'Find skills',detail:typeof args.query==='string'?args.query:undefined};
+ if(tool==='skill_view')return {title:'Read skill',detail:typeof args.name==='string'?args.name:undefined};
  if(['read','write','edit'].includes(tool))return {title:`${tool==='read'?'Read':tool==='write'?'Write':'Edit'} ${path?.split('/').pop()??'file'}`,detail:path};
  if(tool==='bash'){
   const command=typeof args.command==='string'?args.command.trim():'';

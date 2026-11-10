@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {JsonValue} from '@earendil-works/chord';
+import type {JsonValue} from '@earendil-works/chord/json';
 import {defineDocFamily,type ConversationId,type Tx} from '@earendil-works/pi-durable';
 /** Atomic operation receipts close the commit -> ToolTask-settlement crash window. */
 export const LearningToolReceipts=defineDocFamily<{fingerprint?:string;result?:JsonValue},null>({kind:'bob.learning.tool-receipts',version:1,scope:'conversation',history:'latest',fork:'initial',family:true,initial:()=>({}),checkpointWhen:()=>true});

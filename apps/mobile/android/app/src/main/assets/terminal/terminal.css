@@ -1,0 +1,5 @@
+@font-face{font-family:'Nordwand Mono';font-style:normal;font-weight:400;font-display:block;src:url('/fonts/NordwandMono-Regular.woff2') format('woff2')}
+@font-face{font-family:'Nordwand Mono';font-style:normal;font-weight:700;font-display:block;src:url('/fonts/NordwandMono-Bold.woff2') format('woff2')}
+@font-face{font-family:'Nordwand Mono';font-style:italic;font-weight:400;font-display:block;src:url('/fonts/NordwandMono-Italic.woff2') format('woff2')}
+@font-face{font-family:'Nordwand Mono';font-style:italic;font-weight:700;font-display:block;src:url('/fonts/NordwandMono-BoldItalic.woff2') format('woff2')}
+html,body,#terminal{height:100%;width:100%;margin:0;overflow:hidden;background:transparent}#terminal{box-sizing:border-box;padding:8px 16px;visibility:hidden;font-family:'Nordwand Mono'}.xterm{height:100%}.xterm-viewport{overscroll-behavior:contain;scrollbar-width:none}.xterm-viewport::-webkit-scrollbar{display:none}

@@ -1,3 +1,4 @@
+import {isRetired,requireActiveConversation} from './retired-chat-profile.js';
 import {handleDelegationBehaviorCommand,recoverDelegationBehaviorCommands} from './delegation-behavior-command.js';
 import {describeDelegationBehavior,readDelegationBehavior} from './delegation-behavior.js';
 import {randomUUID} from 'node:crypto';
@@ -77,6 +78,7 @@ async function putPicker(tx:Tx,id:ConversationId,phase:'mode'|'when',modes:Deleg
  const choices=await tx.doc(QuestionChoices,id);choices.questionId=questionId;choices.options=phase==='mode'?[...modes.map(m=>modeLabels[m]),'Cancel']:['Next session (recommended)','Now (refresh tools)','Cancel'];choices.multiple=false;
 }
 export async function handleDelegationCommand(state:State,harness:Harness,delegation:Delegation,chat:Conversation,text:string,requestId:string,clientRequestId:string,questionId?:string):Promise<SubmissionRecord|undefined>{
+ await requireActiveConversation(harness,chat.id);
  const behavior=await handleDelegationBehaviorCommand(state,harness,chat,text,requestId,clientRequestId,appendReceipt);if(behavior)return behavior;
  const command=/^\/delegation(?:\s|$)/i.test(text.trim());
  const picker=questionId?(await harness.snapshot(DelegationCommands,chat.id,ctx))?.picker:undefined;
@@ -138,7 +140,7 @@ export async function handleDelegationCommand(state:State,harness:Harness,delega
 export async function recoverDelegationCommands(state:State,harness:Harness,delegation:Delegation){
  let cursor:Cursor|undefined;
  do{const page=await harness.commit(tx=>tx.scanConversations({},100,cursor),ctx);
-  for(const record of page.items){await recoverDelegationBehaviorCommands(state,harness,record.id,appendReceipt);const pending=(await harness.snapshot(DelegationCommands,record.id,ctx))?.pending??{};for(const [id,intent] of Object.entries(pending)){const chat=(await harness.conversation(record.id,ctx))!;await finishIntent(state,harness,delegation,chat,id,intent);}}
+  for(const record of page.items){if(await isRetired(harness,record.id))continue;await recoverDelegationBehaviorCommands(state,harness,record.id,appendReceipt);const pending=(await harness.snapshot(DelegationCommands,record.id,ctx))?.pending??{};for(const [id,intent] of Object.entries(pending)){const chat=(await harness.conversation(record.id,ctx))!;await finishIntent(state,harness,delegation,chat,id,intent);}}
   cursor=page.next;
  }while(cursor);
 }

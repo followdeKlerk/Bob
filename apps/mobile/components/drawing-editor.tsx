@@ -1,6 +1,7 @@
+import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {ActivityIndicator,Alert,Modal,PanResponder,Pressable,ScrollView,StyleSheet,View} from 'react-native';
+import {Alert,Modal,PanResponder,Pressable,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Svg,{Path} from 'react-native-svg';
 import {RotateCcw,RotateCw} from 'lucide-react-native';
@@ -87,15 +88,20 @@ export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel
  const size=paper??canvas,fit=fitPaper(canvas,size);
  return <Modal visible={visible} animationType="slide" onRequestClose={requestCancel} statusBarTranslucent>
   <SafeAreaView style={s.root}>
-   <View style={{marginHorizontal:-12}}><SectionHeading title="Drawing"/></View>
-   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.toolbar}><View style={s.tools}><Pressable accessibilityRole="button" accessibilityLabel="Undo" accessibilityState={{disabled:undoDisabled}} disabled={undoDisabled} onPress={undo} style={[s.tool,undoDisabled&&s.disabled]}><RotateCcw size={21} color={colors.foreground}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Redo" accessibilityState={{disabled:redoDisabled}} disabled={redoDisabled} onPress={redoLast} style={[s.tool,redoDisabled&&s.disabled]}><RotateCw size={21} color={colors.foreground}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Eraser" accessibilityState={{selected:erasing,disabled:saving}} disabled={saving} onPress={()=>setErasing(!erasing)} style={[s.pill,erasing&&s.selected]}><Text style={s.toolText}>Eraser</Text></Pressable>{palette.map(item=><Pressable key={item.value} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{selected:color===item.value&&!erasing,disabled:saving}} disabled={saving} onPress={()=>{setColor(item.value);setErasing(false);}} style={[s.pill,color===item.value&&!erasing&&s.selected]}><Text style={s.toolText}>{item.label}</Text></Pressable>)}</View></ScrollView>
-   <View style={s.widthRow}><Text style={s.widthLabel}>Width</Text>{[3,5,8].map(value=><Pressable key={value} accessibilityRole="button" accessibilityLabel={`Pen width ${value}`} accessibilityState={{selected:penWidth===value,disabled:saving}} disabled={saving} onPress={()=>setPenWidth(value)} style={[s.widthChoice,penWidth===value&&s.selected]}><View style={{width:value+5,height:value+5,borderRadius:12,backgroundColor:colors.foreground}}/></Pressable>)}</View>
-   {saving&&<Text accessibilityLiveRegion="polite" style={s.feedback}>Adding drawing…</Text>}
-   {!!error&&<Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={s.feedback}>{error} Your drawing is still here.</Text>}
+   <View style={{marginHorizontal:-16}}><SectionHeading title="Drawing"/></View>
+   <ScrollView testID="drawing-toolbar" horizontal showsHorizontalScrollIndicator={false} style={s.toolbar} contentContainerStyle={s.tools}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Undo" accessibilityState={{disabled:undoDisabled}} disabled={undoDisabled} onPress={undo} style={[s.tool,undoDisabled&&s.disabled]}><RotateCcw size={20} color={colors.foreground}/></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Redo" accessibilityState={{disabled:redoDisabled}} disabled={redoDisabled} onPress={redoLast} style={[s.tool,redoDisabled&&s.disabled]}><RotateCw size={20} color={colors.foreground}/></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Eraser" accessibilityState={{selected:erasing,disabled:saving}} disabled={saving} onPress={()=>setErasing(!erasing)} style={[s.pill,erasing&&s.selected]}><Text typography="ui" style={s.toolText}>Eraser</Text></Pressable>
+    {palette.map(({value:inkColor,label})=><Pressable key={inkColor} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected:color===inkColor&&!erasing,disabled:saving}} disabled={saving} onPress={()=>{setColor(inkColor);setErasing(false);}} style={[s.tool,color===inkColor&&!erasing&&s.selected]}><View pointerEvents="none" style={[s.swatch,{backgroundColor:inkColor}]}/></Pressable>)}
+    <View style={s.widthRow}><Text typography="ui" style={s.widthLabel}>Width</Text>{[3,5,8].map(value=><Pressable key={value} accessibilityRole="button" accessibilityLabel={`Pen width ${value}`} accessibilityState={{selected:penWidth===value,disabled:saving}} disabled={saving} onPress={()=>setPenWidth(value)} style={[s.tool,penWidth===value&&s.selected]}><View style={{width:value+5,height:value+5,borderRadius:12,backgroundColor:colors.foreground}}/></Pressable>)}</View>
+   </ScrollView>
+   {saving&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.feedback}>Adding drawing…</Text>}
+   {!!error&&<Text typography="ui" accessibilityRole="alert" accessibilityLiveRegion="polite" style={s.feedback}>{error} Your drawing is still here.</Text>}
    {/* A gesture canvas is not a scroll viewport: keep the paper above the
        measured controls so strokes can never be hidden under Add/Cancel. */}
-   <SectionBody footer={<SectionActions overlay leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionActions>}>{clearance=>
-   <View onLayout={event=>{const layout=event.nativeEvent.layout;viewport.current={width:layout.width,height:layout.height};setCanvas(viewport.current);}} style={[s.canvas,{marginBottom:clearance+12}]} {...responder.panHandlers} accessibilityLabel="Drawing canvas" accessibilityRole="image">
+   <SectionBody fadeTop={false} footer={<SectionActions overlay leading={<SectionAction label="Cancel drawing" text="Cancel" disabled={saving} onPress={requestCancel}/>}><SectionAction label="Add drawing" text="Add" primary busy={saving} disabled={!hasContent||saving} onPress={()=>void add()}/></SectionActions>}>{clearance=>
+   <View onLayout={event=>{const layout=event.nativeEvent.layout;viewport.current={width:layout.width,height:layout.height};setCanvas(viewport.current);}} style={[s.canvas,{marginBottom:clearance+8}]} {...responder.panHandlers} accessibilityLabel="Drawing canvas" accessibilityRole="image">
     <Svg ref={svgRef} pointerEvents="none" width={fit.width} height={fit.height} style={{position:'absolute',left:fit.left,top:fit.top}} viewBox={`0 0 ${Math.max(1,size.width)} ${Math.max(1,size.height)}`} preserveAspectRatio="xMidYMid meet">
      <Path d={`M0 0 H${size.width} V${size.height} H0 Z`} fill="#ffffff"/>
      {strokes.map((stroke,index)=><Path key={index} d={pathFor(stroke)} stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
@@ -105,4 +111,8 @@ export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel
   </SafeAreaView>
  </Modal>;
 }
-const sTheme=themed(({colors,menuChrome})=>StyleSheet.create({root:{flex:1,backgroundColor:colors.background,paddingHorizontal:12},toolbar:{flexGrow:0,flexShrink:0},tools:{minHeight:64,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:8},tool:{...menuChrome.control,height:48,width:48,alignItems:'center',justifyContent:'center'},pill:{...menuChrome.control,minHeight:48,minWidth:48,paddingHorizontal:12,justifyContent:'center'},selected:{...menuChrome.selected},disabled:{opacity:0.4},toolText:{fontSize:14,color:colors.foreground},widthRow:{minHeight:56,flexShrink:0,flexDirection:'row',alignItems:'center',justifyContent:'space-around'},widthLabel:{fontSize:16,color:colors.foreground},widthChoice:{...menuChrome.control,width:48,height:48,alignItems:'center',justifyContent:'center'},feedback:{fontSize:14,lineHeight:20,color:colors.foreground,paddingBottom:8},canvas:{flex:1,minHeight:0,width:'100%',maxWidth:680,alignSelf:'center',marginBottom:12,backgroundColor:colors.surface,overflow:'hidden'}}));
+const sTheme=themed(({colors,shadows})=>StyleSheet.create({
+ root:{flex:1,backgroundColor:colors.background,paddingHorizontal:16},toolbar:{flexGrow:0,flexShrink:0},tools:{minHeight:64,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:8},
+ tool:{...menuButtonChrome({colors,shadows}).circle,minHeight:48,minWidth:48,borderRadius:24,alignItems:'center',justifyContent:'center'},pill:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,minWidth:48,paddingHorizontal:8,paddingVertical:8,borderRadius:999,justifyContent:'center'},selected:{...menuButtonChrome({colors,shadows}).selected},disabled:{opacity:0.4},toolText:{...menuButtonChrome({colors,shadows}).label,fontSize:13,lineHeight:24,color:colors.foreground},swatch:{height:20,width:20,borderRadius:10},widthRow:{flexDirection:'row',alignItems:'center',gap:8},widthLabel:{fontSize:13,lineHeight:24,color:colors.muted},
+ feedback:{fontSize:13,lineHeight:24,color:colors.foreground,paddingBottom:8},canvas:{flex:1,minHeight:0,width:'100%',maxWidth:680,alignSelf:'center',backgroundColor:colors.surface,overflow:'hidden'},
+}));

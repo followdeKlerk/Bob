@@ -12,14 +12,14 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-schema": "1.5.0"
+    "@earendil-works/pi-durable": "1.5.1",
+    "@earendil-works/pi-ai": "1.5.1",
+    "@earendil-works/chord": "1.5.1",
+    "@earendil-works/pi-schema": "1.5.1"
   },
   "bobExtension": {
     "api": 1,
-    "durable": "1.5.0",
+    "durable": "1.5.1",
     "name": "bob.peers",
     "requires": []
   }

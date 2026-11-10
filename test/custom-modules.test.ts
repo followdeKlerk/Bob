@@ -8,13 +8,13 @@ import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai/providers/faux';
 import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
-import {customRecords,importCustomModule} from '../src/custom-modules.js';
+import {customRecords,importCustomModule,loadCustomModules} from '../src/custom-modules.js';
 import {selectModules,changeModule,listModules} from '../src/modules.js';
-import {restoreState} from '../src/recovery.js';
+import {restoreState,backupState,installedDurableVersion} from '../src/recovery.js';
 import {migrateCustomModule,requireDisjoint} from '../src/custom-migration.js';
 function fixture(directory:string,version='0.1.0',step=1,stateVersion=1){
  mkdirSync(join(directory,'dist'),{recursive:true});
- writeFileSync(join(directory,'package.json'),JSON.stringify({name:'bob-custom-fixture',version,type:'module',exports:'./dist/index.js',dependencies:{'@earendil-works/pi-durable':'1.5.0','@earendil-works/pi-ai':'1.5.0'},bobExtension:{api:1,durable:'1.5.0',stateVersion,name:'fixture.counter',requires:[]}}));
+ writeFileSync(join(directory,'package.json'),JSON.stringify({name:'bob-custom-fixture',version,type:'module',exports:'./dist/index.js',dependencies:{'@earendil-works/pi-durable':installedDurableVersion(),'@earendil-works/pi-ai':installedDurableVersion()},bobExtension:{api:1,durable:installedDurableVersion(),stateVersion,name:'fixture.counter',requires:[]}}));
  writeFileSync(join(directory,'dist/helper.js'),`export const increment=value=>value+${step};`);
  writeFileSync(join(directory,'dist/index.js'),`import{defineExtension,defineTool,defineDoc}from'@earendil-works/pi-durable';import{increment}from'./helper.js';export const Counter=defineDoc({kind:'fixture.counter',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({count:0}),checkpointWhen:()=>true});export default defineExtension({name:'fixture.counter',tools:[defineTool({name:'fixture_counter',description:'Explicit test counter',parameters:{type:"object",properties:{},required:[]},execute:async(args,api,context)=>{const count=await api.commit(async tx=>{const doc=await tx.doc(Counter,api.conversationId);doc.count=increment(doc.count);return doc.count;},context);return{output:[{type:'text',text:String(count)}]};}})]});`);
 }
@@ -83,4 +83,41 @@ test('custom imports reject symlinks, incompatible dependencies, schema changes,
   fixture(source);await assert.rejects(()=>importCustomModule(state,runtime,'other',source),/collision/);assert.equal(customRecords(state).length,1);
   const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);await chat.submit({type:'input',content:'Pending, no model/provider used'},ctx);await assert.rejects(()=>importCustomModule(state,runtime,'another',source),/fully settled/);
  }finally{await runtime.close();state.close();}
+});
+
+test('retained cross-runtime custom archives are readable recovery data but rejected before executing incompatible code',async()=>{
+ const dir=mkdtempSync(join(process.env.TMPDIR!,'bob-custom-runtime-')),state=new State(join(dir,'state')),source=join(dir,'source');
+ const installed=installedDurableVersion(),other=installed==='1.5.1'?'1.5.0':'1.5.1';
+ try{
+  fixture(source);
+  const manifest=JSON.parse(readFileSync(join(source,'package.json'),'utf8'));
+  manifest.bobExtension.durable=other;
+  for(const dependency of Object.keys(manifest.dependencies))manifest.dependencies[dependency]=other;
+  writeFileSync(join(source,'package.json'),JSON.stringify(manifest));
+  // A broken legacy Chord import must never even reach Node's module loader.
+  writeFileSync(join(source,'dist/index.js'),"import {Context} from '@earendil-works/chord'; throw Error('INCOMPATIBLE CODE EXECUTED');");
+  const paused={harness:{inspect:async()=>({scheduling:'paused',tasks:[],submissions:[]})}} as any;
+  await assert.rejects(importCustomModule(state,paused,'fixture',source),/runtime mismatch.*Archive preserved.*Chord imports/);
+  assert.equal(existsSync(join(state.dir,'custom-modules')),false,'rejected imports create no archive');
+  // Model an existing, retained older archive. Reading configuration must not
+  // rewrite it or attempt to load it, even when it remains selected.
+  const hash='a'.repeat(64),record={id:'fixture',manifest,hash,files:{}};
+  const archive=join(state.dir,'custom-modules/fixture',`${manifest.version}-${hash}`);
+  mkdirSync(join(archive,'dist'),{recursive:true});
+  writeFileSync(join(archive,'package.json'),JSON.stringify(manifest));
+  writeFileSync(join(archive,'dist/index.js'),readFileSync(join(source,'dist/index.js')));
+  writeFileSync(join(archive,'dist/helper.js'),readFileSync(join(source,'dist/helper.js')));
+  state.set('customModules',[record]);state.set('modules',{installed:['fixture'],defaults:[]});
+  const stored=JSON.stringify(state.get('customModules')),bytes=readFileSync(join(archive,'dist/index.js'));
+  assert.equal(customRecords(state)[0].manifest.bobExtension.durable,other);
+  await assert.rejects(loadCustomModules(state),/runtime mismatch.*Archive preserved/);
+  assert.equal(JSON.stringify(state.get('customModules')),stored);assert.deepEqual(readFileSync(join(archive,'dist/index.js')),bytes);
+  const backup=join(dir,'backup'),destination=join(dir,'restored');
+  await backupState(state,backup);restoreState(backup,destination);
+  const restored=new State(destination);
+  try{assert.equal(JSON.stringify(restored.get('customModules')),stored);assert.deepEqual(readFileSync(join(destination,'custom-modules/fixture',`${manifest.version}-${hash}`,'dist/index.js')),bytes);}
+  finally{restored.close();}
+  manifest.bobExtension.durable='1.5.2';state.set('customModules',[{...record,manifest}]);
+  assert.throws(()=>customRecords(state),/Invalid/,'unknown runtimes remain rejected, not a semver range');
+ }finally{state.close();rmSync(dir,{recursive:true,force:true});}
 });

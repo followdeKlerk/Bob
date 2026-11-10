@@ -283,7 +283,8 @@ private class NotificationChecks(private val context: Context, private val curre
         val jobs = status.optJSONArray("jobs")
         val activeBuild = jobs != null && (0 until jobs.length()).any { NotificationSchedulePolicy.activeStatus(jobs.optJSONObject(it)?.optString("status") ?: "") }
         val apk = status.optJSONObject("apk") ?: return activeBuild
-        if (apk.optLong("versionCode", 0) <= BuildConfig.VERSION_CODE || NotificationRuntime.appVisible || !current()) return activeBuild
+        val installedVersion = InstalledAppVersion.get(context).code
+        if (installedVersion <= 0 || apk.optLong("versionCode", 0) <= installedVersion || NotificationRuntime.appVisible || !current()) return activeBuild
         val release = apk.optString("releaseId"); val sha = apk.optString("sha256")
         if (!Regex("^[A-Za-z0-9_-]{1,128}$").matches(release) || !Regex("^[a-f0-9]{64}$").matches(sha)) return activeBuild
         noticeOnce(context.getSharedPreferences("bob-update-notification-receipts", Context.MODE_PRIVATE), "ready", "$identity:$sha")

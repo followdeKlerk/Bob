@@ -1,16 +1,17 @@
+import {installedDurableVersion} from './recovery.js';
 import {DatabaseSync} from 'node:sqlite';
 import {accessSync,constants,existsSync,statSync} from 'node:fs';
 import {join} from 'node:path';
 import {inspectOwner} from './ownership.js';
 import {releaseVersion} from './update.js';
-import {readControlFloor} from './maintenance-migration.js';
+import {readControlFloor,assertRuntimeFloor} from './maintenance-migration.js';
 
 type Check={id:string;status:'ok'|'warning'|'error';message:string};
 /** Local inspection only: never initialize state, migrate, launch a runtime or call a provider. */
 export function diagnose(directory:string){
  const checks:Check[]=[];
  const add=(id:string,status:Check['status'],message:string)=>checks.push({id,status,message});
- const base={state:directory,node:process.version,releaseVersion,platform:process.platform,arch:process.arch,durable:'1.5.0'};
+ const base={state:directory,node:process.version,releaseVersion,platform:process.platform,arch:process.arch,durable:installedDurableVersion()};
  const finish=(details:Record<string,unknown>={})=>({...base,...details,status:checks.some(c=>c.status==='error')?'error':checks.some(c=>c.status==='warning')?'warning':'ok',checks,limits:'Local configuration checks only. Does not verify inference, browser launch, service readiness, TLS, phone connectivity or optional integrations.'});
  const [major,minor,patch]=process.versions.node.split('.').map(Number);
  add('node',major===24&&(minor>22||minor===22&&patch>=1)?'ok':'error','Requires Node >=24.22.1 <25.');
@@ -26,6 +27,10 @@ export function diagnose(directory:string){
   const lifecycleSchema=floor.lifecycleSchemaVersion||1;
   add('schema','ok','Control floor and lifecycle metadata validated read-only; doctor never migrates them.');
   if(floor.kind==='legacy'&&existsSync(join(directory,'durable.sqlite')))add('runtime-floor','error','Existing native state requires the reviewed Pi 1.4 bridge transition before Pi 1.5 may open it.');
+  else if(floor.kind!=='legacy'){
+   try{assertRuntimeFloor(floor,base.durable);add('runtime-floor','ok','Installed native runtime matches the committed physical floor.');}
+   catch{add('runtime-floor','error','Installed native runtime cannot open this physical floor; use the reviewed supervisor transition and matching release. Doctor never changes the floor.');}
+  }
   const backendId=get<string>('identity');
   add('identity',typeof backendId==='string'&&!!backendId?'ok':'error','Existing backend identity required.');
   const model=get<{provider:string;modelId:string}>('model');

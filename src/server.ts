@@ -1,4 +1,8 @@
+import {installedDurableVersion} from './recovery.js';
+import {createTerminalManager,type TerminalManager} from './terminal.js';
+import {agentOverview,conversationAgentStatus} from './agent-overview.js';
 import {Schedules,schedulesView,scheduleAlerts,scheduleHealth} from './schedules.js';
+import {RetiredChat,retiredMetadata,isRetired,isRetiredProvider,requireActiveConversation,retiredMessage} from './retired-chat-profile.js';
 import {displayContext,INLINE_VISUAL_EMERGENCY_HEIGHT} from './display-context.js';
 import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
@@ -91,6 +95,8 @@ export async function serve(
     tls?: { cert: string; key: string };
     runtime?: Runtime;
     devPeerLoopback?: boolean;
+    /** Injectable process boundary for isolated terminal tests. */
+    terminal?: TerminalManager;
   }
 ) {
   const host = options.host ?? "127.0.0.1";
@@ -104,7 +110,8 @@ export async function serve(
   const runtime = options.runtime ?? (await openRuntime(state)),
     h = runtime.harness;
   const streams = new Set<ServerResponse>();
-  let activeNotes=0;
+  const terminal=options.terminal??createTerminalManager(state,{host});
+  let activeNotes=0,activeTerminals=0;
   // Upstream ConversationView deliberately contains BUILT-IN docs only.
   // Add Bob's native document snapshots explicitly; never assume watch exposes them.
   async function present(view: Omit<ConversationView, 'before'>, id: ConversationId, deviceId: string) {
@@ -115,10 +122,10 @@ export async function serve(
     ]);
     const work=inspection.tasks.filter(t=>t.record.conversationId===id).map(t=>NativeWork.parse({id:t.record.id,kind:t.record.kind,background:t.record.background,abortRequested:t.record.abortRequested,state:t.state.kind==='pending'?'ready':t.state.kind}));
     const agents=Object.fromEntries(await Promise.all(Object.entries(subagents?.agents??{}).map(async([name,agent])=>{
-      const childWork=inspection.tasks.filter(t=>t.record.conversationId===agent.conversationId),live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
-      return [name,{...agent,status:childWork.some(t=>t.record.abortRequested)?'stopping':live?.run||childWork.length?'working':'idle'}];
+      const live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
+      return [name,{...agent,status:conversationAgentStatus(inspection,agent.conversationId,live)}];
     })));
-    return { ...view, entries:mobileTranscriptEntries(await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx)}, 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.phone-tools': await phoneToolsView(h,(await h.conversation(id,ctx))!,deviceId,ctx), 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, entries:mobileTranscriptEntries(await runtime.replyPresentation(id,await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents)))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx),profile:retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{})}, 'bob.profile': retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{}), 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.phone-tools': await phoneToolsView(h,(await h.conversation(id,ctx))!,deviceId,ctx), 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -127,9 +134,9 @@ export async function serve(
       if(path==='/internal/update-health'){
         if(!process.env.BOB_HEALTH_TOKEN||req.headers.authorization!=='Bearer '+process.env.BOB_HEALTH_TOKEN)throw new HttpError(401,'Supervisor authorization required');
         const inspection=await h.inspect(ctx);
-        return send(res,200,{backendId:state.id,releaseId:process.env.BOB_RELEASE_ID,foreground:inspection.tasks.filter(t=>!t.record.background).length+inspection.submissions.length+activeNotes});
+        return send(res,200,{backendId:state.id,releaseId:process.env.BOB_RELEASE_ID,foreground:inspection.tasks.filter(t=>!t.record.background).length+inspection.submissions.length+activeNotes+activeTerminals});
       }
-      if(state.get('maintenanceHome')&&req.method!=='GET'&&(path.endsWith('/messages')||path==='/v1/peer/message'||path==='/v1/chats'||path==='/v1/notes/sync')&&withMaintenance(state,store=>store.get('draining')))
+      if(state.get('maintenanceHome')&&req.method!=='GET'&&(path.endsWith('/messages')||path==='/v1/peer/message'||path==='/v1/chats'||path==='/v1/notes/sync'||/^\/v1\/chats\/[^/]+\/terminal$/.test(path))&&withMaintenance(state,store=>store.get('draining')))
         throw new HttpError(503,'Backend update is waiting for active work; retry after reconnect');
       if (req.method === "POST" && path === "/v1/pair") {
         const p = Pair.parse(await body(req));
@@ -192,6 +199,7 @@ export async function serve(
           return send(res,200,await syncNote(runtime.library,state.id,String(state.authenticate(token)!.id),await body(req,1000000)));
         }finally{activeNotes--;}
       }
+      if(path==='/v1/agent-overview'&&req.method==='GET')return send(res,200,await agentOverview(state,h,runtime.library.id,url.searchParams.get('cursor'),z.enum(['all','archived','trash']).optional().parse(url.searchParams.get('filter')??undefined)));
       if(path==='/v1/schedules'&&req.method==='GET')return send(res,200,await schedulesView(h));
       if(path==='/v1/schedules/alerts'&&req.method==='GET')return send(res,200,await scheduleAlerts(h,z.coerce.number().int().nonnegative().safe().parse(url.searchParams.get('since')??0)));
       if(path==='/v1/schedules'&&req.method==='POST'){
@@ -213,6 +221,8 @@ export async function serve(
         try{return send(res,200,await connectNetwork(state,await body(req),options.devPeerLoopback===true,()=>!!state.authenticate(token),String(state.authenticate(token)!.id)));}
         catch{throw new HttpError(400,'Connected-agent link could not be verified; no new connection saved');}
       }
+      if(path==='/v1/chat-profiles'&&req.method==='GET')return send(res,200,[{id:'normal',label:'Bob',restricted:false,immutable:false,configured:true}]);
+      if(path==='/v1/restricted-local-route')throw new HttpError(410,retiredMessage);
       if(path==='/v1/modules'&&req.method==='GET')return send(res,200,await listModules(state,runtime));
       if(path==='/v1/peers') {
         if(req.method==='GET')return send(res,200,listPeers(state));
@@ -222,7 +232,7 @@ export async function serve(
         return send(res, 200, {
           protocol,
           backendId: state.id,
-          durable: "1.5.0",
+          durable: installedDurableVersion(),
           connectedAgents: {version:1,automaticHistory:true,automaticLinking:true,replyDelivery:"durable"},
           providerReady: (await runtime.models.getAvailable()).length > 0,
           inspection: await h.inspect(ctx),
@@ -234,6 +244,7 @@ export async function serve(
           200,
           runtime.models
             .getModels()
+            .filter(m=>!isRetiredProvider(m.provider))
             .map((m) => ({ provider: m.provider, modelId: m.id, name: m.name, thinkingLevels:getSupportedThinkingLevels(m),available:available.has(m.provider+"/"+m.id) }))
         );
       }
@@ -340,19 +351,25 @@ export async function serve(
           // they simply do not belong in the regular top-level Sessions list.
           const items=await Promise.all(page.items.map(async c=>({
             ...c,
-            meta:{...await h.snapshot(ChatMeta,c.id,ctx),...await h.snapshot(SessionUI,c.id,ctx)},
+            meta:{...await h.snapshot(ChatMeta,c.id,ctx),...await h.snapshot(SessionUI,c.id,ctx),profile:retiredMetadata(await h.snapshot(RetiredChat,c.id,ctx)??{})},
           })));
           return send(res,200,{items,next:encodeCursor(state,'chats',page.next)});
         }
         if (req.method === "POST") {
           const p = CreateChat.parse(await body(req));
           validateDirectory(p.cwd);
+          if(p.model&&isRetiredProvider(p.model.provider))throw new HttpError(403,'This local-model integration was removed');
+          const selectedModel=p.model??state.get<{provider:string;modelId:string}>('model');
+          if(selectedModel&&isRetiredProvider(selectedModel.provider))throw new HttpError(403,'This local-model integration was removed');
           if (p.model && !runtime.models.getModel(p.model.provider, p.model.modelId)) throw new HttpError(400, "Unknown model");
+          const defaultThinking=Configure.shape.thinkingLevel.parse(state.get('thinkingLevel'));
+          const supported=selectedModel?runtime.models.getModel(selectedModel.provider,selectedModel.modelId):undefined;
           const chat = await h.createConversation(
             {
               ownership: { kind: "ownerless" },
               agent: {
                 model: p.model ?? state.get("model"),
+                thinkingLevel: defaultThinking&&supported&&getSupportedThinkingLevels(supported).includes(defaultThinking)?defaultThinking:undefined,
                 cwd: p.cwd ?? state.get("cwd"),
                 instructions: p.instructions,
               },
@@ -378,6 +395,28 @@ export async function serve(
           throw new HttpError(403, "Reserved resource");
         const chat = await h.conversation(id, ctx);
         if (!chat) throw new HttpError(404, "Conversation not found");
+        const retired=await isRetired(h,id);
+        if(retired&&!['GET','HEAD'].includes(req.method??'')&&action!=='metadata'&&action!=='stop'&&!(action===''&&req.method==='DELETE'))throw new HttpError(410,retiredMessage);
+        if(action==='terminal'){
+          if(!['GET','POST','DELETE'].includes(req.method??''))throw new HttpError(405,'Terminal supports GET, POST and DELETE');
+          if(retired)throw new HttpError(410,retiredMessage);
+          const record=await h.commit(tx=>tx.conversation(id),ctx);
+          if(!record||record.owner)throw new HttpError(403,'Open a main conversation to use its terminal');
+          if((await h.snapshot(SessionUI,id,ctx))?.trashed)throw new HttpError(403,'Restore this conversation before using its terminal');
+          const device=state.authenticate(token);
+          if(!device)throw new HttpError(401,'Device authorization required');
+          const deviceId=String(device.id),conversationId=String(id);
+          if(req.method==='DELETE'){
+            const input=z.object({sessionId:z.string().uuid()}).strict().parse(await body(req,1024));
+            activeTerminals++;
+            try{return send(res,200,await terminal.disconnect(deviceId,conversationId,input.sessionId));}finally{activeTerminals--;}
+          }
+          const agent=await chat.agent(ctx),cwd=agent.cwd??state.get<string>('cwd')??process.cwd();
+          if(req.method==='GET')return send(res,200,await terminal.status(deviceId,conversationId,cwd));
+          const input=z.object({requestId:z.string().uuid()}).strict().parse(await body(req,1024));
+          activeTerminals++;
+          try{return send(res,200,await terminal.connect(deviceId,conversationId,cwd,input.requestId));}finally{activeTerminals--;}
+        }
         if(action==='phone-tools'&&req.method==='POST')return send(res,200,await claimPhoneTool(h,runtime.library,chat,String(state.authenticate(token)!.id),await body(req,70000),ctx));
         if(action==='diagnostics'&&req.method==='POST')return send(res,200,await respondDiagnostics(state,chat,String(state.authenticate(token)!.id),await body(req,65536)));
         // Additive, versioned UI-only document; the existing ChatMeta and task
@@ -436,8 +475,8 @@ export async function serve(
         }
         if (action === "artifacts" && req.method === "POST")
           return send(res, 201, await receiveArtifact(req, state, chat));
-        if (action.startsWith("artifacts/") && req.method === "GET") {
-          await downloadArtifact(res, state, chat, action.slice(10));
+        if (action.startsWith("artifacts/") && (req.method === "GET" || req.method === "HEAD")) {
+          await downloadArtifact(res, state, chat, action.slice(10), {range:typeof req.headers.range==='string'?req.headers.range:undefined,method:req.method});
           return;
         }
         if (action === "history" && req.method === "GET") {
@@ -452,13 +491,13 @@ export async function serve(
           const resource=`history:${id}`,cursor=decodeCursor(state,resource,url.searchParams.get('cursor'));
           const query=(url.searchParams.get('query')??'').trim().slice(0,160),limit=Math.min(Math.max(Number(url.searchParams.get('limit')??100)||100,1),100);
           const page=await chat.entries({order:'descending'},limit,cursor,ctx);
-          let items=await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,page.items));
+          let items=await runtime.replyPresentation(id,await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,page.items)));
           if(query){const terms=query.toLocaleLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
           return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:mobileTranscriptEntries(items),next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
         }
         if (action === "configure" && req.method === "GET") {
           const agent = await chat.agent(ctx);
-          return send(res, 200, { model: agent.model, thinkingLevel:agent.thinkingLevel, cwd: agent.cwd ?? state.get("cwd") ?? process.cwd(), instructions: agent.instructions ?? null });
+          return send(res, 200, { model: agent.model, thinkingLevel:agent.thinkingLevel, cwd: retired?null:agent.cwd ?? state.get("cwd") ?? process.cwd(), instructions: agent.instructions ?? null,profile:retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{}) });
         }
         if(action==='modules') {
           if(req.method==='GET')return send(res,200,await listModules(state,runtime,chat));
@@ -470,7 +509,9 @@ export async function serve(
           return send(res, 200, todo);
         }
         if (action === "configure" && req.method === "PUT") {
+          await requireActiveConversation(h,id);
           const configuration = Configure.parse(await body(req)); validateDirectory(configuration.cwd);
+          if(configuration.model&&isRetiredProvider(configuration.model.provider))throw new HttpError(403,'This local-model integration was removed');
           if (configuration.model && !runtime.models.getModel(configuration.model.provider, configuration.model.modelId)) throw new HttpError(400, "Unknown model");
           if(configuration.model||configuration.thinkingLevel){
             const current=await chat.agent(ctx),ref=configuration.model??current.model;
@@ -650,7 +691,7 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
       for (const s of streams) s.end();
       server.close();
       server.closeAllConnections();
-      await runtime.close();
+      try{await terminal.close();}finally{await runtime.close();}
     },
   };
 }

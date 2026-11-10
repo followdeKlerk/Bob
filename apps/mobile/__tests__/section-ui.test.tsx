@@ -6,6 +6,7 @@ import {RoundAction,SectionHeading,SectionActions,SectionBody,SectionSegments,Se
 import {Button} from '../components/ui/button';
 import {Tabs,TabsList,TabsTrigger} from '../components/ui/tabs';
 import {colors} from '../theme';
+import {APP_UI_FONT_FAMILY} from '../typography';
 import {EdgeFade} from '../components/edge-fade';
 import {ThemeContext,tokens} from '../theme-context';
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -23,6 +24,7 @@ test('settings toggles expose state with a full-size row and concise visible lab
 test('shared headings wrap text and icon actions keep accessible labels and 48-point targets',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Notes"/><SectionActions><RoundAction label="Create note" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-heading'}).props.style).paddingTop).toBe(28);
  const heading=tree.root.findAllByType(Text).find(node=>node.props.accessibilityRole==='header')!;
  expect(heading.props.numberOfLines).toBeUndefined();
  const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Create note'&&typeof node.props.onPress==='function')[0];expect(button.props.accessibilityLabel).toBe('Create note');
@@ -46,12 +48,12 @@ test('legacy compact flag cannot introduce inconsistent header control geometry'
  await act(async()=>{tree=Renderer.create(<RoundAction label="Create note" icon={Plus} primary compact onPress={()=>{}}/>);});
  const button=tree.root.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function')[0];
  expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48});
- expect(tree.root.findByType(Button).props).toMatchObject({size:'icon',variant:'default',className:'rounded-full'});
+ expect(tree.root.findByType(Button).props).toMatchObject({size:'icon',variant:'outline',className:'rounded-full'});
  expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
  await act(async()=>tree.unmount());
 });
 
-test('headers use the Reusables Button asset and keep return separate from right actions; cards retain menu chrome',async()=>{
+test('headers use the Reusables Button asset and keep return separate from right actions; settings groups stay unboxed',async()=>{
  const {menuChrome}=require('../theme');let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Schedules" subtitle="This workstation"/><SectionActions onBack={()=>{}}><RoundAction label="Refresh" icon={Plus} onPress={()=>{}}/><RoundAction label="Create" icon={Plus} primary onPress={()=>{}}/></SectionActions><SettingsGroup title="Group"><Text>Information</Text></SettingsGroup></View>);});
  const actions=tree.root.findByProps({testID:'section-footer-actions'});
@@ -59,9 +61,9 @@ test('headers use the Reusables Button asset and keep return separate from right
  expect(actions.findAllByType(Button).map(node=>node.props.accessibilityLabel)).toEqual(['Refresh','Create']);
  expect(actions.findAllByProps({accessibilityLabel:'Back to previous menu'})).toHaveLength(0);
  const group=tree.root.findByType(SettingsGroup);
- expect(group.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===menuChrome.card.borderRadius&&style?.borderColor===menuChrome.card.borderColor&&style?.borderWidth===1;})).toBe(true);
+ expect(group.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===16&&!style?.borderWidth;})).toBe(true);
  const refresh=actions.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function')[0];
- expect(actions.findAllByType(Button).map(node=>node.props.variant)).toEqual(['ghost','default']);
+ expect(actions.findAllByType(Button).map(node=>node.props.variant)).toEqual(['outline','outline']);
  expect(StyleSheet.flatten(refresh.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
  await act(async()=>tree.unmount());
 });
@@ -83,10 +85,10 @@ test.each(filterSets.map(options=>[options] as const))('Reusables filters keep s
    const tabs=tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function');
    expect(tabs).toHaveLength(3);
    const metrics=tabs.map((tab,index)=>{
-    const {backgroundColor,...shape}=StyleSheet.flatten(tab.props.style);
+    const {backgroundColor,borderColor,...shape}=StyleSheet.flatten(tab.props.style);
     expect(shape).toMatchObject({minWidth:48,minHeight:48,height:'auto',flex:1});
     expect(tab.props.accessibilityState).toMatchObject({selected:options[index].value===option.value,disabled:false});
-    expect(backgroundColor).toBe(options[index].value===option.value?colors.accent:'transparent');
+    expect(backgroundColor).toBe(options[index].value===option.value?colors.selectedSurface:colors.surface);
     const labels=tab.findAllByType(Text);expect(labels).toHaveLength(1);
     expect(labels[0].props.children).toBe(options[index].label);
     expect(labels[0].props.allowFontScaling).not.toBe(false);expect(labels[0].props.numberOfLines).toBeUndefined();expect(labels[0].props.adjustsFontSizeToFit).not.toBe(true);expect(labels[0].props.maxFontSizeMultiplier).toBeUndefined();
@@ -105,7 +107,7 @@ test('long workstation subtitles cannot vertically shift header actions and shar
  await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Sessions" subtitle="workstation.example.ts.net"/><SectionActions><RoundAction label="Schedules" icon={Bell} onPress={()=>{}}/><RoundAction label="Search" icon={Bell} onPress={()=>{}}/><RoundAction label="New" icon={Plus} primary onPress={()=>{}}/></SectionActions></View>);});
  try{
   const row=tree.root.findByProps({testID:'section-heading-row'}),subtitle=tree.root.findAllByType(Text).find(node=>node.props.testID==='section-heading-subtitle')!;
-  expect(StyleSheet.flatten(row.props.style)).toMatchObject({alignItems:'flex-start',minHeight:35,flexDirection:'row'});
+  expect(StyleSheet.flatten(row.props.style)).toMatchObject({alignItems:'flex-start',minHeight:30,flexDirection:'row'});
   expect(row.findAllByProps({testID:'section-heading-subtitle'})).toHaveLength(0);
   expect(subtitle.props.numberOfLines).toBeUndefined();
   expect(tree.root.findAllByType(Button)).toHaveLength(3);
@@ -127,7 +129,7 @@ test.each([0,1,3])('title stays top while %i utilities, Back and Menu remain in 
  expect(tree.root.findAllByType(View).filter(node=>node.props.testID==='section-footer-actions')).toHaveLength(count?1:0);
  const title=heading.findAllByType(Text).find(node=>node.props.accessibilityRole==='header')!;
  expect(title.props.numberOfLines).toBeUndefined();expect(title.props.allowFontScaling).not.toBe(false);
- expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:27,lineHeight:35});
+ expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:24,lineHeight:30});
  await act(async()=>tree.unmount());
 });
 
@@ -153,7 +155,7 @@ test('overlay footers reveal the host gradient without changing normal footer ch
   expect(StyleSheet.flatten(button.props.style)).toMatchObject({minWidth:48,minHeight:48});
   await act(async()=>tree.update(<SectionActions onBack={()=>{}}/>));
   expect(tree.root.findByProps({testID:'section-footer'})).toBe(footer);
-  expect(StyleSheet.flatten(footer.props.style)).toMatchObject({backgroundColor:colors.background,borderTopWidth:StyleSheet.hairlineWidth});
+  expect(StyleSheet.flatten(footer.props.style)).toMatchObject({backgroundColor:colors.background,borderTopWidth:0});
  }finally{await act(async()=>tree.unmount());}
 });
 
@@ -172,6 +174,7 @@ test.each(['dark','light'] as const)('measured %s footer overlays keep the full 
   const scroll=tree.root.findByProps({testID:'retained-scroll'}),input=tree.root.findByProps({testID:'retained-input'}),menu=tree.root.findByProps({testID:'retained-menu'});
   act(()=>input.props.onChangeText('Keep the caret and draft'));
   expect(StyleSheet.flatten(host.props.style)).toMatchObject({flex:1,minHeight:0});
+  expect(tree.root.findAllByType(EdgeFade).find(node=>node.props.edge==='top')!.props).toMatchObject({height:16,color:tokens[scheme].colors.surface});
   expect(StyleSheet.flatten(overlay.props.style)).toEqual({position:'absolute',left:0,right:0,bottom:0});
   expect(overlay.props.pointerEvents).toBe('box-none');
   expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
@@ -180,7 +183,7 @@ test.each(['dark','light'] as const)('measured %s footer overlays keep the full 
   for(const height of [64,184,96]){
    act(()=>overlay.props.onLayout({nativeEvent:{layout:{height}}}));
    expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(height+12+16);
-   expect(tree.root.findByType(EdgeFade).props).toMatchObject({edge:'bottom',height:height+12,color:tokens[scheme].colors.surface});
+   expect(tree.root.findAllByType(EdgeFade).find(node=>node.props.edge==='bottom')!.props).toMatchObject({edge:'bottom',height:height+12,color:tokens[scheme].colors.surface});
    expect(tree.root.findByProps({testID:'retained-scroll'})===scroll).toBe(true);
    expect(tree.root.findByProps({testID:'retained-input'})===input).toBe(true);
    expect(tree.root.findByProps({testID:'retained-menu'})===menu).toBe(true);
@@ -189,5 +192,20 @@ test.each(['dark','light'] as const)('measured %s footer overlays keep the full 
   for(const height of [0,-1,NaN,Infinity])act(()=>overlay.props.onLayout({nativeEvent:{layout:{height}}}));
   expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBe(124);
   expect(StyleSheet.flatten(tree.root.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
+ }finally{await act(async()=>tree.unmount());}
+});
+
+
+test.each(['dark','light'] as const)('%s settings place long values beneath the title with no narrow right-hand column or text clipping',async scheme=>{
+ const value='Calendar, contacts and camera permissions are managed by Android';let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ThemeContext.Provider value={tokens[scheme]}><SettingsRow title="Android permissions" value={value} icon={Bell} onPress={()=>{}}/></ThemeContext.Provider>);});
+ try{
+  const title=tree.root.findAllByType(Text).find(node=>node.props.children==='Android permissions')!,detail=tree.root.findAllByType(Text).find(node=>node.props.children===value)!;
+  const column=tree.root.findAllByType(View).find(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flex===1&&style?.gap===4;})!;
+  expect(column.findAllByType(Text).map(node=>node.props.children)).toEqual(['Android permissions',value]);expect(StyleSheet.flatten(column.props.style)).toMatchObject({flex:1,minWidth:0,gap:4});
+  for(const text of [title,detail]){
+   expect(StyleSheet.flatten(text.props.style).fontFamily).toBe(APP_UI_FONT_FAMILY);
+   expect(StyleSheet.flatten(text.props.style).maxWidth).toBeUndefined();expect(text.props.numberOfLines).toBeUndefined();expect(text.props.allowFontScaling).not.toBe(false);
+  }
  }finally{await act(async()=>tree.unmount());}
 });

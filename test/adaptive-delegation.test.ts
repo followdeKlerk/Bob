@@ -1,4 +1,4 @@
-import {prepareFreshPi15Floor} from '../src/maintenance-migration.js';
+import {prepareCurrentRuntimeFixtureFloor} from './fixtures/current-runtime-floor.js';
 import {acquireOwner} from '../src/ownership.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -254,7 +254,7 @@ test('one-time native provisioning upgrades genuine pre-behavior AD profile chil
   return result;
  },callContext)},context)}]});
  // The pre-AD host below still uses current native 1.5 storage, not a Pi 1.4 fixture.
- const releaseFloorOwner=acquireOwner(f.dir);try{prepareFreshPi15Floor(f.dir);}finally{releaseFloorOwner();}
+ const releaseFloorOwner=acquireOwner(f.dir);try{prepareCurrentRuntimeFixtureFloor(f.dir);}finally{releaseFloorOwner();}
  const nativeRegistry=createRegistry();nativeRegistry.install(CodingTools);nativeRegistry.install(legacyMarker);nativeRegistry.install(legacyModule);
  let legacy:Harness|undefined=await Harness.open(await openNodeSqliteStorage(join(f.dir,'durable.sqlite')),{models:aliases.models,registry:nativeRegistry,settings:{extensions:[CodingTools,legacyModule]},conversationCreated:async(tx,record)=>{await tx.doc(ChatMeta,record.id);}},ctx),rt:Runtime|undefined;
  try{

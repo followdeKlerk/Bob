@@ -14,7 +14,7 @@ export function createDelegationModels(base:Models,state:State){
  const models=new Proxy(base,{get(target,key){
   const value=Reflect.get(target,key);if(typeof value!=='function')return value;
   return (...args:unknown[])=>{
-   const first=args[0],id=typeof first==='string'?first:first&&typeof first==='object'&&'provider' in first?first.provider:undefined;
+   const first=args[0],id=typeof first==='string'?first:first&&typeof first==='object'&&'provider' in first?first.provider:key==='setProvider'&&first&&typeof first==='object'&&'id' in first?first.id:undefined;
    const destination=typeof id==='string'&&id.startsWith(prefix)?aliases:target;
    const method=Reflect.get(destination,key);return method.apply(destination,args);
   };

@@ -1,3 +1,4 @@
+import {ActivityDisclosure} from './activity-disclosure';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {Text} from './app-text';
@@ -15,12 +16,12 @@ function Branch({row,source}:{row:NestedToolRow;source:Activity['source']}){
  const hint=presentation?.command??presentation?.detail??row.args;
  return <View style={[styles.branch,{marginLeft:Math.min(row.depth,3)*8}]}>
   <CompactActivityRow title={row.name.replace(/^functions\./,'').replaceAll('_',' ')} detail={hint} status={row.status} accessibilityLabel={`Nested tool details: ${row.name} · ${row.id}`} expanded={expanded} onPress={()=>setExpanded(!expanded)}/>
-  {expanded&&<View style={styles.details}>
+  {expanded&&<ActivityDisclosure style={styles.details}>
    <Text style={styles.text}>{row.name} · {row.status}{row.durationMs===undefined?'':` · ${Math.round(row.durationMs)} ms`}</Text>
    {!!row.args&&<><View style={styles.caption}><Text style={styles.text}>Arguments excerpt</Text><CopyAction text={row.args} label={`Copy nested arguments: ${row.name}`}/></View><Text selectable style={styles.code}>{row.args}</Text></>}
    {!!row.preview&&<><Text style={styles.text}>{row.status==='error'?'Error excerpt':'Progress excerpt'}</Text><Text selectable style={styles.code}>{row.preview}</Text></>}
    <Text style={styles.text}>{source==='audit'?'Recorded status and argument/error excerpts; full nested results are not included.':'Live progress excerpts only; a done call does not include its full result.'}</Text>
-  </View>}
+  </ActivityDisclosure>}
  </View>;
 }
 

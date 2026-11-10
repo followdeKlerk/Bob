@@ -1,3 +1,4 @@
+import {isRetired,requireActiveConversation} from './retired-chat-profile.js';
 import {defineDoc,type Conversation,type ConversationId,type Harness,type SubmissionRecord,type Tx} from '@earendil-works/pi-durable';
 import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import type {State} from './state.js';
@@ -13,6 +14,7 @@ async function finish(state:State,harness:Harness,chat:Conversation,request:stri
  return chat.commit(async tx=>{const prior=await tx.submissionByRequest(chat.id,request);if(prior)return prior;const receipt=await append(tx,chat.id,request,intent.text,intent.client,reply);delete (await tx.doc(DelegationBehaviorCommands,chat.id)).pending[request];return receipt;},ctx);
 }
 export async function handleDelegationBehaviorCommand(state:State,harness:Harness,chat:Conversation,text:string,request:string,client:string,append:Append){
+ await requireActiveConversation(harness,chat.id);
  if(!/^\/delegation\s+auto(?:\s|$)/i.test(text.trim()))return undefined;
  const existing=await harness.commit(tx=>tx.submissionByRequest(chat.id,request),ctx);if(existing)return existing;
  const pending=(await harness.snapshot(DelegationBehaviorCommands,chat.id,ctx))?.pending[request];if(pending)return finish(state,harness,chat,request,pending,append);
@@ -30,4 +32,4 @@ export async function handleDelegationBehaviorCommand(state:State,harness:Harnes
  await chat.commit(async tx=>{if(await tx.submissionByRequest(chat.id,request))return;const commands=await tx.doc(DelegationBehaviorCommands,chat.id);if(!commands.pending[request]){await revokeDelegation(tx,chat.id,'Owner changed adaptive delegation');commands.pending[request]=intent;}},ctx);
  const winner=(await harness.snapshot(DelegationBehaviorCommands,chat.id,ctx))?.pending[request];return winner?finish(state,harness,chat,request,winner,append):harness.commit(tx=>tx.submissionByRequest(chat.id,request),ctx);
 }
-export async function recoverDelegationBehaviorCommands(state:State,harness:Harness,id:ConversationId,append:Append){const pending=(await harness.snapshot(DelegationBehaviorCommands,id,ctx))?.pending??{};for(const [request,intent] of Object.entries(pending))await finish(state,harness,(await harness.conversation(id,ctx))!,request,intent,append);}
+export async function recoverDelegationBehaviorCommands(state:State,harness:Harness,id:ConversationId,append:Append){if(await isRetired(harness,id))return;const pending=(await harness.snapshot(DelegationBehaviorCommands,id,ctx))?.pending??{};for(const [request,intent] of Object.entries(pending))await finish(state,harness,(await harness.conversation(id,ctx))!,request,intent,append);}

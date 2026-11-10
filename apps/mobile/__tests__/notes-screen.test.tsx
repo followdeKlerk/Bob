@@ -1,7 +1,8 @@
+import {PageSearch} from '../components/page-search';
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions',()=>({__esModule:true,default:jest.fn(()=>({width:361,height:754,scale:1,fontScale:1}))}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,Modal,Platform,FlatList,Text,View,StyleSheet,useWindowDimensions} from 'react-native';
+import {Alert,Modal,Platform,FlatList,ScrollView,Text,View,StyleSheet,useWindowDimensions} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useKeyboardInset} from '../keyboard-inset';
 import {NotesScreen} from '../components/notes-screen';
@@ -26,8 +27,7 @@ test('real Notes UI creates a category and formatted checklist offline, saves on
   act(()=>press(tree,'Categories'));act(()=>input(tree,'Category name','Work'));
   await act(async()=>press(tree,'Create category'));act(()=>press(tree,'Close categories'));
   act(()=>press(tree,'Create note'));act(()=>input(tree,'Note title','My checklist'));act(()=>input(tree,'Note body','Milk'));
-  act(()=>tree.root.findByProps({accessibilityLabel:'Note body'}).props.onSelectionChange({nativeEvent:{selection:{start:0,end:4}}}));
-  act(()=>press(tree,'Bold'));expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.value).toBe('**Milk**');
+  act(()=>input(tree,'Note body','**Milk**'));expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.value).toBe('**Milk**');
   act(()=>input(tree,'Note body','## Shopping\n- [ ] Milk\n\n**Remember this**'));
   act(()=>press(tree,'Assign category Work'));act(()=>press(tree,'Note shade: Dark gray'));act(()=>press(tree,'Preview note'));
   const task=tree.root.findAll(node=>node.props.accessibilityLabel==='Milk'&&node.props.accessibilityRole==='checkbox')[0];
@@ -72,8 +72,8 @@ test('Notes has no top back button or idle sync boilerplate; large text uses one
  try{
   expect(tree.root.findAllByProps({accessibilityLabel:'Back to chat'})).toHaveLength(0);
   expect(tree.root.findAll(node=>node.type===Text&&node.props.children==='Notes sync automatically')).toHaveLength(0);
-  expect(tree.root.findByType(FlatList).props.numColumns).toBe(2);
-  dimensions.mockReturnValue({width:361,height:754,scale:1,fontScale:2});
+  expect(tree.root.findByType(FlatList).props.numColumns).toBe(1);
+  dimensions.mockReturnValue({width:361,height:754,scale:1,fontScale:3.37});
   await act(async()=>tree.update(<NotesScreen backendId={backend} request={online} visible topInset={0}/>));
   expect(tree.root.findByType(FlatList).props.numColumns).toBe(1);
   act(()=>press(tree,'Create note'));
@@ -146,7 +146,7 @@ test('failed local autosave keeps the editor open and retains text for retry',as
 });
 
 
-test('Notes keeps Sync before primary Create in a separate bottom footer and uses semantic card/control/input chrome',async()=>{
+test('Notes keeps swipeable filters by content and Trash, Tags, Sync, Create in the footer',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
  try{
@@ -154,17 +154,24 @@ test('Notes keeps Sync before primary Create in a separate bottom footer and use
   expect(heading.props.title).toBe('Notes');
   const footer=tree.root.findByType(SectionActions);
   expect(heading.findAllByType(RoundAction)).toHaveLength(0);
-  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Categories','Sync notes','Create note']);
-  expect(footer.findAllByType(RoundAction)[2].props.primary).toBe(true);
+  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Show trash','Categories','Sync notes','Create note']);
+  expect(footer.findAllByType(RoundAction)[3].props.primary).toBe(true);
   expect(tree.root.findByType(FlatList).findAll(node=>node.props.accessibilityLabel==='Sync notes')).toHaveLength(0);
   const button=tree.root.findAll(node=>node.props.accessibilityLabel==='Categories'&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(button.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
-  expect(button.props.variant).toBe('ghost');
-  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flexDirection==='row'&&style.borderRadius===14&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  expect(button.props.variant).toBe('outline');
+  expect(tree.root.findByProps({testID:'notes-search-and-filters'}).findAllByProps({accessibilityLabel:'Categories'})).toHaveLength(0);
+  expect(footer.findAllByProps({accessibilityLabel:'Categories'}).length).toBeGreaterThan(0);
   act(()=>press(tree,'Categories'));act(()=>input(tree,'Category name','Style check'));
   await act(async()=>press(tree,'Create category'));act(()=>press(tree,'Close categories'));
   const all=tree.root.findByProps({accessibilityLabel:'All categories'});
-  expect(StyleSheet.flatten(all.props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface});
+  expect(StyleSheet.flatten(all.props.style)).toMatchObject({borderRadius:999,minHeight:48,backgroundColor:colors.selectedSurface});
+  const strip=tree.root.findAllByType(ScrollView).find(node=>node.props.testID==='notes-category-strip')!;
+  expect(strip.props).toMatchObject({horizontal:true,showsHorizontalScrollIndicator:false,keyboardShouldPersistTaps:'handled'});
+  expect(StyleSheet.flatten(strip.props.contentContainerStyle)).toMatchObject({flexDirection:'row',flexWrap:'nowrap',paddingVertical:6});
+  expect(StyleSheet.flatten(all.props.style)).toMatchObject({flexShrink:0});
+  expect(StyleSheet.flatten(all.props.style).maxWidth).toBeUndefined();
+  expect(StyleSheet.flatten(all.findByType(Text).props.style)).toMatchObject({textAlign:'center',textAlignVertical:'center',includeFontPadding:false});
   act(()=>press(tree,'Create note'));
   expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
   const editorHeading=tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='New note')!;
@@ -173,11 +180,13 @@ test('Notes keeps Sync before primary Create in a separate bottom footer and use
   expect(editorFooter.findByProps({testID:'section-footer-leading'}).findAll(node=>node.props.accessibilityLabel==='Save note and go back').length).toBeGreaterThan(0);
   expect(editorFooter.findByProps({testID:'section-footer-actions'}).findAll(node=>node.props.accessibilityLabel==='Save note').length).toBeGreaterThan(0);
   const save=tree.root.findAll(node=>node.props.accessibilityLabel==='Save note'&&typeof node.props.onPress==='function')[0];
-  expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.accent&&style.borderColor===colors.accent&&style.borderWidth===1;})).toBe(true);
+  expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.surface&&style?.borderRadius===999&&style?.borderColor===colors.foreground;})).toBe(true);
   const shade=tree.root.findByProps({accessibilityLabel:'Note shade: Standard gray'});
   expect(StyleSheet.flatten(shade.props.style)).toMatchObject({borderRadius:24,borderWidth:2,borderColor:colors.accent,backgroundColor:colors.surface});
   act(()=>input(tree,'Note title','Outlined card'));await act(async()=>press(tree,'Save note'));
-  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.overflow==='hidden'&&style.borderRadius===20&&style.borderWidth===1&&style.borderColor===colors.border;})).toBe(true);
+  const noteRow=tree.root.findAll(node=>typeof node.props.testID==='string'&&node.props.testID.startsWith('note-row-'))[0];
+  expect(StyleSheet.flatten(noteRow.props.style).borderWidth).toBeUndefined();
+  expect(StyleSheet.flatten(noteRow.props.style).borderRadius).toBeUndefined();
  }finally{await act(async()=>tree.unmount());}
 });
 
@@ -192,7 +201,7 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   expect(rootFooter.parent!.props.testID).toBe('section-footer-overlay');
   const rootOverlay=tree.root.findByProps({testID:'section-footer-overlay'});
   act(()=>rootOverlay.props.onLayout({nativeEvent:{layout:{height:184}}}));
-  expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(224);
+  expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingBottom).toBe(212);
 
   expect(StyleSheet.flatten(rootFooter.parent!.props.style)).toMatchObject({position:'absolute',bottom:0});
   expect(list.parent!.props.testID).toBe('section-scroll-host');
@@ -206,7 +215,8 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   const categoryBody=categoryHost.findByType(require('react-native').ScrollView),categoryFooter=categoryHost.findByType(SectionActions);
   expect(categoryHost.findByType(SectionHeading).props).toEqual({title:'Categories'});
   expect(categoryBody.findAllByProps({accessibilityLabel:'Close categories'})).toHaveLength(0);
-  expect(categoryBody.findAllByProps({accessibilityLabel:'Create category'}).length).toBeGreaterThan(0);
+  expect(categoryBody.findAllByProps({accessibilityLabel:'Create category'})).toHaveLength(0);
+  expect(categoryFooter.findAllByProps({accessibilityLabel:'Create category'}).length).toBeGreaterThan(0);
   expect(StyleSheet.flatten(categoryBody.props.style)).toMatchObject({flex:1,minHeight:0});
   expect(StyleSheet.flatten(categoryHost.props.style).paddingBottom).toBe(300);
   expect(categoryFooter.findByProps({testID:'section-footer-leading'}).findAllByProps({accessibilityLabel:'Close categories'}).length).toBeGreaterThan(0);
@@ -221,7 +231,6 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   expect(categoryBody.parent!.props.testID).toBe('section-scroll-host');
   act(()=>press(tree,'Close categories'));act(()=>press(tree,'Create note'));act(()=>input(tree,'Note body','Keep my caret'));
   const body=tree.root.findByProps({accessibilityLabel:'Note body'});
-  act(()=>body.props.onSelectionChange({nativeEvent:{selection:{start:5,end:7}}}));
   (useKeyboardInset as jest.Mock).mockReturnValue(0);
   await act(async()=>tree.update(<NotesScreen {...props}/>));
   expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBe(body);
@@ -238,7 +247,7 @@ test('Notes root, category and editor footers stay after shrinking bodies with o
   expect(body.props.value).toBe('Keep my caret');
   expect(StyleSheet.flatten(footer.findByProps({testID:'section-footer'}).props.style)).toMatchObject({backgroundColor:'transparent',borderTopWidth:0});
 
-  act(()=>press(tree,'Bold'));expect(body.props.value).toBe('Keep **my** caret');
+  expect(body.props.value).toBe('Keep my caret');expect(tree.root.findAllByProps({accessibilityLabel:'Bold'})).toHaveLength(0);
  }finally{await act(async()=>tree.unmount());}
 });
 
@@ -265,4 +274,94 @@ test.each(['android','ios'])('Notes input dialogs use one platform keyboard owne
   if(tree)await act(async()=>tree.unmount());
   Object.defineProperty(Platform,'OS',originalOS);
  }
+});
+
+test('337% text and narrow layout retain the list, query, category field and note selection while footer actions remain separate',async()=>{
+ const dimensions=useWindowDimensions as jest.Mock;
+ let tree!:Renderer.ReactTestRenderer;
+ const props={backendId:backend,request:offline,visible:true,topInset:0};
+ await act(async()=>{tree=Renderer.create(<NotesScreen {...props}/>);});
+ try{
+  const list=tree.root.findByType(FlatList),search=tree.root.findByProps({accessibilityLabel:'Search notes'});
+  act(()=>input(tree,'Search notes','kept search'));
+  dimensions.mockReturnValue({width:337,height:540,scale:1,fontScale:3.37});
+  await act(async()=>tree.update(<NotesScreen {...props}/>));
+  expect(tree.root.findByType(FlatList)).toBe(list);expect(tree.root.findByProps({accessibilityLabel:'Search notes'})).toBe(search);expect(search.props.value).toBe('kept search');
+  act(()=>press(tree,'Categories'));
+  const categoryInput=tree.root.findByProps({accessibilityLabel:'Category name'});
+  act(()=>input(tree,'Category name','A category name that wraps'));
+  const categoryModal=tree.root.findByType(Modal),footer=categoryModal.findByType(SectionActions);
+  expect(footer.findByProps({testID:'section-footer-actions'}).findAllByProps({accessibilityLabel:'Create category'}).length).toBeGreaterThan(0);
+  act(()=>categoryModal.findByProps({testID:'section-footer-overlay'}).props.onLayout({nativeEvent:{layout:{height:240}}}));
+  expect(tree.root.findByProps({accessibilityLabel:'Category name'})).toBe(categoryInput);
+  await act(async()=>{press(tree,'Create category');press(tree,'Create category');});
+  const cache=JSON.parse((await AsyncStorage.getItem(`notes:v1:${backend}`))!);
+  expect(cache.pending.filter((op:any)=>op.kind==='category')).toHaveLength(1);
+  act(()=>press(tree,'Rename A category name that wraps'));
+  expect(tree.root.findByProps({accessibilityLabel:'Category name'})).toBe(categoryInput);expect(categoryInput.props.value).toBe('A category name that wraps');
+  act(()=>input(tree,'Category name','Renamed category'));await act(async()=>press(tree,'Save category name'));act(()=>press(tree,'Close categories'));
+  act(()=>input(tree,'Search notes',''));act(()=>press(tree,'Create note'));act(()=>input(tree,'Note body','Keep my caret and draft'));
+  act(()=>press(tree,'Assign category Renamed category'));
+  const body=tree.root.findByProps({accessibilityLabel:'Note body'});
+  dimensions.mockReturnValue({width:800,height:400,scale:1,fontScale:1});
+  await act(async()=>tree.update(<NotesScreen {...props}/>));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBe(body);
+  expect(body.props.value).toBe('Keep my caret and draft');expect(tree.root.findAllByProps({accessibilityLabel:'Bold'})).toHaveLength(0);
+  expect(tree.root.findAll(node=>node.props.accessibilityLabel==='Assign category Renamed category'&&node.props.accessibilityRole==='checkbox')[0].props.accessibilityState.checked).toBe(true);
+  expect(body.props.typography).toBe('ui');
+ }finally{await act(async()=>tree.unmount());dimensions.mockReturnValue({width:361,height:754,scale:1,fontScale:1});}
+});
+
+test('many category filters stay in one swipeable row and keep selection, search and native list identity across footer actions',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+ try{
+  act(()=>press(tree,'Categories'));
+  for(const name of ['Bob','Business','Development','Personal','Research','Shopping','Work','A much longer category name']){
+   act(()=>input(tree,'Category name',name));await act(async()=>press(tree,'Create category'));
+  }
+  act(()=>press(tree,'Close categories'));
+  const strip=tree.root.findAllByType(ScrollView).find(node=>node.props.testID==='notes-category-strip')!,list=tree.root.findByType(FlatList),search=tree.root.findByProps({accessibilityLabel:'Search notes'});
+  expect(strip.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function')).toHaveLength(9);
+  expect(StyleSheet.flatten(strip.props.style)).toMatchObject({flexGrow:0,flexShrink:0});
+  expect(StyleSheet.flatten(strip.props.style).height).toBeUndefined();
+  for(const tab of strip.findAll(node=>node.props.accessibilityRole==='tab'&&typeof node.props.onPress==='function')){
+   const style=StyleSheet.flatten(tab.props.style);expect(style).toMatchObject({minHeight:48,flexShrink:0});expect(style.width).toBeUndefined();expect(style.maxWidth).toBeUndefined();
+   const label=tab.findByType(Text);expect(label.props.numberOfLines).toBeUndefined();expect(label.props.allowFontScaling).not.toBe(false);
+  }
+  act(()=>press(tree,'Filter category Development'));act(()=>input(tree,'Search notes','Retained search'));
+  const selected=()=>tree.root.findByProps({accessibilityLabel:'Filter category Development'}).props.accessibilityState.selected;
+  expect(selected()).toBe(true);
+  act(()=>press(tree,'Show trash'));
+  const toggle=tree.root.findAll(node=>node.props.accessibilityLabel==='Show notes'&&typeof node.props.onPress==='function')[0];
+  expect(toggle.props.accessibilityState.selected).toBe(true);expect(selected()).toBe(true);
+  act(()=>press(tree,'Show notes'));act(()=>press(tree,'Categories'));act(()=>press(tree,'Close categories'));
+  expect(selected()).toBe(true);expect(tree.root.findByProps({accessibilityLabel:'Search notes'}).props.value).toBe('Retained search');
+  expect(tree.root.findByType(FlatList)===list).toBe(true);expect(tree.root.findByProps({accessibilityLabel:'Search notes'})===search).toBe(true);
+  expect(tree.root.findAllByType(ScrollView).find(node=>node.props.testID==='notes-category-strip')===strip).toBe(true);
+  const header=tree.root.findByProps({testID:'notes-search-and-filters'}),footer=tree.root.findByType(SectionActions);
+  for(const label of ['Show trash','Categories']){expect(header.findAllByProps({accessibilityLabel:label})).toHaveLength(0);expect(footer.findAllByProps({accessibilityLabel:label}).length).toBeGreaterThan(0);}
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('Markdown editor has no formatting toolbar and footer Preview preserves the raw native editor and draft',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+ try{
+  const list=tree.root.findByType(FlatList),search=tree.root.findByProps({testID:'notes-search-header'});
+  expect(list.findAllByProps({testID:'page-search'})).toHaveLength(0);expect(search.findAllByType(PageSearch)).toHaveLength(1);
+  act(()=>press(tree,'Create note'));const raw='## Heading\n\n**Own Markdown**\n- [ ] A task';act(()=>input(tree,'Note body',raw));
+  const editor=tree.root.findByProps({accessibilityLabel:'Note body'}),modal=tree.root.findByType(Modal),footer=modal.findByType(SectionActions),scroll=modal.findByType(ScrollView);
+  for(const label of ['Bold','Italic','Heading','Bullet list','Checklist'])expect(modal.findAllByProps({accessibilityLabel:label})).toHaveLength(0);
+  expect(scroll.findAllByProps({accessibilityLabel:'Preview note'})).toHaveLength(0);
+  expect(footer.findAllByType(RoundAction).map(node=>node.props.label)).toEqual(['Save note and go back','Preview note']);
+  act(()=>press(tree,'Preview note'));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})===editor).toBe(true);expect(editor.props.value).toBe(raw);
+  expect(tree.root.findByProps({testID:'note-editor-input'}).props.accessibilityElementsHidden).toBe(true);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'note-editor-input'}).props.style).display).toBe('none');
+  expect(footer.findAllByProps({accessibilityLabel:'Edit text'}).length).toBeGreaterThan(0);
+  act(()=>press(tree,'Edit text'));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})===editor).toBe(true);expect(editor.props.value).toBe(raw);
+  expect(tree.root.findByProps({testID:'note-editor-input'}).props.accessibilityElementsHidden).toBe(false);
+  await act(async()=>press(tree,'Save note'));expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
+  const cache=JSON.parse((await AsyncStorage.getItem(`notes:v1:${backend}`))!);expect(cache.pending.find((op:any)=>op.kind==='note').value.body).toBe(raw);
+ }finally{await act(async()=>tree.unmount());}
 });

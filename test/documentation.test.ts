@@ -7,7 +7,8 @@ import {dirname, resolve} from 'node:path';
 const guides = ['README.md', 'CONTRIBUTING.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
   'apps/mobile/README.md', 'packages/memory/README.md', 'assets/learning/README.md',
   'assets/learning/memory-threats/README.md', 'apps/mobile/components/ui/README.md',
-  'apps/mobile/android/app/src/main/assets/fonts/README.md'];
+  'apps/mobile/android/app/src/main/assets/fonts/README.md',
+  'apps/mobile/android/app/src/main/assets/fonts/nunito/README.md'];
 const read = (path: string) => readFileSync(path, 'utf8');
 const withoutFences = (text: string) => text.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, '');
 function anchors(text: string) {

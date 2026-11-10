@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {MaintenanceStore,MaintenanceSupervisor,type MaintenanceConfig,type Release} from './maintenance.js';
 import {buildRelease} from './maintenance-build.js';
 import {acquireOwner} from './ownership.js';
-import {supervisorProtocol,type SupervisorEvidence} from './maintenance-migration.js';
+import {supervisorProtocol,patchSupervisorProtocol,type SupervisorEvidence} from './maintenance-migration.js';
 const home=process.argv[2];if(!home)throw Error('Maintenance home required');
 const config=JSON.parse(readFileSync(join(home,'config.json'),'utf8')) as MaintenanceConfig;
 const ownerDir=join(home,'supervisor-owner');mkdirSync(ownerDir,{recursive:true,mode:0o700});
@@ -29,7 +29,7 @@ try{
  let restarting=false,restartFailure:Error|undefined;
  const beat=()=>{
   store.set('heartbeat',Date.now());
-  if(runnerRelease)store.set('supervisorEvidence',{supervisorProtocol,pid:process.pid,release:{id:runnerRelease.id,cli:runnerRelease.cli,compatibility:runnerRelease.compatibility,sourceHash:runnerRelease.sourceHash},at:Date.now()} satisfies SupervisorEvidence);
+  if(runnerRelease)store.set('supervisorEvidence',{supervisorProtocol,patchSupervisorProtocol,pid:process.pid,release:{id:runnerRelease.id,cli:runnerRelease.cli,compatibility:runnerRelease.compatibility,sourceHash:runnerRelease.sourceHash},at:Date.now()} satisfies SupervisorEvidence);
  };
  heartbeat=setInterval(()=>{
   beat();

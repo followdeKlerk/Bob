@@ -33,6 +33,18 @@ test('an installed version gets one dismissible confirmation, never another inst
  NativeModules.BobFiles.versionCode=2;NativeModules.BobFiles.versionName='2.0';await AsyncStorage.setItem('pending-install:backend-id','2');await mount();expect(text()).toContain('2.0 installed');expect(tree!.root.findAllByProps({accessibilityLabel:'Install 2.0'})).toHaveLength(0);
  await act(async()=>button('Dismiss build card').props.onPress());expect(tree!.toJSON()).toBeNull();expect(dismiss).toHaveBeenCalled();expect(await AsyncStorage.getItem('pending-install:backend-id')).toBeNull();
 });
+test.each([0,-1,undefined,NaN])('an unknown installed version (%s) cannot be presented as a newer or installed APK',async(versionCode)=>{
+ NativeModules.BobFiles.versionCode=versionCode;NativeModules.BobFiles.getUpdateStatus=jest.fn();
+ await AsyncStorage.setItem('pending-install:backend-id','2');
+ await mount();
+ expect(text()).toContain('Installed app version unavailable');expect(text()).toContain('Fully close and reopen Bob');
+ expect(text()).not.toContain('2.0 ready');expect(text()).not.toContain('2.0 installed');
+ expect(tree!.root.findAllByProps({accessibilityLabel:'Install 2.0'})).toHaveLength(0);
+ expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();expect(NativeModules.BobFiles.getUpdateStatus).not.toHaveBeenCalled();
+ await act(async()=>tree!.unmount());tree=undefined;
+ NativeModules.BobFiles.versionCode=2;NativeModules.BobFiles.versionName='2.0';
+ await mount();expect(text()).toContain('2.0 installed');expect(text()).not.toContain('Installed app version unavailable');
+});
 test('old APKs do not leave a permanent idle card',async()=>{NativeModules.BobFiles.versionCode=3;await mount();expect(tree!.toJSON()).toBeNull();});
 test('failed build gives the recorded error and no automatic rebuild',async()=>{
  const fetch=jest.spyOn(globalThis,'fetch').mockRejectedValue(Error('offline'));await mount({enabled:true,jobs:[{id:'failed',status:'failed',stage:'Stopped safely',error:'Test suite failed'}]});expect(text()).toContain('Test suite failed');expect(fetch).not.toHaveBeenCalled();

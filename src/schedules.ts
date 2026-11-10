@@ -1,3 +1,4 @@
+import {requireActiveConversation} from './retired-chat-profile.js';
 import {ChatMeta,Questions} from './documents.js';
 import {notificationConversationTitle} from './notification-preview.js';
 import {EmailReads,EmailDelivered,DEFAULT_EMAIL_MAILBOXES} from './email-documents.js';
@@ -124,7 +125,7 @@ export function createSchedules(getHarness:()=>Harness){
  });
  async function mutate(raw:unknown,key:string,source?:number,context:Context=ctx){
   const input=ScheduleRequest.parse(raw),h=getHarness(),fingerprint=createHash('sha256').update(JSON.stringify(input)).digest('hex');
-  if(input.action==='create'&&source){const chat=await h.conversation(source as ConversationId,context),agent=await chat?.agent(context);if(!agent?.extensions.some(e=>e.name==='bob.resources')||!agent.tools.some(t=>t.name==='schedule_result'))throw new HttpError(409,'Enable the resources module and scheduling tools in the source conversation first');if(input.emailAccess&&!agent.tools.some(t=>t.name==='email_read'))throw new HttpError(409,'Enable read-only email in the source conversation first');}
+  if(input.action==='create'&&source){await requireActiveConversation(h,source as ConversationId);const chat=await h.conversation(source as ConversationId,context),agent=await chat?.agent(context);if(!agent?.extensions.some(e=>e.name==='bob.resources')||!agent.tools.some(t=>t.name==='schedule_result'))throw new HttpError(409,'Enable the resources module and scheduling tools in the source conversation first');if(input.emailAccess&&!agent.tools.some(t=>t.name==='email_read'))throw new HttpError(409,'Enable read-only email in the source conversation first');}
   if(input.action==='update'&&input.emailAccess){
    const prior=(await h.snapshot(Schedules,context))?.jobs[input.id];
    if(prior){const agent=await (await h.conversation(prior.conversationId as ConversationId,context))?.agent(context);if(!agent?.tools.some(t=>t.name==='email_read'))throw new HttpError(409,'Enable read-only email in the source conversation first');}
@@ -218,5 +219,14 @@ export function createSchedules(getHarness:()=>Harness){
    if(!job||job.taskId!==item.record.id||job.state!=='active')await h.abortTask(item.record.id,ctx);
   }
  }
- return {extension,mutate,recover};
+ async function retireSources(retired:ReadonlySet<ConversationId>){
+  const h=getHarness(),saved=await h.snapshot(Schedules,ctx);if(!saved)return [];
+  const matching=Object.values(saved.jobs).filter(job=>retired.has(job.conversationId as ConversationId));if(!matching.length)return [];
+  await h.commit(async tx=>{const book=await tx.doc(Schedules);for(const source of matching){const job=book.jobs[source.id];if(!job||!['active','paused'].includes(job.state))continue;
+   const now=Date.now();job.state='cancelled';job.revision++;job.updatedAt=now;delete job.nextRunAt;
+   const run=job.history.at(-1);if(run?.outcome==='running'){run.outcome='cancelled';run.finishedAt=now;run.message='Source local-model integration removed';}
+  }},ctx);
+  return matching.flatMap(job=>job.workerId?[job.workerId as ConversationId]:[]);
+ }
+ return {extension,mutate,recover,retireSources};
 }

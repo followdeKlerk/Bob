@@ -4,6 +4,7 @@ import {join,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {MaintenanceStore,sourceFingerprint,compatibilityFingerprint,type MaintenanceConfig,type UpdateJob,type Release} from './maintenance.js';
 import {assertBridgeBuild,type SupervisorEvidence} from './maintenance-migration.js';
+import {sourceManifest,sameManifest,uiFastPath,uiBaselineKey,createUiBaseline,mobilePackageVersion,type SourceManifest,type UiBaseline} from './maintenance-ui.js';
 export async function buildRelease(home:string,config:MaintenanceConfig,store:MaintenanceStore,job:UpdateJob):Promise<Release>{
  const root=config.sourceRoot,dir=join(home,'releases',job.id);mkdirSync(dir,{recursive:true,mode:0o700});
  const log=join(dir,'build.log'),env={...process.env,PATH:[config.javaHome?join(config.javaHome,'bin'):'',dirname(config.node),process.env.PATH].filter(Boolean).join(':'),JAVA_HOME:config.javaHome,ANDROID_HOME:config.androidHome,BOB_SIGNING_PROPERTIES:config.signingProperties};
@@ -24,14 +25,28 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
   const code=Number(gradle.match(/versionCode\s+(\d+)/)?.[1]),version=gradle.match(/versionName\s+"([^"]+)"/)?.[1];
   if(!Number.isInteger(code)||!version||!/^\d+\.\d+\.\d+$/.test(version))throw Error('Invalid Android version metadata');
   const last=store.get<Release>('latestApk')?.apk?.versionCode??0;
-  if(code<=last){const next=last+1,parts=version.split('.').map(Number);parts[2]=parts[2]!+1;const nextVersion=parts.join('.');gradle=gradle.replace(/versionCode\s+\d+/,'versionCode '+next).replace(/versionName\s+"[^"]+"/,'versionName "'+nextVersion+'"');writeFileSync(gradlePath,gradle);for(const file of ['apps/mobile/package.json','apps/mobile/package-lock.json']){const path=join(root,file),data=JSON.parse(readFileSync(path,'utf8'));data.version=nextVersion;if(data.packages?.[''])data.packages[''].version=nextVersion;writeFileSync(path,JSON.stringify(data,null,2)+'\n');}}
+  if(code<=last){const next=last+1,parts=version.split('.').map(Number);parts[2]=parts[2]!+1;const nextVersion=parts.join('.');gradle=gradle.replace(/versionCode\s+\d+/,'versionCode '+next).replace(/versionName\s+"[^"]+"/,'versionName "'+nextVersion+'"');writeFileSync(gradlePath,gradle);for(const file of ['apps/mobile/package.json','apps/mobile/package-lock.json']){const path=join(root,file);writeFileSync(path,mobilePackageVersion(readFileSync(path,'utf8'),file.endsWith('package-lock.json'),nextVersion));}}
  }
  const sourceHash=sourceFingerprint(root);
- stage('Compiling backend');await run('npm',['run','build']);
- stage('Running automated backend checks');await run('npm',['test'],root,600000);
- const release:Release={id:job.id,cli:'',sourceHash,compatibility,durableVersion};
+ let manifest:SourceManifest|undefined;
+ // Unknown inputs (including symlinks) disable the optimization, never the checks.
+ try{manifest=sourceManifest(root);}catch{}
+ const baseline=store.get<UiBaseline>(uiBaselineKey);
+ const decision=uiFastPath(job.target,root,manifest,baseline,baseline?.releaseId?store.get<Release>('release:'+baseline.releaseId):undefined,active);
+ const fast=decision.eligible;
+ store.patch(job.id,{validation:{lane:fast?'ui-fast':'full',reason:decision.reason,baselineId:decision.baselineId,changedFiles:decision.changedFiles}});
+ if(!fast){
+  stage('Compiling backend');await run('npm',['run','build']);
+  stage('Running automated backend checks');await run('npm',['test'],root,600000);
+ }
+ const release:Release={id:job.id,cli:fast?active!.cli:'',sourceHash,compatibility,durableVersion};
  if(android){
+  // Mobile's src/contracts.ts imports generated @bob-local/core/contracts.
+  // Rebuild even with unchanged source: a previous backend build may have left
+  // different dist output behind. This is shared-contract compilation, not the backend.
+  if(fast){stage('Compiling shared mobile contracts');await run('npm',['run','build','--workspace','@bob-local/core']);}
   stage('Compiling interactive content and checking mobile TypeScript');await run('npm',['run','build:interactive']);await run(join(root,'node_modules/.bin/tsc'),['--noEmit'],join(root,'apps/mobile'));
+  stage('Running all mobile tests');await run('npm',['test','--','--runInBand','--ci'],join(root,'apps/mobile'),600000);
   stage('Building signed Android release');await run(join(root,'apps/mobile/android/gradlew'),['-p','android','assembleRelease','-PreactNativeArchitectures=x86_64,arm64-v8a'],join(root,'apps/mobile'));
   const apk=join(dir,'bob.apk');copyFileSync(join(root,'apps/mobile/android/app/build/outputs/apk/release/app-release.apk'),apk);
   const tools=join(config.androidHome!,'build-tools/36.0.0');
@@ -45,6 +60,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
   if(!match||Number(match[1])<=(store.get<Release>('latestApk')?.apk?.versionCode??0))throw Error('APK is not an in-place Bob upgrade');
   release.apk={path:apk,sha256:createHash('sha256').update(readFileSync(apk)).digest('hex'),size:statSync(apk).size,versionCode:Number(match[1]),versionName:match[2]!,signer};
  }
+ if(!fast){
  stage('Packaging isolated backend release');
  const packageManifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
  await run('npm',['pack','--silent','--pack-destination',dir]);
@@ -57,9 +73,18 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'setup','--cwd',dir],root,60000);
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'doctor'],root,60000);
  await run(config.node,[release.cli,'--state',join(dir,'verification-state'),'module','list'],root,60000);
+ }
  if(sourceFingerprint(root)!==sourceHash)throw Error('Source changed during build; candidate not published. Finish editing and request a new build.');
+ if(manifest){
+  let finalManifest:SourceManifest;
+  try{finalManifest=sourceManifest(root);}catch{throw Error('Source manifest changed during build; candidate not published.');}
+  if(!sameManifest(manifest,finalManifest))throw Error('Source changed during build; candidate not published. Finish editing and request a new build.');
+ }
  writeFileSync(join(dir,'release.json'),JSON.stringify(release,null,2),{mode:0o600});store.set('release:'+release.id,release);
  if(release.apk)store.set('latestApk',release);
  store.patch(job.id,{status:'ready',stage:release.apk?'Verified APK ready to install':'Backend release ready',releaseId:release.id});
+ // Only a full Android/all build has passed backend, mobile, signing and installed
+ // package checks. Backend-only and fast builds cannot advance this authority.
+ if(!fast&&android&&manifest)store.set(uiBaselineKey,createUiBaseline(root,release,manifest));
  return release;
 }

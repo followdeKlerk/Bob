@@ -6,7 +6,7 @@ import {TabGlyph,type TabGlyphName} from './tab-glyph';
 import {themed,useTheme,useThemedValue} from '../theme';
 import {Text} from './app-text';
 import {FLUID_TAB_HEIGHT,fluidTabPath} from '../fluid-tabs';
-export type BottomDestination=TabGlyphName;
+export type BottomDestination=TabGlyphName|'Terminal';
 const tabs=[{id:'Notes'},{id:'Workstations'},{id:'Chat'},{id:'Agents'},{id:'Sessions'},{id:'Settings'}] as const;
 const AnimatedPath=Animated.createAnimatedComponent(Path);
 export function BottomTabs({selected,onSelect,onHeight,activeAgentCount=0}:{selected:string;onSelect:(tab:BottomDestination)=>void;onHeight?:(height:number)=>void;activeAgentCount?:number}){

@@ -1,4 +1,5 @@
-import {APP_FONT_FAMILY} from '../typography';
+import {ActivityDisclosure} from './activity-disclosure';
+import {APP_MONO_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
 import React,{useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
@@ -25,18 +26,18 @@ function Content({name,content,result}:{name:string;content:string;result?:Linke
  return <View style={styles.card}>
   <CompactActivityRow title={presentation.title==='Tool output'?name.replace(/^functions\./,'').replaceAll('_',' '):presentation.title} detail={hint} status={status} count={result?.nested?.total} accessibilityLabel={`Tool details: ${name}`} expanded={open} onPress={()=>setOpen(!open)}/>
   {result?.nested&&<NestedToolActivity activity={result.nested}/>}
-  {open&&<View style={styles.details}>
+  {open&&<ActivityDisclosure style={styles.details}>
    <Text style={styles.label}>{name} · {status}</Text>
    <View style={styles.row}><Text style={styles.label}>Arguments / content</Text><CopyAction text={content} label={`Copy tool content: ${name}`}/></View>
-   <Text selectable style={styles.code}>{pretty(content)}</Text>
+   <Text typography="mono" selectable style={styles.code}>{pretty(content)}</Text>
    {result&&<>
     <Pressable accessibilityRole="button" accessibilityLabel={`Tool result: ${name}`} accessibilityState={{expanded:resultOpen}} onPress={()=>setResultOpen(!resultOpen)} style={styles.resultButton}>
      <Text style={styles.summary}>{resultOpen?'Hide result':'Show full result'}</Text>
      {resultOpen?<ChevronDown size={18} color={colors.muted}/>:<ChevronRight size={18} color={colors.muted}/>}
     </Pressable>
-    {resultOpen?<><CopyAction text={resultText} label={`Copy result: ${name}`}/><Text selectable style={styles.code}>{resultText}</Text></>:!!preview&&<Text numberOfLines={3} style={[styles.output,result.isError&&styles.error]}>{preview}</Text>}
+    {resultOpen?<><CopyAction text={resultText} label={`Copy result: ${name}`}/><Text typography="mono" selectable style={styles.code}>{resultText}</Text></>:!!preview&&<Text numberOfLines={3} style={[styles.output,result.isError&&styles.error]}>{preview}</Text>}
    </>}
-  </View>}
+  </ActivityDisclosure>}
  </View>;
 }
 const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
@@ -46,7 +47,7 @@ const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  output:{color:colors.muted,fontSize:12,lineHeight:20},
  details:{paddingLeft:21,paddingBottom:10,gap:8},
  row:{flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
- code:{fontFamily:APP_FONT_FAMILY,color:colors.body,fontSize:12,lineHeight:20},
+ code:{fontFamily:APP_MONO_FONT_FAMILY,color:colors.body,fontSize:12,lineHeight:20},
  resultButton:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
  error:{color:colors.foreground,fontSize:12,lineHeight:20},
 }));

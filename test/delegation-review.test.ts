@@ -1,4 +1,4 @@
-import {prepareFreshPi15Floor} from '../src/maintenance-migration.js';
+import {prepareCurrentRuntimeFixtureFloor} from './fixtures/current-runtime-floor.js';
 import {acquireOwner} from '../src/ownership.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -628,7 +628,7 @@ test('AD review upgrade: original native pending child/reporter resume with lega
       return last?.role==='user'&&last.content==='legacy-child'?slow.provider.streamSimple(model,context,options):original.streamSimple(model,context,options);
     }});
  // The pre-AD host below still uses current native 1.5 storage, not a Pi 1.4 fixture.
- const releaseFloorOwner=acquireOwner(f.dir);try{prepareFreshPi15Floor(f.dir);}finally{releaseFloorOwner();}
+ const releaseFloorOwner=acquireOwner(f.dir);try{prepareCurrentRuntimeFixtureFloor(f.dir);}finally{releaseFloorOwner();}
     const registry=createRegistry();registry.install(SubagentTools);
     legacy=await Harness.open(await openNodeSqliteStorage(join(f.dir,'durable.sqlite')),{models:f.models,registry,settings:{extensions:[SubagentTools]},conversationCreated:async(tx,conversation)=>{await tx.doc(ChatMeta,conversation.id);}},ctx);
     const root=await legacy.root(ctx);await root.commit(async tx=>{await tx.doc(Library,root.id);},ctx);

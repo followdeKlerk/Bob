@@ -35,17 +35,32 @@ import java.util.concurrent.Semaphore
 
 // Font failures must not prevent opening a surface (including resource-light tests).
 private fun TextView.useSurfaceTypeface() {
-    typeface = try { ResourcesCompat.getFont(context, R.font.nordwand_mono) ?: Typeface.MONOSPACE }
-        catch (_: Exception) { Typeface.MONOSPACE }
+    typeface = try { ResourcesCompat.getFont(context, R.font.nunito) ?: Typeface.DEFAULT }
+        catch (_: Exception) { Typeface.DEFAULT }
 }
-private fun surfaceFontFaces(context: Context): String = listOf(
-    Triple("Regular", "400", "normal"), Triple("Bold", "500 900", "normal"),
-    Triple("Italic", "400", "italic"), Triple("BoldItalic", "500 900", "italic")
-).joinToString("") { (file, weight, style) ->
-    try {
-        val data = context.assets.open("fonts/NordwandMono-$file.woff2").use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
-        "@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,$data) format('woff2');font-weight:$weight;font-style:$style;font-display:swap}"
-    } catch (_: Exception) { "" }
+private fun surfaceFontFaces(context: Context): String {
+    // Reuse the exact native TTF resources offline; do not ship a second copy.
+    val ui = listOf(
+        Triple(R.font.nunito_regular, "400", "normal"), Triple(R.font.nunito_medium, "500", "normal"),
+        Triple(R.font.nunito_semi_bold, "600", "normal"), Triple(R.font.nunito_bold, "700 1000", "normal"),
+        Triple(R.font.nunito_regular_italic, "400", "italic"), Triple(R.font.nunito_medium_italic, "500", "italic"),
+        Triple(R.font.nunito_semi_bold_italic, "600", "italic"), Triple(R.font.nunito_bold_italic, "700 1000", "italic")
+    ).joinToString("") { (font, weight, style) ->
+        try {
+            val data = context.resources.openRawResource(font).use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
+            "@font-face{font-family:'Nunito';src:url(data:font/ttf;base64,$data) format('truetype');font-weight:$weight;font-style:$style;font-display:swap}"
+        } catch (_: Exception) { "" }
+    }
+    val mono = listOf(
+        Triple("Regular", "400", "normal"), Triple("Bold", "500 900", "normal"),
+        Triple("Italic", "400", "italic"), Triple("BoldItalic", "500 900", "italic")
+    ).joinToString("") { (file, weight, style) ->
+        try {
+            val data = context.assets.open("fonts/NordwandMono-$file.woff2").use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
+            "@font-face{font-family:'Nordwand Mono';src:url(data:font/woff2;base64,$data) format('woff2');font-weight:$weight;font-style:$style;font-display:swap}"
+        } catch (_: Exception) { "" }
+    }
+    return ui + mono
 }
 
 internal data class SurfaceSession(val endpoint: String, val identity: String, val token: String, val chat: Long, val id: String, val resource: JSONObject)
@@ -384,7 +399,7 @@ internal class BobSurfacePanel(context: Context, private val onClose: () -> Unit
             val fontFaceCss = surfaceFontFaces(context)
             val safePayload = payload.toString().replace("<", "\\u003c")
             val colors = BobAppearance.palette(context)
-            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:${colors.backgroundCss};color:${colors.foregroundCss};font:14px sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
+            val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src about: data: blob:; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style id="bob-font-faces">$fontFaceCss</style><style>html,body{height:100%;margin:0;background:${colors.backgroundCss};color:${colors.foregroundCss};font:14px Nunito,sans-serif}body{display:flex;flex-direction:column}#status{padding:8px}#status:empty{display:none}#surface{flex:1;min-height:0}</style></head><body><div id="status" role="status" aria-live="polite">Loading isolated content…</div><div id="surface"></div><script>$bundle
 window.startBobSurface($safePayload,${JSONObject.quote(nonce)},${if (inline) "true" else "false"},${JSONObject.quote(inlineMeasure)},document.getElementById('bob-font-faces').textContent).catch(e=>document.getElementById('status').textContent='Unavailable: '+e.message);</script></body></html>"""
             view.loadDataWithBaseURL("https://bob.invalid/", html, "text/html", "utf-8", null)
         }

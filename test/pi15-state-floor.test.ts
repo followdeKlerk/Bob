@@ -16,6 +16,7 @@ import * as disabled from '../src/maintenance-migration.js';
 // Synthetic positive pins exist ONLY in this private compiled copy. Production
 // policy rejects these synthetic pairs; configuration/environment cannot pin it.
 const from='a'.repeat(64),to='b'.repeat(64);
+const patchRuntime=disabled.installedDurableVersion()==='1.5.1';
 const stage=mkdtempSync(join(tmpdir(),'bob-pi15-state-policy-'));
 after(()=>rmSync(stage,{recursive:true,force:true}));
 writeFileSync(join(stage,'package.json'),'{"type":"module"}');
@@ -65,7 +66,7 @@ for(const resume of [true,false])test(`legacy native v1 is rejected before nativ
  try{
   const lock=acquireOwner(f.stateDir);
   try{await assert.rejects(openRuntime(state,undefined,undefined,{resume}),/already owned/);}finally{lock();}
-  await assert.rejects(openRuntime(state,undefined,undefined,{resume}),/Existing Durable state requires explicit Pi 1.5 maintenance migration/);
+  await assert.rejects(openRuntime(state,undefined,undefined,{resume}),/Existing Durable state requires explicit Pi 1.5(?:.1 supervisor crossing| maintenance migration)/);
   assert.equal(version(state.db),0);assert.deepEqual(readFileSync(join(f.stateDir,'durable.sqlite')),native);
   assert.equal(disabled.readControlFloor(f.stateDir).kind,'legacy');
   const release=acquireOwner(f.stateDir);release();
@@ -80,8 +81,10 @@ test('first native open establishes fresh origin under ownership; restart and ol
   try{await assert.rejects(openRuntime(state),/already owned/);assert.equal(version(state.db),0);assert.equal(existsSync(join(dir,'durable.sqlite')),false);}finally{lock();}
   const runtime=await openRuntime(state,undefined,undefined,{resume:false});
   const libraryId=runtime.library.id;await runtime.close();
-  assert.deepEqual(disabled.readControlFloor(dir),{kind:'pi15-fresh',origin:'fresh',minDurable:'1.5.0',protocol:'bob-pi15-v1',lifecycleSchemaVersion:0});
-  assert.equal(version(state.db),3);assert.equal(controlSchema(state),1);
+  assert.deepEqual(disabled.readControlFloor(dir),patchRuntime
+   ?{kind:'pi151',origin:'fresh',minDurable:'1.5.1',protocol:'bob-pi151-v1',to:disabled.pi151Fingerprint,migrationReleaseId:'fresh-bootstrap',migrationCli:new URL('../src/cli.js',import.meta.url).pathname,lifecycleSchemaVersion:0}
+   :{kind:'pi15-fresh',origin:'fresh',minDurable:'1.5.0',protocol:'bob-pi15-v1',lifecycleSchemaVersion:0});
+  assert.equal(version(state.db),patchRuntime?4:3);assert.equal(controlSchema(state),1);
   assert.throws(()=>new Pi14State(dir),/Unsupported newer control schema/);
   const reopened=await openRuntime(state,undefined,undefined,{resume:false});
   try{assert.equal(reopened.library.id,libraryId);}finally{await reopened.close();}
@@ -121,7 +124,7 @@ for(const lifecycle of [0,1,2])for(const origin of ['fresh','migrated'])test(`${
  }finally{state?.close();f.close();}
 });
 
-test('recognized compiled migrated floor passes runtime barrier and opens native storage without resume',async()=>{
+test('recognized historical v3 floor follows the installed runtime: bridge opens, target rejects before native open',async()=>{
  const f=fixture();let state:any;
  try{
   // Use official 1.5 storage to exercise the positive runtime path without
@@ -129,11 +132,19 @@ test('recognized compiled migrated floor passes runtime barrier and opens native
   // verifies that even a native v1 marker is never opened on the legacy path.
   rmSync(join(f.stateDir,'durable.sqlite'));state=new State(f.stateDir);
   const initial=await openRuntime(state,undefined,undefined,{resume:false}),root=initial.library.id;await initial.close();state.close();state=undefined;
-  mutate(f.stateDir,'DROP TABLE maintenance_runtime_floor; PRAGMA user_version=0');
+  mutate(f.stateDir,'DROP TABLE IF EXISTS maintenance_pi151_floor; DROP TABLE maintenance_runtime_floor; PRAGMA user_version=0');
   enabled.preparePi15Floor(f.home,f.stateDir,f.journal,f.intent);state=new EnabledState(f.stateDir);
-  const runtime=await enabledRuntime(state,undefined,undefined,{resume:false});
-  try{assert.equal(runtime.library.id,root);}finally{await runtime.close();}
+  const native=readFileSync(join(f.stateDir,'durable.sqlite'));
+  if(patchRuntime){
+   await assert.rejects(enabledRuntime(state,undefined,undefined,{resume:false}),/requires explicit supervisor crossing.*control-v4/);
+   assert.deepEqual(readFileSync(join(f.stateDir,'durable.sqlite')),native);
+  }else{
+   const runtime=await enabledRuntime(state,undefined,undefined,{resume:false});
+   try{assert.equal(runtime.library.id,root);}finally{await runtime.close();}
+  }
+  assert.equal(typeof root,'number');
   assert.equal(enabled.readControlFloor(f.stateDir).kind,'pi15');
+  const lock=acquireOwner(f.stateDir);lock();
  }finally{state?.close();f.close();}
 });
 

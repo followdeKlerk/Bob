@@ -80,6 +80,7 @@ function Text({
   const Component = asChild ? Slot : RNText;
   return (
     <Component
+      typography={variant==='code'?'mono':'ui'}
       className={cn(textVariants({ variant }), textClass, className)}
       role={variant ? ROLE[variant] : undefined}
       aria-level={variant ? ARIA_LEVEL[variant] : undefined}

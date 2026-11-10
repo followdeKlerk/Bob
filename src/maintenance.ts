@@ -4,9 +4,9 @@ import {spawn,type ChildProcess} from 'node:child_process';
 import {randomBytes,createHash} from 'node:crypto';
 import {join} from 'node:path';
 import {acquireOwner} from './ownership.js';
-import {readControlFloor,assertReleaseFloor,assertFloorIntent,assertLegacyIntent,assertBridgeActivation,preparePi15Floor,prepareFreshPi15ReleaseFloor,verifiedBackup,type MigrationIntent,type SupervisorEvidence} from './maintenance-migration.js';
+import {readControlFloor,assertReleaseFloor,assertFloorIntent,assertLegacyIntent,assertBridgeActivation,preparePi15Floor,prepareFreshPi15ReleaseFloor,verifiedBackup,type MigrationIntent,type SupervisorEvidence,patchSupervisorProtocol,assertPatchFloorIntent,assertPrePatchIntent,preparePi151Floor,prepareFreshPi151ReleaseFloor,type PatchMigrationIntent} from './maintenance-migration.js';
 export type UpdateRequest={id:string;action:'build'|'update'|'rollback';target:'android'|'backend'|'all';conversationId?:number};
-export type UpdateJob=UpdateRequest&{status:string;stage:string;created:number;updated:number;error?:string;releaseId?:string};
+export type UpdateJob=UpdateRequest&{status:string;stage:string;created:number;updated:number;error?:string;releaseId?:string;validation?:{lane:'ui-fast'|'full';reason:string;baselineId?:string;changedFiles?:string[]}};
 /** Deployment journal only. Conversation/tool execution remains in official Durable. */
 export class MaintenanceStore{
  readonly db:DatabaseSync;
@@ -47,7 +47,9 @@ export function rawCompatibilityFingerprint(root:string){
  * the existing transition gate. The historical Pi1.5 floor/intent stay untouched. */
 export function compatibilityFingerprint(root:string){
  const raw=rawCompatibilityFingerprint(root);
- return raw==='95750e8918ed663e0607933a0e3867674fec8098d32981b45008b15806a072f9'
+ // The second exact raw pin is the 1.5.0 bridge: same persistence code, plus
+ // the monotonic v4 lifecycle guard. Its type-only imports use Chord's old root.
+ return (raw==='95750e8918ed663e0607933a0e3867674fec8098d32981b45008b15806a072f9'||raw==='2a4bc4fcd5898898e00e03fb5d89702df671c264061eb2d8eff983e086e2f60c')
   ?'5c798ab849e5ebf456f1aa4da70f8ef88f87af72bd8e709292083776ba1d0b45':raw;
 }
 export type Release={id:string;cli:string;sourceHash?:string;compatibility?:string;durableVersion?:string;apk?:{path:string;sha256:string;size:number;versionCode:number;versionName:string;signer:string}};
@@ -59,10 +61,19 @@ export class MaintenanceSupervisor{
  async health(){const response=await fetch(this.config.origin+'/internal/update-health',{headers:{authorization:'Bearer '+this.healthToken},signal:AbortSignal.timeout(3000)});if(!response.ok)throw Error('Backend health unavailable');const value=await response.json() as {backendId:string;releaseId:string;foreground:number};if(value.backendId!==this.config.backendId)throw Error('Backend identity mismatch');return value;}
  /** Every recovery decision reads the actual floor, including COMMIT-before-phase crashes. */
  recoveryRelease():Release{
-  const intent=this.store.get<MigrationIntent>('migrationIntent');let floor=readControlFloor(this.config.stateDir,!!intent);
+  const intent=this.store.get<MigrationIntent>('migrationIntent'),patch=this.store.get<PatchMigrationIntent>('patchMigrationIntent');let floor=this.readFloor();
   let active=this.store.get<Release>('active');
   const interrupted=this.store.get<{previous:Release;candidate:Release}>('transition');
-  if(floor.kind==='pi15'){
+  if(floor.kind==='pi151'){
+   assertPatchFloorIntent(floor,patch);
+   if(interrupted?.previous?.compatibility===floor.to&&interrupted.previous.durableVersion==='1.5.1')active=interrupted.previous;
+   if(!active||active.compatibility!==floor.to||active.durableVersion!=='1.5.1'){
+    if(!patch)throw Error('Fresh Pi 1.5.1 floor has no compatible installed recovery release');
+    active=patch.candidate;
+   }
+  }else if(patch){
+   assertPrePatchIntent(patch);active=patch.previous;
+  }else if(floor.kind==='pi15'){
    assertFloorIntent(floor,intent);
    // The stable loader may still have selected the old bridge runner. It must recover forward.
    if(interrupted?.previous?.compatibility===floor.to&&interrupted.previous.durableVersion==='1.5.0')active=interrupted.previous;
@@ -75,20 +86,38 @@ export class MaintenanceSupervisor{
    const releaseOwner=acquireOwner(this.config.stateDir);
    try{floor=prepareFreshPi15ReleaseFloor(this.config.stateDir,active,intent);}finally{releaseOwner();}
   }
-  assertReleaseFloor(floor,active,intent);
+  if((floor.kind==='legacy'||floor.kind==='pi15-fresh')&&!intent&&!patch&&active.durableVersion==='1.5.1'){
+   const releaseOwner=acquireOwner(this.config.stateDir);
+   try{floor=prepareFreshPi151ReleaseFloor(this.config.stateDir,active,intent,patch);}finally{releaseOwner();}
+  }
+  assertReleaseFloor(floor,active,intent,patch);
   this.store.set('active',active);this.store.set('transition',null);
   if(floor.kind==='legacy'&&intent)this.store.set('migrationIntent',null);
+  if(floor.kind!=='pi151'&&patch)this.store.set('patchMigrationIntent',null);
   return active;
  }
+ /** v4 preserves and validates the historical floor/intent rather than replacing it. */
+ private readFloor(){
+  const intent=this.store.get<MigrationIntent>('migrationIntent'),patch=this.store.get<PatchMigrationIntent>('patchMigrationIntent');
+  const floor=readControlFloor(this.config.stateDir,!!intent||!!patch);
+  if(floor.kind==='pi151'){
+   const historical=readControlFloor(this.config.stateDir,true,true);
+   if(historical.kind==='pi15')assertFloorIntent(historical,intent);
+   else if(historical.kind!=='pi15-fresh'||intent)throw Error('Pi 1.5.1 historical floor/intent mismatch');
+  }
+  return floor;
+ }
+ private assertRelease(release:Release){assertReleaseFloor(this.readFloor(),release,this.store.get<MigrationIntent>('migrationIntent'),this.store.get<PatchMigrationIntent>('patchMigrationIntent'));}
  async start(release:Release){
   if(this.child&&this.child.exitCode===null&&this.child.signalCode===null)throw Error('Backend already running');
   // Check under the same OS-backed ownership lock used by the runtime. Release for handoff;
   // the child's own runtime lock remains the final single-owner authority.
   const releaseOwner=acquireOwner(this.config.stateDir);
   try{
-   const intent=this.store.get<MigrationIntent>('migrationIntent');let floor=readControlFloor(this.config.stateDir,!!intent);
+   const intent=this.store.get<MigrationIntent>('migrationIntent'),patch=this.store.get<PatchMigrationIntent>('patchMigrationIntent');let floor=this.readFloor();
    if(floor.kind==='legacy'&&!intent&&release.durableVersion==='1.5.0')floor=prepareFreshPi15ReleaseFloor(this.config.stateDir,release,intent);
-   assertReleaseFloor(floor,release,intent);
+   if((floor.kind==='legacy'||floor.kind==='pi15-fresh')&&!intent&&!patch&&release.durableVersion==='1.5.1')floor=prepareFreshPi151ReleaseFloor(this.config.stateDir,release,intent,patch);
+   assertReleaseFloor(floor,release,intent,patch);
   }finally{releaseOwner();}
   this.expectedStop=false;
   const fd=openSync(join(this.home,'backend.log'),'a',0o600);
@@ -108,44 +137,52 @@ export class MaintenanceSupervisor{
  async activate(candidate:Release){
   if(this.transitioning)throw Error('A release transition is already in progress');
   const previous=this.store.get<Release>('active');if(!previous)throw Error('No rollback release');
-  assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),previous,this.store.get<MigrationIntent>('migrationIntent'));
-  const crossing=candidate.compatibility!==previous.compatibility;
+  this.assertRelease(previous);
+  const crossing=candidate.compatibility!==previous.compatibility,patchCrossing=crossing&&candidate.durableVersion==='1.5.1';
   if(crossing)assertBridgeActivation(previous,candidate,this.store.get<SupervisorEvidence>('supervisorEvidence'));
-  else assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),candidate,this.store.get<MigrationIntent>('migrationIntent'));
+  else this.assertRelease(candidate);
   this.transitioning=true;this.store.set('draining',true);
   try{
    const until=Date.now()+600000;
    while((await this.health()).foreground!==0){if(Date.now()>until)throw Error('Active work did not settle; release remains staged');await sleep(1000);}
    if(crossing)assertBridgeActivation(previous,candidate,this.store.get<SupervisorEvidence>('supervisorEvidence'));
    this.store.set('transition',{previous,candidate});
-   if(crossing)this.store.set('migrationIntent',{protocol:'bob-pi15-v1',previous,candidate,phase:'intent'} satisfies MigrationIntent);
+   if(patchCrossing)this.store.set('patchMigrationIntent',{protocol:patchSupervisorProtocol,previous,candidate,phase:'intent'} satisfies PatchMigrationIntent);
+   else if(crossing)this.store.set('migrationIntent',{protocol:'bob-pi15-v1',previous,candidate,phase:'intent'} satisfies MigrationIntent);
    await this.stop();
    try{
-    if(crossing)preparePi15Floor(this.home,this.config.stateDir,this.store,this.store.get<MigrationIntent>('migrationIntent')!);
+    if(patchCrossing)preparePi151Floor(this.home,this.config.stateDir,this.store,this.store.get<PatchMigrationIntent>('patchMigrationIntent')!);
+    else if(crossing)preparePi15Floor(this.home,this.config.stateDir,this.store,this.store.get<MigrationIntent>('migrationIntent')!);
     else{
      const releaseOwner=acquireOwner(this.config.stateDir);
      try{
-      assertReleaseFloor(readControlFloor(this.config.stateDir,!!this.store.get<MigrationIntent>('migrationIntent')),candidate,this.store.get<MigrationIntent>('migrationIntent'));
+      this.assertRelease(candidate);
       this.store.set('lastBackup',verifiedBackup(this.home,this.config.stateDir,candidate.id));
      }finally{releaseOwner();}
     }
     await this.start(candidate);this.store.set('previous',previous);this.store.set('active',candidate);this.store.set('transition',null);
     const intent=this.store.get<MigrationIntent>('migrationIntent');
-    if(crossing&&intent)this.store.set('migrationIntent',{...intent,phase:'complete'});
+    if(patchCrossing){const patch=this.store.get<PatchMigrationIntent>('patchMigrationIntent')!;this.store.set('patchMigrationIntent',{...patch,phase:'complete'});}
+    else if(crossing&&intent)this.store.set('migrationIntent',{...intent,phase:'complete'});
    }
    catch(error){
     await this.stop();
     // This read is mandatory even if migration threw before it could journal its COMMIT.
     // Unknown/corrupt floors throw here, leaving intent and state intact, with no spawn.
-    const intent=this.store.get<MigrationIntent>('migrationIntent'),floor=readControlFloor(this.config.stateDir,!!intent);
+    const intent=this.store.get<MigrationIntent>('migrationIntent'),patch=this.store.get<PatchMigrationIntent>('patchMigrationIntent'),floor=this.readFloor();
+    if(floor.kind==='pi151'){
+     assertPatchFloorIntent(floor,patch);
+     if(crossing)throw Error('Pi 1.5.1 floor committed; compatible candidate recovery required. Patch intent retained; no old restart or database restore.',{cause:error});
+    }else if(patch)assertPrePatchIntent(patch);
     if(floor.kind==='pi15'){
      assertFloorIntent(floor,intent);
-     if(crossing)throw Error('Pi 1.5 floor committed; compatible candidate recovery required. Intent retained; no old restart or database restore.',{cause:error});
+     if(crossing&&!patchCrossing)throw Error('Pi 1.5 floor committed; compatible candidate recovery required. Intent retained; no old restart or database restore.',{cause:error});
     }
     if(floor.kind==='legacy'&&intent)assertLegacyIntent(intent);
-    assertReleaseFloor(floor,previous,intent);
+    assertReleaseFloor(floor,previous,intent,patch);
     await this.start(previous);this.store.set('active',previous);this.store.set('transition',null);
-    if(crossing)this.store.set('migrationIntent',null);
+    if(patchCrossing)this.store.set('patchMigrationIntent',null);
+    else if(crossing)this.store.set('migrationIntent',null);
     throw Error('Unhealthy candidate rolled back to previous code; state retained',{cause:error});
    }
   }finally{this.store.set('draining',false);this.transitioning=false;}

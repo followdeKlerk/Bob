@@ -47,8 +47,9 @@ internal object AppDiagnostics {
         } catch (_: Exception) { /* Recording must never crash the app. */ }
     }
     fun report(context: Context): String {
+        val version = InstalledAppVersion.get(context)
         val report = JSONObject().put("schema", 3).put("collectedAt", System.currentTimeMillis())
-            .put("versionName", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE)
+            .put("versionName", version.name).put("versionCode", version.code)
             .put("androidSdk", Build.VERSION.SDK_INT).put("deviceModel", Build.MODEL)
             .put("events", json(read(context)))
             .put("crashCapture", "code_only_best_effort")

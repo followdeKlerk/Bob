@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import {readControlFloor} from "./maintenance-migration.js";
+import {readControlFloor,assertRuntimeFloor} from "./maintenance-migration.js";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export const secret = () => randomBytes(32).toString("base64url");
 export class State {
@@ -11,7 +11,10 @@ export class State {
   constructor(readonly dir: string) {
     // Validate before opening a writer, setting WAL, creating tables or changing config.
     // A runtime floor is not the independently maintained device lifecycle schema.
-    readControlFloor(dir);
+    const floor=readControlFloor(dir);
+    // Supervisor may inspect v4 under 1.5.0; its direct CLI/State writer may not.
+    // Target State can still inspect/setup older floors; native open has its own gate.
+    if(floor.kind==='pi151')assertRuntimeFloor(floor);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
     this.db = new DatabaseSync(join(dir, "control.sqlite"));
@@ -26,7 +29,7 @@ export class State {
       this.set("identity", this.id);
     } catch(error) {this.db.close();throw error;}
   }
-  /** Raw lifecycle marker (0 remains historical/unversioned), never runtime floor 3. */
+  /** Raw lifecycle marker (0 remains historical/unversioned), never runtime floor 3/4. */
   get lifecycleSchemaVersion(): 0|1|2 {
     return readControlFloor(this.dir,true).lifecycleSchemaVersion;
   }

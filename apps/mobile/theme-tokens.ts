@@ -1,8 +1,9 @@
 // Semantic palettes. Never recolor drawing paper or user-generated visuals.
+// Chat gets dedicated deeper-beige surfaces, not the shared selection/panel colors.
 const warmWhite='#e8e0d2' as const;
-export const darkColors={background:'#000000',navigationSurface:warmWhite,assistantBubble:'#191919',panel:'#191919',iconSurface:'#262626',selectedSurface:'#303030',selectedBorder:'#737373',surface:'#272727',composer:'#242424',foreground:warmWhite,body:warmWhite,muted:'#a1a1a1',border:'#3f3f3f',subtle:'#2b2b2b',accent:warmWhite,onAccent:'#000000',navigationInk:'#111111',destructive:'#5c5c5c'} as const;
+export const darkColors={background:'#000000',navigationSurface:warmWhite,assistantBubble:'#191919',ownerBubble:'#303030',bubbleMuted:'#a1a1a1',panel:'#191919',iconSurface:'#262626',selectedSurface:'#303030',selectedBorder:'#737373',surface:'#272727',composer:'#242424',foreground:warmWhite,body:warmWhite,muted:'#a1a1a1',border:'#3f3f3f',subtle:'#2b2b2b',accent:warmWhite,onAccent:'#000000',navigationInk:'#111111',destructive:'#5c5c5c'} as const;
 export type ThemeColors={[K in keyof typeof darkColors]:string};
-export const lightColors:ThemeColors={background:'#f7f5f0',navigationSurface:'#e5dfd4',assistantBubble:'#e8e3d9',panel:'#fffdf8',iconSurface:'#e9e4da',selectedSurface:'#e2ddd2',selectedBorder:'#736b5e',surface:'#eeeae2',composer:'#fffdf8',foreground:'#292720',body:'#343129',muted:'#655f54',border:'#958d7f',subtle:'#e6e0d5',accent:'#302d27',onAccent:'#fffdf8',navigationInk:'#3e382e',destructive:'#e2ddd2'};
+export const lightColors:ThemeColors={background:'#e8dfd0',navigationSurface:'#e5dfd4',assistantBubble:'#d5c5ae',ownerBubble:'#ddcfbb',bubbleMuted:'#554d40',panel:'#f0e8dc',iconSurface:'#e9e4da',selectedSurface:'#e2ddd2',selectedBorder:'#736b5e',surface:'#eee5d8',composer:'#f0e8dc',foreground:'#292720',body:'#343129',muted:'#655f54',border:'#958d7f',subtle:'#e6e0d5',accent:'#302d27',onAccent:'#fffdf8',navigationInk:'#3e382e',destructive:'#e2ddd2'};
 // Compatibility for non-rendering consumers; app components use useTheme.
 export const colors=darkColors;
 export const menuRadii={card:20,control:14,icon:10} as const;
@@ -26,7 +27,13 @@ export const noteShades={
 export function makeSurfaceShadows(scheme:'light'|'dark'){
  const ink=scheme==='light'?'62, 56, 46':'0, 0, 0';
  return {
-  floating:{boxShadow:`0 2px 6px rgba(${ink}, ${scheme==='light'?0.08:0.06})`},
-  popup:{boxShadow:`0 3px 10px rgba(${ink}, ${scheme==='light'?0.10:0.08})`},
+  floating:{boxShadow:`0 2px 7px rgba(${ink}, ${scheme==='light'?0.11:0.08})`},
+  popup:{boxShadow:`0 3px 11px rgba(${ink}, ${scheme==='light'?0.13:0.10})`},
  };
 }
+
+// Quiet task-state accents, separate from the app's neutral navigation palette.
+export const activityTones={
+ light:{running:{ink:'#315c82',fill:'#e4edf4'},done:{ink:'#35634b',fill:'#e4eee5'},failed:{ink:'#904034',fill:'#f6e8e3'}},
+ dark:{running:{ink:'#adcbe3',fill:'#192c3b'},done:{ink:'#a9c9b1',fill:'#1b3023'},failed:{ink:'#efb5ab',fill:'#3c2422'}},
+} as const;

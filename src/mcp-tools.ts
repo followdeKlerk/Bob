@@ -2,7 +2,7 @@ import {isToolVisibilityAppOnly} from '@modelcontextprotocol/ext-apps/app-bridge
 import {Client,StreamableHTTPClientTransport,type Transport} from '@modelcontextprotocol/client';
 import {defineDoc,defineTool,section} from '@earendil-works/pi-durable';
 import * as schema from '@earendil-works/pi-schema';
-import type {JsonValue} from '@earendil-works/chord';
+import type {JsonValue} from '@earendil-works/chord/json';
 import {McpConnection,validateMcpEndpoint,type McpConnectionConfig} from '@bob-local/interactive';
 
 type Store={get<T>(key:string):T|undefined};

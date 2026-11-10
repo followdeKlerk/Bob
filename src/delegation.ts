@@ -1,4 +1,5 @@
 import {readSoul} from '@bob-local/resources';
+import {isRetired} from './retired-chat-profile.js';
 import {DelegationBudget,authorizeDelegation,checkDelegationDispatch,recordDelegationDispatch,restoreDelegationBudget,stopDelegationHelper} from './delegation-budget.js';
 import {DelegationChildTools,DelegationToolProvisioning,provisionLegacyDelegationTools,applyDelegationTools,enforceDelegationTools,snapshotDelegationTools,COORDINATOR_POLICY,readDelegationBehavior,behaviorRevision} from './delegation-behavior.js';
 import {type ModelThinkingLevel} from '@earendil-works/pi-ai';
@@ -200,6 +201,7 @@ export function createDelegation(state:State,baseModels:Models,registry:Registry
   do{
    const page=await harness.commit(tx=>tx.scanConversations({},100,cursor),ctx);
    for(const conversation of page.items){
+    if(await isRetired(harness,conversation.id))continue;
     const saved=await harness.snapshot(DelegationSession,conversation.id,ctx);
     if(saved?.config)installSnapshot(DelegationConfig.parse(saved.config));
     else if(!conversation.owner){

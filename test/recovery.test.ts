@@ -4,10 +4,10 @@ import {mkdtempSync,writeFileSync,readFileSync,mkdirSync,rmSync,symlinkSync,rena
 import {join} from 'node:path';
 import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
-import {backupState,restoreState} from '../src/recovery.js';
+import {backupState,restoreState,installedDurableVersion} from '../src/recovery.js';
 test('quiescent SQLite backup, integrity-verified restore, tamper and overwrite refusal',async()=>{
  const dir=mkdtempSync(join(process.env.TMPDIR!,'bob-recovery-')),s=new State(join(dir,'source'));const rt=await openRuntime(s);const c=await rt.harness.createConversation({ownership:{kind:'ownerless'}},ctx);await c.submit({type:'write',entry:{kind:'bob.test',data:{text:'persisted'}}},ctx);
- await assert.rejects(()=>backupState(s,join(dir,'busy')));await rt.close();const manifest=await backupState(s,join(dir,'backup'));assert.equal(manifest.backendId,s.id);assert.equal(manifest.format,2);assert.equal(manifest.durable,'1.5.0');assert.equal(manifest.controlSchemaVersion,3);assert.equal(manifest.floor.kind,'pi15-fresh');const restored=restoreState(join(dir,'backup'),join(dir,'restored'));assert.equal(restored.backendId,s.id);assert.throws(()=>restoreState(join(dir,'backup'),join(dir,'restored')));
+ await assert.rejects(()=>backupState(s,join(dir,'busy')));await rt.close();const manifest=await backupState(s,join(dir,'backup'));assert.equal(manifest.backendId,s.id);assert.equal(manifest.format,2);assert.equal(manifest.durable,installedDurableVersion());assert.equal(manifest.controlSchemaVersion,installedDurableVersion()==='1.5.1'?4:3);assert.equal(manifest.floor.kind,installedDurableVersion()==='1.5.1'?'pi151':'pi15-fresh');const restored=restoreState(join(dir,'backup'),join(dir,'restored'));assert.equal(restored.backendId,s.id);assert.throws(()=>restoreState(join(dir,'backup'),join(dir,'restored')));
  const r=new State(join(dir,'restored')),rr=await openRuntime(r);try{const rc=(await rr.harness.conversation(c.id,ctx))!;assert.ok((await rc.entries({},100,undefined,ctx)).items.some(e=>e.kind==='bob.test'));}finally{await rr.close();r.close();s.close();}
  writeFileSync(join(dir,'backup/control.sqlite'),'tamper');assert.throws(()=>restoreState(join(dir,'backup'),join(dir,'invalid')));
 });

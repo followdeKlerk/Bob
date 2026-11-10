@@ -98,6 +98,15 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.bobmobile"
+    // Android 10+ forbids exec from writable app storage. Package the separate
+    // Mosh PIE under lib/ and ask PackageManager to extract it to nativeLibraryDir.
+    packagingOptions { jniLibs { useLegacyPackaging = true } }
+    sourceSets {
+        main {
+            jniLibs.srcDir(file("build/generated/terminal/jniLibs"))
+            assets.srcDir(file("build/generated/terminal/assets"))
+        }
+    }
     defaultConfig {
         applicationId "com.bobmobile"
         buildConfigField "boolean", "BOB_PUSH_CONFIGURED", firebaseConfigured.toString()
@@ -108,8 +117,8 @@ android {
         resValue "string", "project_id", firebaseConfigured ? firebaseConfig.project_info.project_id : ""
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 148
-        versionName "0.3.145"
+        versionCode 175
+        versionName "0.3.172"
     }
     signingConfigs {
         release {
@@ -164,7 +173,14 @@ tasks.register("buildBobInteractive", Exec) {
     inputs.file(rootProject.file("../../../package-lock.json"))
     outputs.file(file("src/main/assets/bob-host.js"))
 }
-tasks.named("preBuild").configure { dependsOn("buildBobInteractive") }
+tasks.register("buildBobTerminal", Exec) {
+    workingDir rootProject.projectDir
+    commandLine "bash", rootProject.file("terminal/build-mosh.sh").absolutePath
+    inputs.files(rootProject.file("terminal/build-mosh.sh"), rootProject.file("terminal/terminal-pty.c"),
+        rootProject.file("terminal/vendor-manifest.json"), rootProject.file("terminal/README.md"), rootProject.file("terminal/terminal-pty-test.c"))
+    outputs.dir(layout.buildDirectory.dir("generated/terminal"))
+}
+tasks.named("preBuild").configure { dependsOn("buildBobInteractive", "buildBobTerminal") }
 
 // Keep matching Hermes symbols private on the build machine, never inside the APK.
 // Numeric crash positions are only useful with the exact release's composed map.

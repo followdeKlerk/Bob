@@ -38,9 +38,10 @@ internal object ApprovedDiagnostics {
                     .put("importance", info.importance).put("pssKb", info.pss).put("rssKb", info.rss))
             }
         } catch (_: Exception) { /* Missing exit history does not prevent sharing local events. */ }
+        val version = InstalledAppVersion.get(context)
         val webVersion = if (Build.VERSION.SDK_INT >= 26) WebView.getCurrentWebViewPackage()?.versionName else null
         return JSONObject().put("schema", 1).put("collectedAt", System.currentTimeMillis())
-            .put("versionName", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("androidSdk", Build.VERSION.SDK_INT)
+            .put("versionName", version.name).put("versionCode", version.code).put("androidSdk", Build.VERSION.SDK_INT)
             .put("webViewVersion", webVersion?.takeIf { it.matches(Regex("[0-9A-Za-z._+-]{1,80}")) } ?: "unavailable")
             .put("events", events).put("exits", exits)
             .put("inline", JSONArray(context.getSharedPreferences("inline-diagnostics", Context.MODE_PRIVATE).getString("events", "[]"))).toString()

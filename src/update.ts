@@ -3,7 +3,7 @@ import {copyFileSync,createReadStream,existsSync,lstatSync,mkdirSync,readFileSyn
 import {join,resolve,relative,isAbsolute} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {State} from './state.js';
-import {backupState,restoreState} from './recovery.js';
+import {backupState,restoreState,installedDurableVersion} from './recovery.js';
 import {controlSchema,migrateControl} from './control-migrations.js';
 import {openRuntime,ctx} from './runtime.js';
 import {requireDisjoint} from './custom-migration.js';
@@ -49,14 +49,14 @@ export async function updateRelease(state:State,options:UpdateOptions){
       if(installed.status!==0)throw Error('Offline package installation failed; original state and verified backup retained');
       const packageRoot=join(installation,'node_modules/@bob-local/cli');
       const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
-      if(manifest.name!=='@bob-local/cli'||manifest.version!==options.version||manifest.dependencies?.['@earendil-works/pi-durable']!=='1.5.0')throw Error('Installed release identity/version/runtime mismatch');
+      if(manifest.name!=='@bob-local/cli'||manifest.version!==options.version||manifest.dependencies?.['@earendil-works/pi-durable']!==installedDurableVersion())throw Error('Installed release identity/version/runtime mismatch');
       restoreState(backup,destination);
       restored=true;
       const cli=join(packageRoot,'dist/cli.js');
       const run=(args:string[])=>{const child=spawnSync(process.execPath,[cli,'--state',destination,...args],{encoding:'utf8',timeout:60000,maxBuffer:1024*1024});if(child.status!==0)throw Error('Candidate validation failed: '+args[0]+'; original state and backup retained');return JSON.parse(child.stdout);};
       const migration=run(['migrate','--backup',join(installation,'pre-migration')]);
       const health=run(['doctor']);
-      if(health.backendId!==state.id||health.releaseVersion!==options.version||health.controlSchema!==3||health.lifecycleSchema!==2||health.ownership!=='available')throw Error('Candidate health/identity/schema mismatch');
+      if(health.backendId!==state.id||health.releaseVersion!==options.version||health.controlSchema!==(installedDurableVersion()==='1.5.1'?4:3)||health.durable!==installedDurableVersion()||health.lifecycleSchema!==2||health.ownership!=='available')throw Error('Candidate health/identity/schema mismatch');
       const modules=run(['module','list']);
       if(!Array.isArray(modules)||modules.length<6)throw Error('Candidate module catalog unavailable');
       result={version:options.version,previousVersion:'0.1.0-compatible',backendId:state.id,installation,state:destination,backup,migration,verified:true,activation:'Explicit cutover: keep the original service stopped. Invoke the new CLI with the migrated state, or install its scoped service. No service was restarted automatically.',command:[process.execPath,cli,'--state',destination],rollback:'Before accepting new work, discard only the new installation/state and use the untouched original. After accepting work, restoring the pre-update backup loses subsequent work; no automatic rollback or arbitrary downgrade.'};

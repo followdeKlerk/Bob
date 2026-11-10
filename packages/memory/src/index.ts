@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {defineExtension,defineTask,defineTool,hook,section,GenerationTask,LiveDoc,type Harness,type Storage,type ConversationId,type SubmissionRecord,type Cursor,type Tx,type EntryRecord,type TaskId,type RunningTask,type TaskRuntime} from '@earendil-works/pi-durable';
 import * as schema from '@earendil-works/pi-schema';
-import type {Context} from '@earendil-works/chord';
+import type {Context} from '@earendil-works/chord/context';
 import {BACKGROUND_CONTEXT as context} from '@earendil-works/chord/context';
 import {HindsightClient,MemoryHttpError,memoryConfig,type MemoryConfig} from './client.js';
 import {MemoryActivity,MemoryInstallation,MemoryPreferences,MemorySaves,MemoryTurnPolicy} from './documents.js';

@@ -1,3 +1,4 @@
+import {SectionHeading} from '../components/section-ui';
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {ActivityIndicator,Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
@@ -69,7 +70,6 @@ test('the header uses the actual bundled Bob wordmark image, not a replacement t
 });
 test('searching and switching tabs keep the same native scroll list and fade overlays',()=>{
  const list=tree.root.findByProps({testID:'drawer-scroll-list'});
- act(()=>button('Search loaded sessions').props.onPress());
  act(()=>tree.root.findByProps({accessibilityLabel:'Search loaded sessions'}).props.onChangeText('First'));
  expect(button('First')).toBeDefined();expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
  act(()=>button('Trash').props.onPress());expect(tree.root.findAllByType(EdgeFade)).toHaveLength(2);
@@ -99,7 +99,7 @@ test('embedded Sessions preserves session actions and hides workstation/pairing 
  await act(async()=>tree.update(<SideDrawer embedded mode="sessions" workspaceLabel="My machine" visible onClose={close} navigation={[]} workspaces={[{id:'machine',label:'My machine',onPress:open}]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
  expect(tree.root.findAllByType(Modal)).toHaveLength(0);expect(button('First')).toBeDefined();expect(button('Connect backend')).toBeUndefined();expect(button('My machine')).toBeUndefined();expect(button('New conversation')).toBeDefined();
  expect(button('All').props.accessibilityState.selected).toBe(true);
- expect(StyleSheet.flatten(button('All').props.style)).toMatchObject({minHeight:48,backgroundColor:colors.accent});
+ expect(StyleSheet.flatten(button('All').props.style)).toMatchObject({minHeight:48,backgroundColor:colors.selectedSurface});
  act(()=>button('Session controls for First').props.onPress({nativeEvent:{pageY:350}}));expect(button('Rename')).toBeDefined();
 });
 
@@ -152,7 +152,8 @@ test('visible session overflow is an independent 48dp target that opens controls
   const option=button(label);
   expect(StyleSheet.flatten(option.props.style).minHeight).toBeGreaterThanOrEqual(48);
   const iconSurface=option.findAll(node=>StyleSheet.flatten(node.props.style)?.width===34)[0];
-  expect(StyleSheet.flatten(iconSurface.props.style)).toMatchObject({width:34,height:34,borderRadius:10,backgroundColor:colors.iconSurface});
+  expect(StyleSheet.flatten(iconSurface.props.style)).toMatchObject({width:34,height:34});
+  expect(StyleSheet.flatten(iconSurface.props.style).backgroundColor).toBeUndefined();
  }
  expect(dismiss).toHaveBeenCalled();expect(open).not.toHaveBeenCalled();expect(close).not.toHaveBeenCalled();expect(action).not.toHaveBeenCalled();
  act(()=>button('Dismiss session controls').props.onPress());
@@ -171,7 +172,7 @@ test('session filters use the Reusables track with scalable labels, 48dp targets
   for(const name of ['Chats','Archived','Trash']){
    expect(button(name).props.accessibilityState.selected).toBe(name===label);
    expect(button(name).findAllByType(Text)).toHaveLength(1);
-   expect(StyleSheet.flatten(button(name).props.style).backgroundColor).toBe(name===label?colors.accent:'transparent');
+   expect(StyleSheet.flatten(button(name).props.style).backgroundColor).toBe(name===label?colors.selectedSurface:colors.surface);
   }
  }
 });
@@ -181,13 +182,12 @@ test('search clearly filters loaded sessions while preserving pagination and lis
  await act(async()=>tree.update(<SideDrawer visible onClose={close} navigation={[]} workspaces={[]} conversations={rows} onNew={newChat} onSettings={()=>{}} disabled={false} loadMore={more} pairing={null} onSessionAction={action}/>));
  const list=tree.root.findByProps({testID:'drawer-scroll-list'});
  expect(list.props).toMatchObject({initialNumToRender:15,maxToRenderPerBatch:12,windowSize:5,keyboardShouldPersistTaps:'handled',keyboardDismissMode:'on-drag'});
- act(()=>button('Search loaded sessions').props.onPress());
  const input=tree.root.findByProps({accessibilityLabel:'Search loaded sessions',placeholder:'Search loaded sessions'});
- expect(input.props.autoFocus).toBe(true);
+ expect(input.props.autoFocus).not.toBe(true);
  act(()=>input.props.onChangeText('not loaded'));
  expect(tree.root.findAll(node=>node.type===Text&&node.props.children==='No matching loaded sessions.').length).toBeGreaterThan(0);
  act(()=>button('Load more conversations').props.onPress());expect(more).toHaveBeenCalledTimes(1);
- expect(button('Close loaded session search')).toBeDefined();
+ expect(button('Close loaded session search')).toBeUndefined();
  expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
 });
 
@@ -205,7 +205,9 @@ test('global session actions sit in the measured bottom footer with New before M
  const props={embedded:true,visible:true,onClose:close,navigation:[],workspaces:[],conversations:rows,onNew:newChat,onSettings:()=>{},onSchedules:()=>{},disabled:false,pairing:null,onSessionAction:action};
  await act(async()=>tree.update(<SideDrawer {...props} mode="sessions"/>));
  const labels=()=>tree.root.findByProps({testID:'section-footer-actions'}).findAllByType(Button).map(node=>node.props.accessibilityLabel);
- expect(labels()).toEqual(['Schedules','Search loaded sessions','New conversation']);
+ expect(labels()).toEqual(['Schedules','New conversation']);
+ expect(tree.root.findByProps({testID:'drawer-header'}).findAll(node=>node.props.accessibilityLabel==='Search loaded sessions').length).toBeGreaterThan(0);
+ expect(tree.root.findByProps({testID:'drawer-footer'}).findAll(node=>node.props.accessibilityLabel==='Search loaded sessions')).toHaveLength(0);
  await act(async()=>tree.update(<SideDrawer {...props} mode="workstations"/>));
  expect(labels()).toEqual(['Add workstation']);
 });
@@ -238,3 +240,35 @@ test('embedded session filters follow the measured heading without an extra scre
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-viewport'}).props.style).marginBottom).toBe(260);
  expect(tree.root.findByProps({testID:'drawer-footer'})).toBe(footer);expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
  });
+
+test('workstation search is always visible below the heading, preserves identity, and Back clears the query before leaving',async()=>{
+ const onBack=jest.fn(),other=jest.fn();
+ jest.spyOn(Keyboard,'isVisible').mockReturnValue(false);
+ const props={embedded:true,mode:'workstations' as const,visible:true,onClose:close,onBack,navigation:[],workspaces:[{id:'saved-a',label:'Home computer',selected:true,onPress:open},{id:'saved-b',label:'Studio',onPress:other}],conversations:[],onNew:newChat,onSettings:()=>{},disabled:false,pairing:<TextInput accessibilityLabel="Pairing invitation"/>,onSessionAction:action};
+ await act(async()=>tree.update(<SideDrawer {...props}/>));
+ const header=tree.root.findByProps({testID:'drawer-header'}),footer=tree.root.findByProps({testID:'drawer-footer'});
+ const heading=header.findByType(SectionHeading);
+ expect(StyleSheet.flatten(heading.findByProps({testID:'section-heading'}).props.style).paddingTop).toBe(28);
+ expect(header.findAll(node=>node.props.accessibilityLabel==='Search workstations').length).toBeGreaterThan(0);
+ expect(footer.findAll(node=>node.props.accessibilityLabel==='Search workstations')).toHaveLength(0);
+ const search=header.findByProps({accessibilityLabel:'Search workstations'}),list=tree.root.findByProps({testID:'drawer-scroll-list'});
+ expect(search.props.autoFocus).not.toBe(true);expect(button('Search workstations')).toBeUndefined();
+ expect(header.findAllByProps({testID:'page-search'}).length).toBeGreaterThan(0);
+ expect(StyleSheet.flatten(button('Home computer').props.style).borderWidth).toBeUndefined();
+ expect(button('Home computer').props.accessibilityState.selected).toBe(true);
+ act(()=>tree.root.findByProps({accessibilityLabel:'Search workstations',placeholder:'Search workstations'}).props.onChangeText('studio'));
+ expect(button('Home computer')).toBeUndefined();
+ act(()=>button('Studio').props.onPress());expect(other).toHaveBeenCalledTimes(1);expect(open).not.toHaveBeenCalled();
+ act(()=>button('Back to previous menu').props.onPress());
+ expect(onBack).not.toHaveBeenCalled();expect(button('Home computer')).toBeDefined();
+ expect(header.findByProps({accessibilityLabel:'Search workstations'})===search).toBe(true);expect(search.props.value).toBe('');
+ expect(tree.root.findByProps({testID:'drawer-scroll-list'})===list).toBe(true);
+ act(()=>button('Add workstation').props.onPress());
+ const pairing=tree.root.findByProps({testID:'workstation-pairing'});
+ expect(pairing.findByProps({accessibilityLabel:'Pairing invitation'})).toBeDefined();
+ expect(footer.findAllByProps({testID:'workstation-pairing'})).toHaveLength(0);
+ expect(pairing.findAll(node=>node.props.accessibilityRole==='header').length).toBeGreaterThan(0);
+ act(()=>button('Back to previous menu').props.onPress());
+ expect(onBack).not.toHaveBeenCalled();expect(tree.root.findAllByProps({testID:'workstation-pairing'})).toHaveLength(0);
+ act(()=>button('Back to previous menu').props.onPress());expect(onBack).toHaveBeenCalledTimes(1);
+});
