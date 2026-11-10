@@ -31,9 +31,15 @@ export function createReplyPresentation(reader:Reader){
    }
    // Detect overlaps using every fetched settlement, including answers before
    // this page: the metadata certifies a whole range, not only visible entries.
-   const all=[...groups.values()],valid:Reply[]=[];
-   for(const group of all){
-    if(group.answer<min||group.first>max||all.some(other=>other!==group&&group.first<=other.answer&&other.first<=group.answer))continue;
+   const all=[...groups.values()].sort((a,b)=>a.first-b.first||a.answer-b.answer),valid:Reply[]=[];
+   let previousEnd=-Infinity;
+   for(let index=0;index<all.length;index++){
+    const group=all[index];
+    // The furthest earlier end catches nesting; the next start is the earliest
+    // later range. Include rejected/unloaded groups in both overlap checks.
+    const overlaps=previousEnd>=group.first||(index+1<all.length&&all[index+1].first<=group.answer);
+    previousEnd=Math.max(previousEnd,group.answer);
+    if(group.answer<min||group.first>max||overlaps)continue;
     const answer=(await reader.entry(group.answer as EntryRecord['id'],ctx))?.entry;
     if(answer?.conversationId===id&&answer.kind==='pi.assistant'&&answer.model?.some(message=>message.role==='assistant'))valid.push(group);
    }
@@ -45,7 +51,7 @@ export function createReplyPresentation(reader:Reader){
     // answer commits, even though that old page's min/max IDs never change.
     for(const old of windows.keys())if(old!==key&&old.startsWith(`${id}:`))windows.delete(old);
    }
-   return valid.sort((a,b)=>a.first-b.first||a.answer-b.answer);
+   return valid;
   })();
   windows.set(key,job);while(windows.size>96)windows.delete(windows.keys().next().value!);
   try{return await job;}catch(error){if(windows.get(key)===job)windows.delete(key);throw error;}
@@ -55,10 +61,13 @@ export function createReplyPresentation(reader:Reader){
   const groups=await ranges(id,Math.min(...entries.map(e=>e.id)),Math.max(...entries.map(e=>e.id)));
   return entries.map(entry=>{
    if(entry.conversationId!==id||!['pi.assistant','pi.tool-result','bob.file','bob.nested-surface'].includes(entry.kind))return entry;
-   const matches=groups.filter(group=>entry.id>=group.first&&entry.id<=group.answer);
-   // Overlapping settlements for different answers are ambiguous. Fail closed.
-   if(matches.length!==1)return entry;
-   const reply=matches[0],key=`${reply.first}:${reply.answer}`,cached=projected.get(entry);
+   // Ranges are sorted and all overlaps were rejected above. Find the last
+   // start at/before this entry without rescanning every historical answer.
+   let low=0,high=groups.length;
+   while(low<high){const middle=(low+high)>>>1;if(groups[middle].first<=entry.id)low=middle+1;else high=middle;}
+   const reply=groups[low-1];
+   if(!reply||entry.id>reply.answer)return entry;
+   const key=`${reply.first}:${reply.answer}`,cached=projected.get(entry);
    if(cached?.key===key)return cached.entry as T;
    const value={...entry,mobileReply:reply};projected.set(entry,{key,entry:value});return value;
   });

@@ -42,3 +42,65 @@ test('an answer-only page cannot certify a range overlapping an earlier unloaded
  assert.equal((await present(7 as any,[entry(40)]))[0].mobileReply,undefined);
  assert.equal((await present(7 as any,[entry(25,'bob.file')]))[0].mobileReply,undefined);
 });
+
+test('nested, touching and equal-start settlements stay ambiguous even outside the loaded window',async()=>{
+ const ranges=[[1,100],[10,20],[30,40],[110,120],[120,130],[140,150],[140,160],[170,180]];
+ const subs=ranges.map(([first,answer])=>({conversationId:7,type:'input',status:'done',entry:first,answer})).reverse();
+ const reader={scanSubmissions:async()=>({items:subs}),entry:async(id:number)=>({entry:entry(id),commitSeq:1})};
+ const present=createReplyPresentation(reader as any);
+ // Every first/answer boundary is inclusive. An unloaded outer or touching
+ // range must invalidate the whole candidate, not just the overlapping slice.
+ for(const id of [1,10,20,30,40,100,110,119,120,130,140,150,160,169,181]){
+  assert.equal((await present(7 as any,[entry(id,'bob.file')]))[0].mobileReply,undefined,`entry ${id}`);
+ }
+ for(const id of [170,175,180])assert.deepEqual((await present(7 as any,[entry(id,'bob.file')]))[0].mobileReply,{version:1,first:170,answer:180});
+});
+
+test('indexed reply association matches exhaustive overlap rejection for seeded unordered settlements',async()=>{
+ let seed=93821;const random=(max:number)=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed%max;};
+ for(let trial=0;trial<80;trial++){
+  const subs=Array.from({length:50},(_,index)=>{
+   const first=index*10+1+random(4),answer=first+random(trial%3===0?18:7);
+   return {conversationId:7,type:'input',status:'done',entry:first,answer};
+  });
+  // Multiple admitted inputs may share one final answer; keep its earliest input.
+  for(const sub of subs.slice(0,5))subs.push({...sub,entry:sub.answer});
+  for(let i=subs.length-1;i>0;i--){const at=random(i+1);[subs[i],subs[at]]=[subs[at],subs[i]];}
+  const grouped=new Map<number,{version:1;first:number;answer:number}>();
+  for(const sub of subs)grouped.set(sub.answer,{version:1,first:Math.min(grouped.get(sub.answer)?.first??sub.entry,sub.entry),answer:sub.answer});
+  const all=[...grouped.values()];
+  const valid=all.filter(group=>!all.some(other=>other!==group&&group.first<=other.answer&&other.first<=group.answer));
+  const reader={scanSubmissions:async()=>({items:subs}),entry:async(id:number)=>({entry:entry(id),commitSeq:1})};
+  const originals=Array.from({length:504},(_,i)=>entry(i+1,'bob.file'));
+  // Input presentation order is independent of chronological order.
+  if(trial%2)originals.reverse();
+  const before=JSON.stringify(originals),result=await createReplyPresentation(reader as any)(7 as any,originals);
+  for(let i=0;i<result.length;i++){
+   const expected=valid.find(group=>result[i].id>=group.first&&result[i].id<=group.answer);
+   assert.deepEqual(result[i].mobileReply,expected,`trial ${trial}, entry ${result[i].id}`);
+   if(!expected)assert.equal(result[i],originals[i]);
+  }
+  assert.equal(JSON.stringify(originals),before,'presentation must not mutate native entries');
+ }
+});
+
+test('unchanged large-history presentation does logarithmic rather than full-range lookup',async()=>{
+ const count=1000,subs=Array.from({length:count},(_,i)=>({conversationId:7,type:'input',status:'done',entry:i*4+1,answer:i*4+3}));
+ let scans=0,answerReads=0;
+ const reader={scanSubmissions:async(_filter:unknown,size:number,cursor?:{offset:number})=>{
+  scans++;const offset=cursor?.offset??0;return {items:subs.slice(offset,offset+size),next:offset+size<subs.length?{offset:offset+size}:undefined};
+ },entry:async(id:number)=>{answerReads++;return {entry:entry(id),commitSeq:1};}};
+ const present=createReplyPresentation(reader as any),originals=subs.map(sub=>entry(sub.answer,'bob.file'));
+ const first=await present(7 as any,originals);assert.equal(scans,10);assert.equal(answerReads,count);
+ // Count reads of the actual reused range objects, not elapsed time or a
+ // reimplementation of the algorithm. Instrumentation never changes values.
+ let rangeReads=0;
+ for(const row of first)for(const name of ['first','answer']){
+  const value=row.mobileReply[name];
+  Object.defineProperty(row.mobileReply,name,{get:()=>{rangeReads++;return value;},configurable:true,enumerable:true});
+ }
+ const again=await present(7 as any,originals);
+ assert.ok(again.every((row,i)=>row===first[i]),'retain immutable projected entry identity');
+ assert.equal(scans,10);assert.equal(answerReads,count,'unchanged windows retain existing read reuse');
+ assert.ok(rangeReads<count*16,`${rangeReads} range-field reads must fit logarithmic lookup; a full range scan is quadratic`);
+});
