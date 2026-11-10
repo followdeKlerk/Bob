@@ -1348,3 +1348,170 @@ test('sent image decks preserve their row, draft and selected image; original pr
   expect(row.findByType(ImageAttachmentStack)).toBe(deck);expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(draft);expect(draft.props.value).toBe('Keep my draft');
  }finally{await act(async()=>tree.unmount());}
 });
+
+describe('optional chat-list cache and child stream regressions',()=>{
+ beforeEach(()=>{(AsyncStorage.setItem as jest.Mock).mockClear();});
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
+ const rows=[{id:7,meta:{title:'Authoritative chat'}}];
+ const response=(data:any)=>({ok:true,status:200,json:async()=>data} as Response);
+ async function paired(backends=[backend]){
+  await AsyncStorage.setItem('backends',JSON.stringify(backends));
+  await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
+  NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
+ }
+ function fallback(url:string){
+  return response(url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'bob.user',data:{text:'Parent history'}}]}:url.endsWith('/updates')?{enabled:false}:url.endsWith('/configure')?{}:[]);
+ }
+ function streams(){
+  const sources:{url:string;listeners:Map<string,(event:any)=>void>;close:jest.Mock}[]=[];
+  require('react-native-sse').mockImplementation((url:string)=>{
+   const source={url,listeners:new Map<string,(event:any)=>void>(),close:jest.fn()};sources.push(source);
+   return{close:source.close,addEventListener:(event:string,callback:(event:any)=>void)=>source.listeners.set(event,callback)};
+  });
+  return{sources,latest:(id:number)=>sources.filter(source=>source.url===`${backend.endpoint}/v1/chats/${id}/events`).slice(-1)[0]};
+ }
+ test.each([
+  ['rejected read',undefined],['malformed JSON','{'],['object','{}'],['null','null'],['string','"cache"'],
+  ['null row','[null]'],['invalid id','[{"id":"7"}]'],['nonpositive id','[{"id":0}]'],
+  ['invalid metadata','[{"id":7,"meta":{"title":42}}]'],['invalid flag','[{"id":7,"meta":{"title":"Bad","pinned":"yes"}}]'],
+  ['invalid owner','[{"id":7,"owner":{"conversationId":0}}]'],
+ ])('chat-list cache %s cannot prevent the authoritative fetch',async(_label,cached)=>{
+  await paired();
+  const key=`chats:${backend.backendId}`,get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+  if(cached!==undefined)await AsyncStorage.setItem(key,cached);
+  (AsyncStorage.getItem as jest.Mock).mockImplementation((name:string)=>name===key&&cached===undefined?Promise.reject(Error('cache unavailable')):get(name));
+  const network=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>String(input).endsWith('/chats')?response({items:rows}):fallback(String(input)));
+  streams();let tree!:Renderer.ReactTestRenderer;
+  try{
+   await act(async()=>{tree=Renderer.create(<App/>);});
+   expect(network.mock.calls.some(([url])=>String(url)===`${backend.endpoint}/v1/chats`)).toBe(true);
+   expect(JSON.parse(await get(key))).toEqual(rows);
+   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(true);
+  }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(get);}
+ });
+ test('valid chat-list cache is parsed once and retains restrictive profile evidence on refresh',async()=>{
+  await paired();const key=`chats:${backend.backendId}`;
+  const cached=JSON.stringify([{id:7,meta:{title:'Old title',profile:{id:'restricted-local',immutable:true}},owner:{conversationId:3,taskId:4}}]);
+  await AsyncStorage.setItem(key,cached);
+  const parse=jest.spyOn(JSON,'parse');
+  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>String(input).endsWith('/chats')?response({items:rows}):fallback(String(input)));
+  streams();let tree!:Renderer.ReactTestRenderer;
+  try{
+   await act(async()=>{tree=Renderer.create(<App/>);});
+   expect(parse.mock.calls.filter(([value])=>value===cached)).toHaveLength(1);
+   expect(JSON.parse((await AsyncStorage.getItem(key))!)[0].meta).toMatchObject({title:'Authoritative chat',profile:{id:'restricted-local'}});
+   expect(tree.root.findByProps({testID:'read-only-conversation'})).toBeDefined();
+  }finally{if(tree)await act(async()=>tree.unmount());}
+ });
+ test('chat-list cache write failure does not turn a connected successful fetch offline',async()=>{
+  await paired();const key=`chats:${backend.backendId}`,set=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((name:string,value:string)=>name===key?Promise.reject(Error('cache full')):set(name,value));
+  let release!:(value:Response)=>void;
+  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>String(input).endsWith('/chats')?new Promise(resolve=>{release=resolve;}):fallback(String(input)));
+  const source=streams();let tree!:Renderer.ReactTestRenderer;
+  try{
+   await act(async()=>{tree=Renderer.create(<App/>);});
+   await act(async()=>source.latest(7).listeners.get('snapshot')!({data:JSON.stringify({backendId:backend.backendId,conversationId:7,view:{entries:[{id:1,kind:'bob.user',data:{text:'Parent history'}}],docs:{}}})}));
+   const status=()=>tree.root.findByType((ComposerStatus as unknown as {type:React.ComponentType<any>}).type).props.text;
+   expect(status()).toBe('Connected');
+   await act(async()=>release(response({items:rows})));
+   expect(status()).toBe('Connected');
+   expect(tree.root.findByProps({accessibilityLabel:'Message draft'}).props.editable).toBe(true);
+  }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(set);}
+ });
+ test.each(['read','network'])('late chat-list cache %s cannot cross workstation scope',async(stage)=>{
+  const other={backendId:'22222222-2222-4222-8222-222222222222',endpoint:'https://other.ts.net',name:'Other'};
+  await paired([backend,other]);const oldKey=`chats:${backend.backendId}`,get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+  let releaseRead!:(value:string)=>void,releaseNetwork!:(value:Response)=>void;
+  if(stage==='read')(AsyncStorage.getItem as jest.Mock).mockImplementation((key:string)=>key===oldKey?new Promise(resolve=>{releaseRead=resolve;}):get(key));
+  const network=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+   const url=String(input);
+   if(url===`${backend.endpoint}/v1/chats`)return new Promise(resolve=>{releaseNetwork=resolve;});
+   if(url===`${other.endpoint}/v1/chats`)return response({items:[{id:27,meta:{title:'Other chat'}}]});
+   return fallback(url);
+  });
+  streams();let tree!:Renderer.ReactTestRenderer;
+  try{
+   await act(async()=>{tree=Renderer.create(<App/>);});
+   (NativeModules.BobPlatform.takeNotificationTarget as jest.Mock).mockResolvedValue({backendId:other.backendId,screen:'updates'});
+   await act(async()=>DeviceEventEmitter.emit('BobNotificationOpen'));
+   await act(async()=>stage==='read'?releaseRead(JSON.stringify([{id:7,meta:{title:'Late cached chat'}}])):releaseNetwork(response({items:rows})));
+   expect(JSON.parse(await get(`chats:${other.backendId}`))).toEqual([{id:27,meta:{title:'Other chat'}}]);
+   expect((AsyncStorage.setItem as jest.Mock).mock.calls.filter(([key])=>key===oldKey)).toHaveLength(0);
+   expect(network.mock.calls.filter(([url])=>String(url)===`${backend.endpoint}/v1/chats`)).toHaveLength(stage==='read'?0:1);
+   expect(tree.root.findAllByProps({testID:'history-entry-1'})).toHaveLength(0);
+  }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(get);}
+ });
+ test('child duplicates avoid parsing and persistence, recover reconnect status, and reset when switching children',async()=>{
+  jest.useFakeTimers();jest.replaceProperty(AppState,'currentState','active');
+  const lifecycle=new Set<(state:any)=>void>();
+  jest.spyOn(AppState,'addEventListener').mockImplementation((event,callback)=>{if(event==='change')lifecycle.add(callback as any);return{remove:()=>{lifecycle.delete(callback as any);}};});
+  const transition=async(state:'background'|'active')=>act(async()=>{(AppState as any).currentState=state;for(const callback of lifecycle)callback(state);});
+  const advance=async(ms:number)=>act(async()=>{await jest.advanceTimersByTimeAsync(ms);});
+  await paired();const source=streams();
+  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
+   const url=String(input);
+   return url.includes('/agent-overview')?response({backendId:backend.backendId,sessions:[{conversationId:7,title:'Test chat',status:'working',agents:[{name:'First helper',conversationId:8,status:'working'},{name:'Second helper',conversationId:9,status:'idle'}]}]}):url.endsWith('/chats')?response({items:rows}):fallback(url);
+  });
+  const parse=jest.spyOn(JSON,'parse'),key=`history:${backend.backendId}:8`;
+  const writes=()=> (AsyncStorage.setItem as jest.Mock).mock.calls.filter(([name])=>name===`chunked:${key}`);
+  const publish=async(id:number,raw:string)=>act(async()=>source.latest(id).listeners.get('snapshot')!({data:raw}));
+  const frame=(id:number,view:any)=>JSON.stringify({backendId:backend.backendId,conversationId:id,view});
+  let tree!:Renderer.ReactTestRenderer;
+  try{
+   await act(async()=>{tree=Renderer.create(<App/>);});
+   await navigateTo(tree,'Agents');
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'Expand agents for Test chat'}).props.onPress());
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent First helper'}).props.onPress());
+   let expectedWrites=0;
+   for(const [status,docs,work] of [
+    ['Child working',{'pi.live':{run:{taskId:10}}},[]],
+    ['Child blocked',{},[{state:'blocked',background:false}]],
+    ['Child idle',{},[]],
+   ] as const){
+    const raw=frame(8,{entries:[{id:10,kind:'bob.user',data:{text:status}}],docs,work});
+    await publish(8,raw);await advance(1100);
+    expect(writes()).toHaveLength(++expectedWrites);
+    expect(tree.root.findByType(AgentsScreen).props.status).toBe(status);
+    await publish(8,raw);await advance(1100);await publish(8,raw);
+    expect(writes()).toHaveLength(expectedWrites);
+    expect(parse.mock.calls.filter(([value])=>value===raw)).toHaveLength(1);
+    const previous=source.latest(8);
+    await transition('background');await transition('active');
+    expect(previous.close).toHaveBeenCalled();expect(source.latest(8)).not.toBe(previous);
+    expect(tree.root.findByType(AgentsScreen).props.status).toBe('Reconnecting');
+    await publish(8,raw);
+    expect(tree.root.findByType(AgentsScreen).props.status).toBe(status);
+    expect(writes()).toHaveLength(expectedWrites);
+    expect(parse.mock.calls.filter(([value])=>value===raw)).toHaveLength(1);
+   }
+   const final={entries:[{id:11,kind:'bob.user',data:{text:'Final child answer'}}],docs:{},work:[]},raw=frame(8,final);
+   await publish(8,raw);
+   // Settled snapshots flush immediately, without waiting for the live cadence.
+   expect(writes()).toHaveLength(++expectedWrites);
+   const {readHistoryCache}=require('../history-cache');
+   expect(JSON.parse(await readHistoryCache(key))).toEqual(final);
+   const old=source.latest(8);
+   // Duplicate frames still reach snapshotStream's diagnostics and liveness accounting.
+   const diagnostic=jest.spyOn(require('../stream-diagnostics'),'noteSnapshot');
+   for(let i=0;i<2;i++){await advance(9000);await publish(8,raw);}
+   expect(source.latest(8)).toBe(old);expect(old.close).not.toHaveBeenCalled();
+   expect(diagnostic).toHaveBeenCalledTimes(2);expect(writes()).toHaveLength(expectedWrites);
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'Back to agent list'}).props.onPress());
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent Second helper'}).props.onPress());
+   await publish(9,frame(9,{entries:[],docs:{},work:[]}));
+   expect(tree.root.findByType(AgentsScreen).props.status).toBe('Child idle');
+   await act(async()=>old.listeners.get('snapshot')!({data:frame(8,{entries:[],docs:{},work:[]})}));
+   expect(writes()).toHaveLength(expectedWrites);
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'Back to agent list'}).props.onPress());
+   await act(async()=>tree.root.findByProps({accessibilityLabel:'View agent First helper'}).props.onPress());
+   await publish(8,raw);
+   expect(writes()).toHaveLength(++expectedWrites);
+   // This exact payload was accepted by the previous child subscription as well.
+   expect(parse.mock.calls.filter(([value])=>value===raw)).toHaveLength(2);
+   expect(tree.root.findByType(AgentsScreen).props.status).toBe('Child idle');
+  }finally{if(tree)await act(async()=>tree.unmount());jest.useRealTimers();}
+ });
+});

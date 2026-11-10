@@ -434,14 +434,32 @@ function Main() {
     setStatus('Connecting');
     const b=backend;let cancelled=false;setChats([]);setChatListBackend(b.backendId);setChatCursor(undefined);
     void (async()=>{
-      const cached=await AsyncStorage.getItem(`chats:${b.backendId}`);
+      let cached:Chat[]=[];
+      try{
+        const parsed:unknown=JSON.parse(await AsyncStorage.getItem(`chats:${b.backendId}`)??'[]');
+        if(Array.isArray(parsed)&&parsed.every(row=>{
+          if(!row||typeof row!=='object'||!Number.isSafeInteger(row.id)||row.id<=0)return false;
+          const {meta,owner}=row;
+          const validMeta=meta===undefined||(
+            meta&&typeof meta==='object'&&!Array.isArray(meta)&&typeof meta.title==='string'&&
+            ['pinned','archived','trashed'].every(key=>meta[key]===undefined||typeof meta[key]==='boolean')
+          );
+          const validOwner=owner===undefined||(
+            owner&&typeof owner==='object'&&!Array.isArray(owner)&&
+            ['conversationId','taskId'].every(key=>owner[key]===undefined||(Number.isSafeInteger(owner[key])&&owner[key]>0))
+          );
+          // Profile evidence, including malformed restrictive markers, stays intact.
+          return validMeta&&validOwner;
+        }))cached=parsed;
+      }catch{/* The chat list cache is optional; always try the authoritative load. */}
       if(cancelled||selectedBackend.current!==b.backendId)return;
-      if(cached)setChats(JSON.parse(cached));
+      setChats(cached);
       try {
         const result=await request('chats','GET',undefined,b);
         if(cancelled||selectedBackend.current!==b.backendId)return;
-        const items=mergeChatRows(cached?JSON.parse(cached):[],result.items);
-        setChats(items);setChatCursor(result.next);if(!identity.current)setStatus('Ready · select a conversation');await AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items));
+        const items=mergeChatRows(cached,result.items);
+        setChats(items);setChatCursor(result.next);if(!identity.current)setStatus('Ready · select a conversation');
+        void AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items)).catch(()=>{});
       }catch{if(!cancelled&&selectedBackend.current===b.backendId)setStatus('Offline • cached history');}
     })();
     return()=>{cancelled=true;};
@@ -511,7 +529,7 @@ function Main() {
   useEffect(()=>{
     if(screen!=='Agents'||!child||!backend)return;
     setChildStatus('Connecting agent');
-    const b=backend,current=scope,id=child;let cancelled=false,events:SnapshotStream|undefined;
+    const b=backend,current=scope,id=child;let cancelled=false,events:SnapshotStream|undefined,lastRaw:string|undefined,lastStatus='';
     const cache=snapshotPersistence(`history:${b.backendId}:${id}`);
     const cacheLifecycle=AppState.addEventListener('change',state=>{if(state!=='active')void cache.flush();});
     void (async()=>{
@@ -523,10 +541,12 @@ function Main() {
         if(cancelled||identity.current!==current)return;
         events=snapshotStream(`${b.endpoint}/v1/chats/${id}/events`,{Authorization:'Bearer '+credential.password,'x-bob-backend':b.backendId},raw=>{
           if(cancelled||identity.current!==current)return;
+          if(raw===lastRaw){setChildStatus(lastStatus);return;}
           const data=JSON.parse(raw);
           if(data.backendId!==b.backendId||data.conversationId!==id){events?.close();setChildStatus('Child identity mismatch');return;}
           const snapshot=data.view as Snapshot;setChildView(previous=>reuseSnapshotEntries(previous,snapshot));
-          setChildStatus(snapshot.work?.some(t=>t.state==='blocked')?'Child blocked':snapshot.docs['pi.live']?.run||snapshot.work?.some(t=>!t.background)?'Child working':'Child idle');
+          lastRaw=raw;lastStatus=snapshot.work?.some(t=>t.state==='blocked')?'Child blocked':snapshot.docs['pi.live']?.run||snapshot.work?.some(t=>!t.background)?'Child working':'Child idle';
+          setChildStatus(lastStatus);
           cache.push(snapshot,!snapshot.docs['pi.live']?.run);
         },nextStatus=>{if(!cancelled&&identity.current===current)setChildStatus(nextStatus);},undefined,snapshotLifecycle);
       }catch{if(!cancelled&&identity.current===current)setChildStatus('Child offline • last cached state');}
