@@ -4,11 +4,17 @@ type Backend=OutgoingMessage['backend'];
 type Port={
  background?(item:OutgoingMessage):Promise<import('./background-outbox').BackgroundReceipt|undefined>;
  backends():Backend[];
- request(path:string,method:string,body:unknown,backend:Backend):Promise<any>;
+ deviceId(backend:Backend):Promise<string|undefined>;
+ request(path:string,method:string,body:unknown,backend:Backend,deviceId:string):Promise<any>;
  upload(item:OutgoingMessage,backend:Backend):Promise<void>;
  cleanup(item:OutgoingMessage):Promise<void>;
  watch(item:OutgoingMessage,backend:Backend):Promise<void>;
 };
+/** Check the credential actually used by a request, not a separate preflight read. */
+export function requireDeliveryDevice(expected:string,actual:string|undefined){
+ if(!expected||expected!==actual)throw deliveryUnconfirmed('Pairing changed or unavailable; original delivery identity must be restored');
+}
+function deliveryUnconfirmed(message:string){return Object.assign(Error(message),{httpStatus:409,deliveryUnconfirmed:true});}
 /** One ordered writer per backend. An unreachable machine cannot stall another.
  * Only this queue owns message retries; unrelated mutations are never replayed. */
 export class OutboxDelivery {
@@ -32,7 +38,7 @@ export class OutboxDelivery {
    // Save this iteration too; the initial drain snapshot is not a write barrier
    // for messages added later.
    await this.box.saved();
-   const item=this.box.items.find(value=>value.id===original.id);
+   let item=this.box.items.find(value=>value.id===original.id);
    if(!item||item.rejected||blocked.has(item.scope)||(item.admitted&&item.entry!==undefined))continue;
    const now=Date.now(),force=options.force||options.forceBackendId===backend.backendId;
    if((item.retryAfterAt??0)>now||(!force&&(item.retryAt??0)>now)){blocked.add(item.scope);continue;}
@@ -46,10 +52,20 @@ export class OutboxDelivery {
     }
     if(background?.state==='pending'){blocked.add(item.scope);continue;}
     let admission=background?.admission;
-    if(!background)admission=(await this.port.request(`chats/${item.chat}/operations/${item.id}`,'GET',undefined,backend)).admission;
+    if(!background){
+     if(!item.foregroundDeviceId){
+      if(!item.foregroundUnsent||item.uncertain||item.admitted)throw deliveryUnconfirmed('Original pairing identity is unknown; delivery cannot be confirmed safely');
+      const deviceId=await this.port.deviceId(backend);
+      if(!deviceId)throw Error('Waiting for device identity; pair again if the credential is missing');
+      // No foreground request (including receipt lookup) precedes this write.
+      await this.box.update(item.id,{foregroundDeviceId:deviceId,foregroundUnsent:undefined});
+      item={...item,foregroundDeviceId:deviceId,foregroundUnsent:undefined};
+     }
+     admission=(await this.port.request(`chats/${item.chat}/operations/${item.id}`,'GET',undefined,backend,item.foregroundDeviceId!)).admission;
+    }
     if(!background&&!admission&&!item.admitted){
      if(item.files.length)await this.port.upload(item,backend);
-     admission=await this.port.request(`chats/${item.chat}/messages`,'POST',item.message,backend);
+     admission=await this.port.request(`chats/${item.chat}/messages`,'POST',item.message,backend,item.foregroundDeviceId!);
     }
     if(admission){
      if(typeof admission!=='object'||typeof admission.status!=='string'||(admission.entry!==undefined&&(!Number.isSafeInteger(admission.entry)||admission.entry<=0)))throw Error('Invalid delivery receipt');
@@ -64,7 +80,7 @@ export class OutboxDelivery {
     }
    }catch(error){
     if(this.box.storageError)throw error;
-    if(!retryableError(error))await this.box.update(item.id,{rejected:true,lastError:String((error as Error).message??error),retryAt:undefined,retryAfterAt:undefined});
+    if(!retryableError(error))await this.box.update(item.id,{rejected:true,...((error as {deliveryUnconfirmed?:boolean}).deliveryUnconfirmed?{uncertain:true}:{}),lastError:String((error as Error).message??error),retryAt:undefined,retryAfterAt:undefined});
     else await this.defer(item,error);
     blocked.add(item.scope);
    }

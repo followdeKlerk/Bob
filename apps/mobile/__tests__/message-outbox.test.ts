@@ -69,11 +69,17 @@ test('temporary device read errors recover without overwriting the previously sa
 });
 test('corrupt saved queues are not silently replaced by a fresh empty queue',async()=>{
  await AsyncStorage.setItem('message-outbox:v2','bad JSON');const box=new MessageOutbox();await expect(box.ready).rejects.toThrow();
- await expect(box.add(item('1'))).rejects.toThrow();expect(box.items).toHaveLength(1);expect(box.storageError).toBeDefined();expect(await AsyncStorage.getItem('message-outbox:v2')).toBe('bad JSON');
+ await expect(box.add(item('1'))).rejects.toThrow();expect(box.items).toHaveLength(1);expect(box.storageError).toBeDefined();expect(await AsyncStorage.getItem('message-outbox:v2')).toBe('bad JSON');await expect(box.whenReady()).rejects.toThrow();expect(box.isReady).toBe(false);
 });
 test('local and admitted bubbles retain the same list identity, without colliding with other entry kinds',()=>{
  const local={id:-1,kind:'bob.user',data:{requestId:'original-request'}};
  expect(transcriptKey(local)).toBe(transcriptKey({...local,id:42}));
  expect(transcriptKey({id:43,kind:'bob.artifact',data:{requestId:'original-request'}})).toBe('entry:43');
  expect(transcriptKey({id:42,kind:'bob.user'})).toBe('entry:42');
+});
+
+test('readiness can be retried after the constructor read fails',async()=>{
+ (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(Error('Temporary storage failure'));
+ const box=new MessageOutbox();await expect(box.ready).rejects.toThrow('Temporary storage failure');
+ await expect(box.whenReady()).resolves.toBeUndefined();await expect(box.ready).resolves.toBeUndefined();expect(box.storageError).toBeUndefined();
 });

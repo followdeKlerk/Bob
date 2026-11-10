@@ -2,6 +2,9 @@ import type {Message} from '../../src/contracts';
 import {readOutbox,writeOutbox} from './outbox-storage';
 import type {DraftAttachment} from './components/attachment-thumbnail';
 export type OutgoingMessage={
+  // Only genuinely new foreground items with no network requests may bind lazily.
+  // Persist the device ID, never the Keychain credential.
+  foregroundDeviceId?:string; foregroundUnsent?:boolean;
   id:string; scope:string; foregroundOnly?:boolean; notificationReply?:boolean; backend:{backendId:string;endpoint:string;name:string}; chat:number;
   localId:number; afterEntryId?:number; createdAt?:number; message:ReturnType<typeof Message.parse>; files:DraftAttachment[]; admitted?:boolean; entry?:number; rejected?:boolean; uncertain?:boolean; attempts?:number; retryAt?:number; retryAfterAt?:number; lastError?:string;
 };
@@ -16,8 +19,12 @@ export class MessageOutbox {
   private revision=0;
   private savedRevision=0;
   private removed=new Set<string>();
-  readonly ready:Promise<void>;
-  constructor(){this.ready=this.load();void this.ready.catch(()=>{});}
+  constructor(){void this.whenReady().catch(()=>{});}
+  // Keep the convenient awaitable API retryable too: never retain a rejected
+  // constructor promise as the lifetime gate for a mounted consumer.
+  get ready(){return this.whenReady();}
+  whenReady(){return this.load();}
+  get isReady(){return this.loaded;}
   private load():Promise<void>{
     if(this.loaded)return Promise.resolve();
     if(this.loading)return this.loading;

@@ -42,7 +42,7 @@ import {LiveStatus} from './components/live-status';
 import {HindsightActivity,AgentReportActivity,LearningActivity} from './components/passive-activity';
 import {useBuildStatus} from './use-build-status';
 import {MessageOutbox,visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
-import {OutboxDelivery} from './outbox-delivery';
+import {OutboxDelivery,requireDeliveryDevice} from './outbox-delivery';
 import {BackgroundOutbox,type BackgroundPort} from './background-outbox';
 import {responseData} from './network-policy';
 import {QuestionCard,type Question} from './components/question-card';
@@ -243,14 +243,14 @@ function Main() {
   useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
   useEffect(()=>{
     const native=NativeModules.BobOutbox;if(!native?.setNotificationReplyBarriers)return;
-    let current=true,ready=false;
-    const sync=()=>{if(!current||!ready)return;for(const value of backends){
+    let current=true;
+    const sync=()=>{if(!current||!outbox.isReady)return;for(const value of backends){
       // Invoke in the outbox publication callback, before its asynchronous JS persistence.
       void native.setNotificationReplyBarriers(value.backendId,notificationReplyBarriers(outbox.items,value.backendId))
         .catch(()=>{if(current)setOutboxError('Notification replies are waiting for foreground queue recovery');});
     }};
     const unsubscribe=outbox.subscribe(sync);
-    void outbox.ready.then(()=>{if(current){ready=true;sync();}}).catch(()=>{});
+    void outbox.whenReady().then(sync).catch(()=>{});
     return()=>{current=false;unsubscribe();};
   },[outbox,backends]);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
@@ -259,7 +259,7 @@ function Main() {
   const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-composerHeight-16));
   const [draftAttachments,setDraftAttachments]=useState<Record<string,DraftAttachment[]>>({});
   useUpdateNotifications(backends,async backendId=>{
-    await outbox.ready;
+    await outbox.whenReady();
     if(NativeModules.BobOutbox?.setNotificationReplyBarriers)await NativeModules.BobOutbox.setNotificationReplyBarriers(backendId,notificationReplyBarriers(outbox.items,backendId));
   });
   const build=useBuildStatus(backend);
@@ -331,11 +331,13 @@ function Main() {
     body?: unknown,
     b = backend,
     signal?:AbortSignal,
+    deliveryDeviceId?:string,
   ) {
     if (!b) throw Error('Select a backend');
     const credential = await Keychain.getGenericPassword({
       service: `bob.${b.backendId}`,
     });
+    if(deliveryDeviceId!==undefined)requireDeliveryDevice(deliveryDeviceId,credential?credential.username:undefined);
     if (!credential) throw Object.assign(Error('Pair again: device credential missing'),{httpStatus:401});
     const deadline=signal?undefined:new AbortController();
     const timeout=deadline?setTimeout(()=>deadline.abort(),20000):undefined;
@@ -627,7 +629,7 @@ function Main() {
     parentFollow.resume();
     const current=scope,files=answer?[]:attachments,op=uuid();
     const foregroundOnly=files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
-    const item:OutgoingMessage={id:op,scope:current,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
+    const item:OutgoingMessage={id:op,scope:current,foregroundUnsent:!backgroundOutbox||foregroundOnly?true:undefined,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
       message:Message.parse({requestId:op,...(answer?{questionId:answer.questionId}:{}),text:answer?.text??(draft.trim()?draft:'Please look at the attached file'+(files.length===1?'.':'s.')),mode,allowSubagents:true,
         ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:visualDisplayHeight(view?.docs?.['bob.display'])},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
     // Publish the ordinary chat bubble and clear the composer before any await.
@@ -644,17 +646,21 @@ function Main() {
   const [delivery]=useState(()=>new OutboxDelivery(outbox,{
     ...(backgroundOutbox?{background:(item:OutgoingMessage)=>{
       const preceding=outbox.items.slice(0,outbox.items.findIndex(value=>value.id===item.id));
-      if(!item.notificationReply&&preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve(undefined);
+      if(!item.notificationReply&&preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve({state:'pending' as const});
+      // Foreground ownership survives remounts and the later availability of native delivery.
+      if(item.foregroundUnsent||item.foregroundDeviceId)return Promise.resolve(undefined);
       return backgroundOutbox.deliver(item);
     }}:{}),
     backends:()=>transport.current.backends,
-    request:(path,method,body,b)=>transport.current.request(path,method,body,b),
+    deviceId:async b=>{const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});return credential?credential.username:undefined;},
+    request:(path,method,body,b,deviceId)=>transport.current.request(path,method,body,b,undefined,deviceId),
     async upload(item,b){
-      const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
-      if(!credential)throw Object.assign(Error('Pair again: device credential missing'),{httpStatus:401});
-      const limits=TransferLimits.parse(await transport.current.request('transfer-limits','GET',undefined,b));
+      const limits=TransferLimits.parse(await transport.current.request('transfer-limits','GET',undefined,b,undefined,item.foregroundDeviceId!));
       for(const file of item.files){
         await NativeModules.BobFiles.restoreAttachment(file.id,file.uri,file.name,file.mime);
+        const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
+        requireDeliveryDevice(item.foregroundDeviceId!,credential?credential.username:undefined);
+        if(!credential)throw Error('Device credential unavailable');
         await NativeModules.BobFiles.uploadAttachment(file.id,`${b.endpoint}/v1/chats/${item.chat}/artifacts?uploadId=${file.id}`,credential.password,b.backendId,limits.uploadLimit);
       }
     },
@@ -975,7 +981,7 @@ function Main() {
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<LearningActivity entry={item}/>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<ChatBubble style={imageGroup?{width:'100%'}:undefined} variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.bubbleMuted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.bubbleMuted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button disabled={!ordinaryChat} label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{if(!canWriteConversation())return;await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<LearningActivity entry={item}/>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<ChatBubble style={imageGroup?{width:'100%'}:undefined} variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.bubbleMuted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.bubbleMuted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button disabled={!ordinaryChat} label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{if(!canWriteConversation())return;if(!failed.foregroundUnsent&&!failed.foregroundDeviceId)await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble>}
           </View>;
         }}
       />

@@ -1,11 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {MessageOutbox,outgoingLabel,type OutgoingMessage} from '../message-outbox';
-import {OutboxDelivery} from '../outbox-delivery';
+import {readOutbox} from '../outbox-storage';
+import {OutboxDelivery,requireDeliveryDevice} from '../outbox-delivery';
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),removeItem:jest.fn(async(key:string)=>{values.delete(key);}),clear:jest.fn(async()=>values.clear())};});
 const storageWrite=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
 const backend={backendId:'one',endpoint:'https://one.ts.net',name:'One'};
-const item=(id='first',chat=7,b=backend):OutgoingMessage=>({id,scope:`${b.backendId}:${chat}`,backend:b,chat,localId:-Date.now(),files:[],message:{requestId:id,text:id,mode:'steer',allowSubagents:true}});
-const port=()=>({backends:()=>[backend],request:jest.fn(async(_path:string,method:string,_body:any,_backend:any):Promise<any>=>method==='POST'?{status:'placed',entry:42}:{admission:null}),upload:jest.fn(async()=>{}),cleanup:jest.fn(async()=>{}),watch:jest.fn(async()=>{})});
+const item=(id='first',chat=7,b=backend):OutgoingMessage=>({id,scope:`${b.backendId}:${chat}`,backend:b,chat,localId:-Date.now(),foregroundUnsent:true,files:[],message:{requestId:id,text:id,mode:'steer',allowSubagents:true}});
+const port=()=>({deviceId:jest.fn(async()=> 'old'),backends:()=>[backend],request:jest.fn(async(_path:string,method:string,_body:any,_backend:any,_expected?:string):Promise<any>=>method==='POST'?{status:'placed',entry:42}:{admission:null}),upload:jest.fn(async()=>{}),cleanup:jest.fn(async()=>{}),watch:jest.fn(async()=>{})});
 const flush=async()=>{for(let index=0;index<60;index++)await Promise.resolve();};
 beforeEach(async()=>{(AsyncStorage.setItem as jest.Mock).mockImplementation(storageWrite);jest.useFakeTimers();jest.setSystemTime(10000);jest.spyOn(Math,'random').mockReturnValue(0.5);await AsyncStorage.clear();});
 afterEach(()=>{jest.restoreAllMocks();jest.useRealTimers();});
@@ -96,7 +97,7 @@ test('queued server admissions without an entry are polled conservatively, never
  expect(io.request.mock.calls.filter(call=>call[1]==='POST')).toHaveLength(1);expect(outgoingLabel(box.items[0])).toBe('Queued');
 });
 test('a later receipt authorization error cannot relabel an already admitted message as Not sent',async()=>{
- const box=new MessageOutbox();await box.ready;await box.add({...item(),admitted:true});const io=port();io.request.mockRejectedValue(Object.assign(Error('Pair again'),{httpStatus:401}));
+ const box=new MessageOutbox();await box.ready;await box.add({...item(),foregroundDeviceId:'old',admitted:true});const io=port();io.request.mockRejectedValue(Object.assign(Error('Pair again'),{httpStatus:401}));
  await new OutboxDelivery(box,io).drain();expect(outgoingLabel(box.items[0])).toBe('Queued');expect(box.items[0].lastError).toBe('Pair again');expect(io.request.mock.calls.some(call=>call[1]==='POST')).toBe(false);
 });
 test('Android-owned pending delivery never falls back to a foreground POST',async()=>{
@@ -120,4 +121,64 @@ test('notification-origin sends cannot fall back to foreground HTTP when native 
 test('undefined background result cannot bypass native reply pairing and foreground attachment barriers',async()=>{
  const box=new MessageOutbox();await box.ready;await box.add({...item('native-reply'),notificationReply:true});const io={...port(),background:jest.fn(async()=>undefined)};
  await new OutboxDelivery(box,io).drain();expect(io.background).toHaveBeenCalledTimes(1);expect(io.request).not.toHaveBeenCalled();expect(io.upload).not.toHaveBeenCalled();
+});
+
+test('lost acknowledgement followed by re-pair never creates a second device-scoped admission, even on explicit retry',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io=port();let device='old';const admissions=new Set<string>();
+ io.deviceId.mockImplementation(async()=>device);
+ io.request.mockImplementation(async(_path,method,_body,_backend,expected)=>{
+  requireDeliveryDevice(expected!,device);
+  // Match the server's device-scoped request identity.
+  if(method==='POST'){admissions.add(`${device}:first`);throw Error('Lost acknowledgement');}
+  return {admission:admissions.has(`${device}:first`)?{status:'placed',entry:42}:null};
+ });
+ const delivery=new OutboxDelivery(box,io);await delivery.drain();device='new';await delivery.drain({force:true});
+ expect(io.request.mock.calls.filter(call=>call[1]==='POST')).toHaveLength(1);
+ expect(box.items[0]).toMatchObject({foregroundDeviceId:'old',rejected:true,uncertain:true});
+ expect([...admissions]).toEqual(['old:first']);
+ await box.update('first',{rejected:false});await delivery.drain({force:true});
+ expect(io.request.mock.calls.filter(call=>call[1]==='POST')).toHaveLength(1);
+});
+test('legacy unbound queue cannot be silently rebound, including after explicit retry',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add({...item(),foregroundUnsent:undefined});const io=port();const delivery=new OutboxDelivery(box,io);
+ await delivery.drain();expect(outgoingLabel(box.items[0])).toBe('Delivery unconfirmed');expect(io.request).not.toHaveBeenCalled();
+ await box.update('first',{rejected:false});await delivery.drain({force:true});expect(io.request).not.toHaveBeenCalled();expect(box.items[0].foregroundDeviceId).toBeUndefined();
+});
+test('binding is durable before the first receipt request and contains no credential',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io=port();
+ io.request.mockImplementation(async(_path,method,_body,_backend,expected)=>{
+  const persisted=(await readOutbox())[0] as OutgoingMessage;
+  expect(persisted.foregroundDeviceId).toBe('old');expect(persisted.foregroundUnsent).toBeUndefined();expect(expected).toBe('old');
+  return method==='POST'?{status:'placed',entry:42}:{admission:null};
+ });
+ await new OutboxDelivery(box,io).drain();expect(box.items[0].admitted).toBe(true);
+});
+
+test('a failed binding write blocks all foreground I/O and never rebinds on recovery',async()=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io=port();const delivery=new OutboxDelivery(box,io);
+ (AsyncStorage.setItem as jest.Mock).mockRejectedValue(Error('Binding disk failure'));
+ await expect(delivery.drain()).rejects.toThrow('Binding disk failure');expect(io.request).not.toHaveBeenCalled();expect(io.upload).not.toHaveBeenCalled();
+ (AsyncStorage.setItem as jest.Mock).mockImplementation(storageWrite);io.deviceId.mockResolvedValue('new');
+ io.request.mockImplementation(async(_path,_method,_body,_backend,expected)=>{requireDeliveryDevice(expected!,'new');});
+ await delivery.drain({force:true});expect(io.request).toHaveBeenCalledTimes(1);expect(io.request.mock.calls.some(call=>call[1]==='POST')).toBe(false);expect(box.items[0]).toMatchObject({foregroundDeviceId:'old',rejected:true,uncertain:true});
+});
+
+test.each(['throws','missing'])('fresh foreground identity lookup %s before I/O can recover automatically',async(failure)=>{
+ const box=new MessageOutbox();await box.ready;await box.add(item());const io=port();
+ if(failure==='throws')io.deviceId.mockRejectedValueOnce(Error('Keychain temporarily unavailable'));
+ else io.deviceId.mockResolvedValueOnce(undefined as any);
+ const delivery=new OutboxDelivery(box,io);await delivery.drain();
+ expect(io.request).not.toHaveBeenCalled();expect(box.items[0]).toMatchObject({foregroundUnsent:true,attempts:1});
+ expect(box.items[0].rejected).not.toBe(true);expect(box.items[0].uncertain).not.toBe(true);
+ // Restart preserves the proof that no foreground request has happened yet.
+ const reopened=new MessageOutbox();await reopened.ready;
+ await new OutboxDelivery(reopened,io).drain({force:true});
+ expect(reopened.items[0]).toMatchObject({foregroundDeviceId:'old',admitted:true});
+ expect(io.request.mock.calls.filter(call=>call[1]==='POST')).toHaveLength(1);
+});
+
+test.each([{uncertain:true},{admitted:true}])('a marker never overrides existing delivery uncertainty or admission (%j)',async(unsafe)=>{
+ const box=new MessageOutbox();await box.ready;await box.add({...item(),...unsafe});const io=port();
+ await new OutboxDelivery(box,io).drain();expect(io.deviceId).not.toHaveBeenCalled();expect(io.request).not.toHaveBeenCalled();
+ expect(box.items[0]).toMatchObject({rejected:true,uncertain:true});
 });

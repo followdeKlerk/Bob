@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {colors,lightColors} from '../theme';
 import {readOutbox} from '../outbox-storage';
+import {MessageOutbox} from '../message-outbox';
 import {DraftInput} from '../components/draft-input';
 import {EdgeFade} from '../components/edge-fade';
 import {InlineSurface} from '../components/inline-surface';
@@ -59,7 +60,7 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
  jest.replaceProperty(Platform,'OS','android');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'bob.user',data:{text:'Keep this history'}}]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[];return{ok:true,status:200,json:async()=>data} as Response;});
  const dismissKeyboard=jest.spyOn(Keyboard,'dismiss').mockImplementation(()=>{});
@@ -191,7 +192,7 @@ test('Bob menus navigate every root without a bottom bar and preserve draft, con
 test.each(['no conversation','opening','offline'])('Chat menu stays available with %s and closes for notification targets',async(mode)=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:mode==='no conversation'?undefined:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let release:((value:string)=>void)|undefined;
  if(mode==='opening')(AsyncStorage.getItem as jest.Mock).mockImplementation((key:string)=>key===`draft:${backend.backendId}:7`?new Promise(resolve=>{release=resolve;}):get(key));
@@ -222,7 +223,7 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  const surface={id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Solar system',kind:'visual',presentation:'inline',allowedTools:[]};
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};NativeModules.BobInteractive={prepare:jest.fn(async()=> 'prepared-visual'),releasePrepared:jest.fn()};
  let conversationConfiguration:{instructions:string|null;cwd:string}={instructions:null,cwd:'/workspace'};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
@@ -384,7 +385,7 @@ test('cold launch, session switches, and reopening from cache start with the new
  const sessions=[{id:7,meta:{title:'First session'}},{id:8,meta:{title:'Second session'}}];
  const pages=new Map([7,8].map(id=>[id,{backendId:backend.backendId,conversationId:id,coverage:'stored-entries',items:Array.from({length:150},(_,i)=>({id:id*1000+i+1,kind:'bob.user',data:{text:`Session ${id}, message ${i+1}. `+'Variable-height text. '.repeat(i%11===0?120:1)}}))}]));
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});jest.replaceProperty(AppState,'currentState','active');
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});jest.replaceProperty(AppState,'currentState','active');
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:38,versionName:'test'};
  let finishSecond:((response:Response)=>void)|undefined,finishCached:((response:Response)=>void)|undefined,holdCached=false;
  const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
@@ -412,7 +413,7 @@ expect(tree.root.findAllByProps({testID:'history-entry-7001'})).toHaveLength(0);
 test.each([[true,false,false],[false,false,false],[true,true,false],[false,false,true]])('send renders immediately, queues offline and reconciles without duplicate rows (receipt exists: %s, question answer: %s, Bob working: %s)',async(receiptExists,choiceAnswer,bobWorking)=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const lifecycle=new Set<(state:any)=>void>();
  jest.spyOn(AppState,'addEventListener').mockImplementation((event,callback)=>{if(event==='change')lifecycle.add(callback as any);return{remove:()=>{lifecycle.delete(callback as any);}};});
@@ -482,7 +483,7 @@ test.each([[true,false,false],[false,false,false],[true,true,false],[false,false
 test('a rejected message is marked Not sent and remains between the same chat entries as replies arrive',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  jest.spyOn(require('react-native').Alert,'alert').mockImplementation(()=>{});
  let snapshot:((event:any)=>void)|undefined;
@@ -514,7 +515,7 @@ test('a rejected message is marked Not sent and remains between the same chat en
 test('agent reports are collapsible non-owner rows; active indicator clears on idle while agent history remains',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const report='[subagent Audit helper answered, no reply needed] Fixture report.';
  const entries=[{id:1,kind:'bob.user',data:{text:report}},{id:2,kind:'pi.user',model:[{role:'user',content:report}]},{id:3,kind:'bob.subagent-report',data:{name:'Audit helper',conversationId:8},model:[{role:'user',content:report}]}];
@@ -616,7 +617,7 @@ test('agent tree opens another session helper without changing the main draft or
  jest.replaceProperty(Platform,'OS','android');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const snapshots=new Map<string,(event:any)=>void>(),closes=new Map<string,jest.Mock>();
  require('react-native-sse').mockImplementation((url:string)=>{const close=jest.fn();closes.set(url,close);return {addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshots.set(url,callback);}),close};});
@@ -652,7 +653,7 @@ test('agent tree opens another session helper without changing the main draft or
 test('workstation agent overview remains reachable before a conversation is selected',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
   const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:20,title:'Another session',status:'idle',agents:[]}]}:url.endsWith('/chats')?{items:[{id:20,meta:{title:'Another session'}}]}:url.endsWith('/updates')?{enabled:false}:[];
@@ -680,7 +681,7 @@ test('MCP app rows retain an accessible open control',async()=>{
 test('chat opening shows only a small spinner until restoring the draft makes typing safe',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
  let restore!:(value:string)=>void;
  const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
@@ -706,7 +707,7 @@ test('chat opening shows only a small spinner until restoring the draft makes ty
 test('rapid A-to-B-to-A switching keeps the composer locked until the new draft read completes',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:38,versionName:'test'};
  const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
  const reads=new Map<string,((value:string)=>void)[]>();let hold=false;
@@ -739,7 +740,7 @@ test('rapid A-to-B-to-A switching keeps the composer locked until the new draft 
 test('Send hands off to Android before JS persistence completes and immediate backgrounding',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const enqueue=jest.fn(async()=>true);NativeModules.BobOutbox={enqueue,status:jest.fn(async()=>JSON.stringify({state:'pending'})),list:jest.fn(async()=>[]),remove:jest.fn(async()=>true)};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input);return {ok:true,status:200,json:async()=>url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test'}}]}:url.endsWith('/updates')?{enabled:false}:[]} as Response;});
@@ -759,7 +760,7 @@ test('Send hands off to Android before JS persistence completes and immediate ba
 test('Sessions assigns working state by Durable conversation ID, not by the selected chat',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
   const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[7,8,9].map(id=>({conversationId:id,title:`Chat ${id}`,status:id===7?'idle':'working',agents:[]}))}:url.endsWith('/status')?{backendId:backend.backendId,inspection:{tasks:[{record:{conversationId:8,background:false}},{record:{conversationId:7,background:true}}],submissions:[{conversationId:9}]}}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[7,8,9].map(id=>({id,meta:{title:`Chat ${id}`}}))}:url.endsWith('/updates')?{enabled:false}:[];
@@ -780,7 +781,7 @@ test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe r
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  const surface={id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Nested visual',kind:'visual',presentation:'fullscreen',allowedTools:[]};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};NativeModules.BobInteractive={open:jest.fn(async()=>{}),prepare:jest.fn()};
  const entries=[
   ...(placement==='parent'?[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'code',name:'codemode',arguments:{code:'tools.render_visual(...)'}}]}]}]:[]),
@@ -825,7 +826,7 @@ test.each(['parent','receipt-only','unlinked'])('nested surfaces retain a safe r
 test.each([{capability:{inlineHeight:8192},height:8192},{capability:undefined,height:420}])('outbound visual bounds follow the selected backend snapshot ($height)',async({capability,height})=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  jest.spyOn(require('react-native').Alert,'alert').mockImplementation(()=>{});
  let snapshot:((event:any)=>void)|undefined;
@@ -851,7 +852,7 @@ test.each([{capability:{inlineHeight:8192},height:8192},{capability:undefined,he
 test('delayed Use default verification never discards a newer reopened instructions edit with identical text',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  let configured:{instructions:string|null;cwd:string}={instructions:'Saved',cwd:'/backend'},hold=false,release:((response:Response)=>void)|undefined;
  const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
@@ -882,7 +883,7 @@ test('delayed Use default verification never discards a newer reopened instructi
 test('drawing attachment propagates transfer/staging failures and cleans up a file staged after a conversation switch',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
  const stage=jest.fn(),remove=jest.fn(async()=>{});NativeModules.BobFiles={stageDataUri:stage,removeAttachment:remove};
  let transferFailure=true;
@@ -913,7 +914,7 @@ test('drawing attachment propagates transfer/staging failures and cleans up a fi
 test('native run failures remain passive status, preserve drafts, and do not make an idle run busy',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  let snapshot:((event:any)=>void)|undefined;
  require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
@@ -943,7 +944,7 @@ test('native run failures remain passive status, preserve drafts, and do not mak
 test('original per-entry tool layout stays separate and preserves the chat list and draft',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};
  const file={id:'a841d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,name:'fixture.txt',mime:'text/plain',size:12,sha256:'a'.repeat(64)};
  const items=[{id:7,kind:'bob.artifact',data:file},{id:8,kind:'bob.file',data:{...file,id:'b841d08a-8b83-42cd-b8a7-2d61f2db7ae9'}},{id:1,kind:'bob.user',data:{text:'Check these files'}},{id:2,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'Checking the files.'},{type:'toolCall',id:'a',name:'read',arguments:{path:'a.txt'}}]}]},{id:3,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'a',toolName:'read',content:'FIRST'}]},{id:4,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'b',name:'read',arguments:{path:'b.txt'}}]}]},{id:5,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'b',toolName:'read',content:'SECOND'}]},{id:6,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'Here is the answer.'}]}]}];
@@ -980,7 +981,7 @@ test('original per-entry tool layout stays separate and preserves the chat list 
 test('recorded codemode audit branches expand independently while the script stays closed and the list/draft stay mounted',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={versionCode:35,versionName:'test'};
  const items=[
   {id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'codemode-audit',name:'codemode',arguments:{code:'SCRIPT_BODY'}}]}]},
@@ -1027,7 +1028,7 @@ test('recorded codemode audit branches expand independently while the script sta
 test('plain menu stays stable across native work, answers and failures without changing send/stop',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  let snapshot:((event:any)=>void)|undefined;
  require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
@@ -1060,7 +1061,7 @@ test('plain menu stays stable across native work, answers and failures without c
 test('composer owns response phases, chat owns tool detail and errors, and SSE phase changes preserve draft/list/stop identity',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  let snapshot:((event:any)=>void)|undefined;
  require('react-native-sse').mockImplementation(()=>({addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshot=callback;}),close:jest.fn(),open:jest.fn()}));
@@ -1100,7 +1101,7 @@ test('real App wires source snapshot phone requests once and keeps controls in S
  jest.replaceProperty(Platform,'OS','android');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://phone-tools.test.ts.net',name:'Phone tools fixture'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-device-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'paired-device-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const previous=NativeModules.BobPhoneTools;
  const phoneNative={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>true),execute:jest.fn(async(_backendId:string,_json:string)=>JSON.stringify({status:'ok',data:{sdkInt:35}})),getResult:jest.fn(async()=>null)};NativeModules.BobPhoneTools=phoneNative;
@@ -1135,7 +1136,7 @@ test('real App keeps the native connection separate from foreground-only phone t
  jest.replaceProperty(Platform,'OS','android');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://keep-connected.test.ts.net',name:'Connection fixture'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'paired-token'});
  const listeners=new Set<(state:string)=>void>();(AppState as any).currentState='active';
  jest.spyOn(AppState,'addEventListener').mockImplementation((event,listener)=>{if(event==='change')listeners.add(listener as (state:string)=>void);return{remove:()=>listeners.delete(listener as (state:string)=>void)};});
  let connection={enabled:false,running:false,status:'off',batteryRestricted:true};
@@ -1170,7 +1171,7 @@ test.each([false,true])('update notification respects workstation-scoped convers
  jest.replaceProperty(Platform,'OS','android');(AppState as any).currentState='active';
  const one={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://one.ts.net',name:'One'},two={backendId:'22222222-2222-4222-8222-222222222222',endpoint:'https://two.ts.net',name:'Two'};
  await AsyncStorage.setItem('backends',JSON.stringify([one,two]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:one.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'paired-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'paired-token'});
  let notice:any=null;
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>notice),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const native={select:jest.fn(async()=>{}),state:jest.fn(async()=>JSON.stringify({enabled:true,running:false,status:'off',batteryRestricted:true})),start:jest.fn(async()=>{}),stop:jest.fn(async()=>{})};NativeModules.BobConnection=native;
@@ -1190,7 +1191,7 @@ test.each([false,true])('update notification respects workstation-scoped convers
 test('live reply keeps its native row through completion; generated files move beneath only that proven answer',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  NativeModules.BobInteractive={prepare:jest.fn(async()=> 'retained-surface'),releasePrepared:jest.fn()};
  const surface={id:'a941d08a-8b83-42cd-b8a7-2d61f2db7ae9',conversationId:7,title:'Report chart',kind:'visual',presentation:'inline',allowedTools:[]};
@@ -1225,7 +1226,7 @@ test('live reply keeps its native row through completion; generated files move b
 test('inline tree controls complete the session lifecycle without a management screen or draft switch',async()=>{
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  let meta={title:'Manage me',pinned:false,archived:false,trashed:false};const mutations:string[]=[];
  const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
@@ -1254,7 +1255,7 @@ test('inline tree controls complete the session lifecycle without a management s
 
 test.each(['create','refresh'])('New prevents duplicate creation and stale navigation after workstation switch (%s)',async(stage)=>{
  const a={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://a.test',name:'A'},b={backendId:'22222222-2222-4222-8222-222222222222',endpoint:'https://b.test',name:'B'};
- await AsyncStorage.setItem('backends',JSON.stringify([a,b]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:a.backendId,chat:7}));(Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ await AsyncStorage.setItem('backends',JSON.stringify([a,b]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:a.backendId,chat:7}));(Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'fixture'});NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  let finish!:(result:Response)=>void,posted=false,posts=0;const response=(data:unknown)=>({ok:true,status:200,json:async()=>data}) as Response;
  jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options?:any)=>{
   const url=String(input),backend=url.startsWith(a.endpoint)?a:b;
@@ -1275,7 +1276,7 @@ test('real Menu → Terminal embeds directly, reserves IME once and returns to t
  jest.replaceProperty(Platform,'OS','android');(AppState as any).currentState='active';
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
  const native={capabilities:jest.fn(async()=>({available:true})),prepare:jest.fn(async()=> 'terminal-handle'),releasePrepared:jest.fn(async()=>{})};NativeModules.BobTerminal=native;
  const connection={sessionId:'session-1',host:'100.64.0.1',port:60020,key:'abcdefghijklmnopqrstuv',cwd:'/tmp/project'};
@@ -1311,7 +1312,7 @@ test('sent image decks preserve their row, draft and selected image; original pr
  const {ImageAttachments}=require('../components/image-attachments'),{ImageAttachmentStack}=require('../components/image-attachment-stack'),{AttachmentDetails}=require('../components/attachment-details');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={preview:jest.fn(async()=>{}),save:jest.fn(async()=>{})};delete NativeModules.BobOutbox;
  const photo=(id:number,kind='bob.artifact')=>({id,kind,data:{id:`a841d08a-8b83-42cd-b8a7-${String(id).padStart(12,'0')}`,conversationId:7,name:`photo-${id}.png`,mime:'image/png',size:12,sha256:'a'.repeat(64)}});
  const one=photo(11),two=photo(12),three=photo(13),owner={id:14,kind:'bob.user',data:{text:'Look at my photos'}};
@@ -1357,7 +1358,7 @@ describe('optional chat-list cache and child stream regressions',()=>{
  async function paired(backends=[backend]){
   await AsyncStorage.setItem('backends',JSON.stringify(backends));
   await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
-  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'test-token'});
+  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'test-device',password:'test-token'});
   NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
   NativeModules.BobNotifications={};NativeModules.BobFiles={};delete NativeModules.BobOutbox;
  }
@@ -1514,4 +1515,144 @@ describe('optional chat-list cache and child stream regressions',()=>{
    expect(tree.root.findByType(AgentsScreen).props.status).toBe('Child idle');
   }finally{if(tree)await act(async()=>tree.unmount());jest.useRealTimers();}
  });
+});
+
+test.each(['receipt','receipt-with-file','restore','upload'])('foreground delivery checks the actual credential after pairing changes during %s',async(changeAt)=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://identity.test.ts.net',name:'Identity'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ let device='old';(Keychain.getGenericPassword as jest.Mock).mockImplementation(async()=>({username:device,password:`token-${device}`}));
+ delete NativeModules.BobOutbox;NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
+ NativeModules.BobFiles={restoreAttachment:jest.fn(async()=>{if(changeAt==='restore')device='new';}),uploadAttachment:jest.fn(async()=>{if(changeAt==='upload')device='new';})};
+ const files=changeAt==='receipt'?[]:[{id:'file',uri:'file:///draft',name:'file.txt',mime:'text/plain'}];
+ await AsyncStorage.setItem('message-outbox:v1',JSON.stringify([{id:'identity-race',scope:`${backend.backendId}:7`,backend,chat:7,localId:-1,foregroundOnly:true,foregroundUnsent:true,files,message:{requestId:'identity-race',text:'Only once',mode:'steer',allowSubagents:true}}]));
+ const requests:{url:string;authorization:string}[]=[];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options:any)=>{
+  const url=String(input);requests.push({url,authorization:options?.headers?.Authorization});
+  let data:any=[];
+  if(url.includes('/operations/')){const persisted=(await readOutbox())[0] as any;expect(persisted.foregroundDeviceId).toBe('old');expect(JSON.stringify(persisted)).not.toContain('token-');if(changeAt.startsWith('receipt'))device='new';data={admission:null};}
+  else if(url.endsWith('/transfer-limits'))data={uploadLimit:1024};
+  else if(url.includes('/history'))data={backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]};
+  else if(url.endsWith('/chats'))data={items:[{id:7,meta:{title:'Identity'}}]};
+  else if(url.endsWith('/updates'))data={enabled:false};
+  return {ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  expect(requests.filter(request=>request.url.endsWith('/messages'))).toEqual([]);
+  expect((await readOutbox())[0]).toMatchObject({foregroundDeviceId:'old',rejected:true,uncertain:true});
+  if(changeAt==='restore')expect(NativeModules.BobFiles.uploadAttachment).not.toHaveBeenCalled();
+  if(changeAt==='upload')expect(NativeModules.BobFiles.uploadAttachment.mock.calls[0][2]).toBe('token-old');
+  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Check delivery'&&typeof node.props.onPress==='function')[0].props.onPress());
+  expect(requests.filter(request=>request.url.endsWith('/messages'))).toEqual([]);
+  expect((await readOutbox())[0]).toMatchObject({foregroundDeviceId:'old',uncertain:true});
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('mounted native recovery and barrier subscription resume after a transient first outbox read failure',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://readiness.test.ts.net',name:'Readiness'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ const saved={id:'blocked-file',scope:`${backend.backendId}:7`,backend,chat:7,localId:-1,foregroundOnly:true,rejected:true,files:[],message:{requestId:'blocked-file',text:'Preserve barrier',mode:'steer',allowSubagents:true}};
+ await AsyncStorage.setItem('message-outbox:v1',JSON.stringify([saved]));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'device',password:'token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};NativeModules.BobFiles={};
+ const recovered={...saved,id:'native-reply',foregroundOnly:false,notificationReply:true,rejected:false,message:{...saved.message,requestId:'native-reply'}};
+ const native={list:jest.fn(async()=>[JSON.stringify(recovered)]),enqueue:jest.fn(async()=>{}),status:jest.fn(async()=>JSON.stringify({state:'pending'})),setNotificationReplyBarriers:jest.fn(async()=>{})};NativeModules.BobOutbox=native;
+ const read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let blocked=true;
+ jest.spyOn(AsyncStorage,'getItem').mockImplementation(async key=>{if(blocked&&key==='message-outbox:v2')throw Error('Storage temporarily busy');return read(key);});
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{const url=String(input),data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Readiness'}}]}:url.endsWith('/updates')?{enabled:false}:[];return{ok:true,status:200,json:async()=>data} as Response;});
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  expect(native.list).not.toHaveBeenCalled();expect(native.setNotificationReplyBarriers).not.toHaveBeenCalled();
+  blocked=false;await act(async()=>DeviceEventEmitter.emit('BobOutboxChanged'));
+  expect((await readOutbox()).filter((value:any)=>value.id==='native-reply')).toHaveLength(1);
+  expect(native.setNotificationReplyBarriers).toHaveBeenCalledWith(backend.backendId,[7]);
+  await act(async()=>DeviceEventEmitter.emit('BobOutboxChanged'));
+  expect((await readOutbox()).filter((value:any)=>value.id==='native-reply')).toHaveLength(1);
+ }finally{await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
+});
+
+test('retrying an earlier attachment during a drain never transfers already-admitted native text to foreground after re-pair',async()=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://ownership.test.ts.net',name:'Ownership'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ const earlier={id:'earlier-file',scope:`${backend.backendId}:7`,backend,chat:7,localId:-1,foregroundOnly:true,foregroundUnsent:true,rejected:true,files:[{id:'file',uri:'file:///draft',name:'file.txt',mime:'text/plain'}],message:{requestId:'earlier-file',text:'Earlier file',mode:'steer',allowSubagents:true}};
+ await AsyncStorage.setItem('message-outbox:v1',JSON.stringify([earlier]));
+ let device='old',nativeSettled=false;
+ (Keychain.getGenericPassword as jest.Mock).mockImplementation(async()=>({username:device,password:`token-${device}`}));
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
+ NativeModules.BobFiles={restoreAttachment:jest.fn(async()=>{}),uploadAttachment:jest.fn(async()=>{}),removeAttachment:jest.fn(async()=>{})};
+ const admissions=new Set<string>(),nativeItems:any[]=[];
+ const native={enqueue:jest.fn(async(_endpoint,_backend,token,_chat,id,_message,_files,envelope)=>{admissions.add(`${token}:${id}`);nativeItems.push(JSON.parse(envelope));}),status:jest.fn(async()=>JSON.stringify(nativeSettled?{state:'admitted',admission:{status:'placed',entry:43}}:{state:'pending'})),list:jest.fn(async()=>[])};NativeModules.BobOutbox=native;
+ const lifecycle=new Set<(state:any)=>void>();
+ jest.spyOn(AppState,'addEventListener').mockImplementation((event,callback)=>{if(event==='change')lifecycle.add(callback as any);return{remove:()=>{lifecycle.delete(callback as any);}};});
+ const foregroundPosts:string[]=[];
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options:any)=>{
+  const url=String(input);let data:any=[];
+  if(url.endsWith('/messages')){const id=JSON.parse(options.body).requestId;foregroundPosts.push(id);admissions.add(`${options.headers.Authorization.replace('Bearer ','')}:${id}`);data={status:'placed',entry:42};}
+  else if(url.includes('/operations/'))data={admission:null};
+  else if(url.endsWith('/transfer-limits'))data={uploadLimit:1024};
+  else if(url.includes('/history'))data={backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]};
+  else if(url.endsWith('/chats'))data={items:[{id:7,meta:{title:'Ownership'}}]};
+  else if(url.endsWith('/updates'))data={enabled:false};
+  return{ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const saved=MessageOutbox.prototype.saved;let saves=0,release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ jest.spyOn(MessageOutbox.prototype,'saved').mockImplementation(async function(this:MessageOutbox){await saved.call(this);if(++saves===2)await gate;});
+ try{
+  act(()=>tree.root.findByProps({accessibilityLabel:'Message draft'}).props.onChangeText('Native text'));
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Send message'}).props.onPress());
+  expect(saves).toBe(2);expect(native.enqueue).toHaveBeenCalledTimes(1);
+  const id=nativeItems[0].id;device='new';
+  await act(async()=>tree.root.findAll(node=>node.props.accessibilityLabel==='Retry sending'&&typeof node.props.onPress==='function')[0].props.onPress());
+  await act(async()=>release());
+  expect(foregroundPosts).toEqual([]);expect([...admissions]).toEqual([`token-old:${id}`]);
+  expect(nativeItems[0].foregroundUnsent).not.toBe(true);
+  expect((await readOutbox()).find((value:any)=>value.id===id)).not.toHaveProperty('foregroundDeviceId');
+  nativeSettled=true;await act(async()=>{for(const callback of lifecycle)callback('active');});
+  expect(foregroundPosts).toEqual(['earlier-file']);
+  expect((await readOutbox()).find((value:any)=>value.id===id)).toMatchObject({admitted:true,entry:43});
+  expect([...admissions].filter(value=>value.endsWith(`:${id}`))).toEqual([`token-old:${id}`]);
+ }finally{release();await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
+});
+
+test.each(['unsent','bound'])('restored %s foreground text stays foreground behind an attachment barrier, even with native available and explicit retry',async(state)=>{
+ const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://foreground.test.ts.net',name:'Foreground'};
+ await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
+ const base={scope:`${backend.backendId}:7`,backend,chat:7,localId:-1,files:[],message:{requestId:'foreground-text',text:'Foreground text',mode:'steer',allowSubagents:true}};
+ const first={...base,id:'attachment',foregroundOnly:true,foregroundUnsent:true,rejected:true,message:{...base.message,requestId:'attachment'},files:[{id:'file',uri:'file:///draft',name:'file.txt',mime:'text/plain'}]};
+ const text={...base,id:'foreground-text',localId:-2,rejected:true,...(state==='unsent'?{foregroundUnsent:true}:{foregroundDeviceId:'device'})};
+ await AsyncStorage.setItem('message-outbox:v1',JSON.stringify([first,text]));
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'device',password:'token'});
+ NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
+ NativeModules.BobFiles={restoreAttachment:jest.fn(async()=>{}),uploadAttachment:jest.fn(async()=>{}),removeAttachment:jest.fn(async()=>{})};
+ const native={enqueue:jest.fn(async()=>{}),status:jest.fn(async()=>JSON.stringify({state:'pending'})),list:jest.fn(async()=>[])};NativeModules.BobOutbox=native;
+ const lifecycle=new Set<(state:any)=>void>();
+ jest.spyOn(AppState,'addEventListener').mockImplementation((event,callback)=>{if(event==='change')lifecycle.add(callback as any);return{remove:()=>{lifecycle.delete(callback as any);}};});
+ const posts:string[]=[];let release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any,options:any)=>{
+  const url=String(input);let data:any=[];
+  if(url.endsWith('/messages')){posts.push(JSON.parse(options.body).requestId);data={status:'placed',entry:posts.length+40};}
+  else if(url.includes('/operations/')){if(url.endsWith('/attachment'))await gate;data={admission:null};}
+  else if(url.endsWith('/transfer-limits'))data={uploadLimit:1024};
+  else if(url.includes('/history'))data={backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]};
+  else if(url.endsWith('/chats'))data={items:[{id:7,meta:{title:'Foreground'}}]};
+  else if(url.endsWith('/updates'))data={enabled:false};
+  return{ok:true,status:200,json:async()=>data} as Response;
+ });
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ try{
+  const retry=(id:string)=>tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0].props.data.find((entry:any)=>entry.data.requestId===id);
+  const firstLocalId=retry('attachment').id,textLocalId=retry('foreground-text').id;
+  const pressRetry=async(id:number)=>act(async()=>tree.root.findByProps({testID:`history-entry-${id}`}).findAll(node=>node.props.accessibilityLabel==='Retry sending'&&typeof node.props.onPress==='function')[0].props.onPress());
+  await pressRetry(firstLocalId);await pressRetry(textLocalId);
+  expect(posts).toEqual([]);expect(native.enqueue).not.toHaveBeenCalled();
+  await act(async()=>release());
+  expect(posts).toEqual(['attachment']);
+  // The text was rejected when the running drain took its snapshot; a later
+  // resume/poll must deliver it after the attachment, without native handoff.
+  await act(async()=>{for(const callback of lifecycle)callback('active');});
+  expect(posts).toEqual(['attachment','foreground-text']);expect(native.enqueue).not.toHaveBeenCalled();
+ }finally{release();await act(async()=>tree.unmount());delete NativeModules.BobOutbox;}
 });

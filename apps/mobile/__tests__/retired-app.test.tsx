@@ -68,7 +68,7 @@ async function switchBackend(tree:Renderer.ReactTestRenderer){
 }
 beforeEach(async()=>{
  await AsyncStorage.clear();
- (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({password:'fixture'});
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'fixture-device',password:'fixture'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
  NativeModules.BobNotifications={};NativeModules.BobFiles={removeAttachment:jest.fn(async()=>{})};delete NativeModules.BobOutbox;
  rows={[a.backendId]:[{id:7,meta:{title:'Ordinary chat'}}],[b.backendId]:[{id:7,meta:{title:'Other workstation chat'}}]};

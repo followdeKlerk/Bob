@@ -1,7 +1,7 @@
 import {recoverBackgroundOutbox,notificationReplyBarriers} from '../recover-background-outbox';
 import type {OutgoingMessage} from '../message-outbox';
 const item=(id:string,backendId='backend',chat=1):OutgoingMessage=>({id,scope:`${backendId}:${chat}`,backend:{backendId,endpoint:'https://example.test',name:'Test'},chat,localId:-1,files:[],message:{requestId:id,text:'Typed in notification',mode:'followUp',allowSubagents:false}});
-function local(items:OutgoingMessage[]=[]){return {ready:Promise.resolve(),items,add:jest.fn(async function(this:{items:OutgoingMessage[]},value:OutgoingMessage){this.items.push(value);})};}
+function local(items:OutgoingMessage[]=[]){return {whenReady:async()=>{},items,add:jest.fn(async function(this:{items:OutgoingMessage[]},value:OutgoingMessage){this.items.push(value);})};}
 test('recovers a notification reply into its exact backend and conversation without replacing composer queue',async()=>{
  const existing=item('composer'),incoming=item('notification','other-backend',42),box=local([existing]);
  await recoverBackgroundOutbox(box,{recover:async()=>[existing,incoming]});expect(box.items).toEqual([existing,incoming]);expect(box.add).toHaveBeenCalledTimes(1);
