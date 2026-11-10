@@ -8,19 +8,26 @@ export class NotesStore{
  private listeners=new Set<()=>void>();
  private writes:Promise<unknown>=Promise.resolve();
  private flight?:Promise<void>;
- readonly loaded:Promise<void>;
+ private loading?:Promise<void>;
  ready=false;syncing=false;localError=false;error='';
  constructor(readonly backendId:string,private transport:NotesTransport){
   this.cache={backendId,version:0,notes:{},categories:{},pending:[]};
-  this.loaded=AsyncStorage.getItem(this.key).then(raw=>{
+  void this.load();
+ }
+ get loaded(){return this.load();}
+ private load():Promise<void>{
+  if(this.ready)return Promise.resolve();
+  if(this.loading)return this.loading;
+  this.loading=AsyncStorage.getItem(this.key).then(raw=>{
    if(raw){
     const saved=JSON.parse(raw);
-    if(saved.backendId!==backendId)throw Error('Wrong notes cache identity');
+    if(saved.backendId!==this.backendId)throw Error('Wrong notes cache identity');
     const parsed=NotesDelta.parse({...saved,notes:Object.values(saved.notes),categories:Object.values(saved.categories)});
-    this.cache={backendId,version:parsed.version,notes:Object.fromEntries(parsed.notes.map(note=>[note.id,note])),categories:Object.fromEntries(parsed.categories.map(category=>[category.id,category])),pending:saved.pending.map((item:unknown)=>NoteMutation.parse(item))};
+    this.cache={backendId:this.backendId,version:parsed.version,notes:Object.fromEntries(parsed.notes.map(note=>[note.id,note])),categories:Object.fromEntries(parsed.categories.map(category=>[category.id,category])),pending:saved.pending.map((item:unknown)=>NoteMutation.parse(item))};
    }
-   this.ready=true;this.emit();
-  }).catch(()=>{this.error='Local notes could not be loaded. Saved data has not been changed.';this.emit();});
+   this.ready=true;this.error='';this.emit();
+  }).catch(()=>{this.error='Local notes could not be loaded. Saved data has not been changed.';this.emit();}).finally(()=>{this.loading=undefined;});
+  return this.loading;
  }
  private get key(){return `notes:v1:${this.backendId}`;}
  subscribe(listener:()=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}

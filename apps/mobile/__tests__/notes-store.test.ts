@@ -108,3 +108,23 @@ test('storage failures never send an unsaved mutation; retry preserves the local
  }finally{(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
  await store.sync();expect(store.localError).toBe(false);expect(store.pendingCount).toBe(0);expect(store.notes[0].body).toBe(value.body);
 });
+
+test('a transient initial read can recover through Sync without remounting or losing queued notes',async()=>{
+ const remote=server();remote.offline();const prior=new NotesStore(backend,remote.transport);await prior.loaded;
+ const id=await prior.saveNote(value);await prior.sync();
+ (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(Error('Storage temporarily unavailable'));
+ const store=new NotesStore(backend,remote.transport);await store.loaded;
+ expect(store.ready).toBe(false);expect(store.notes).toEqual([]);
+ remote.online();await store.sync();
+ expect(store.ready).toBe(true);expect(store.pendingCount).toBe(0);
+ expect(store.notes).toHaveLength(1);expect(store.notes[0]).toMatchObject({id,body:value.body,revision:1});
+ expect(Object.keys(remote.notes)).toEqual([id]);expect(store.error).toBe('');
+});
+
+test('repeated load attempts coalesce and corrupt bytes remain a closed write barrier',async()=>{
+ const key=`notes:v1:${backend}`,remote=server();await AsyncStorage.setItem(key,'broken');
+ const store=new NotesStore(backend,remote.transport);const first=store.loaded;expect(store.loaded).toBe(first);await first;
+ const retry=store.loaded;expect(store.loaded).toBe(retry);await retry;
+ await store.sync();await expect(store.saveNote(value)).rejects.toThrow('Local notes could not be loaded');
+ expect(store.ready).toBe(false);expect(await AsyncStorage.getItem(key)).toBe('broken');expect(remote.transport).not.toHaveBeenCalled();
+});

@@ -27,3 +27,16 @@ test('attachment messages and text queued behind them retain one foreground send
  await box.enqueue(attachment);expect(await box.deliver(attachment)).toBeUndefined();
  await box.enqueue({...item,foregroundOnly:true});expect(await box.deliver({...item,foregroundOnly:true})).toBeUndefined();expect(port.enqueue).not.toHaveBeenCalled();expect(port.status).not.toHaveBeenCalled();
 });
+
+test.each([{state:'pending'},{state:'admitted',admission:{status:'placed',entry:42}},{state:'rejected',uncertain:true,error:'Pairing changed'}])('enqueue receipt is authoritative without a redundant status read (%j)',async(receipt)=>{
+ const port=native();port.enqueue.mockResolvedValue(JSON.stringify(receipt));
+ const box=new BackgroundOutbox(port,async()=> 'secret');
+ for(let i=0;i<20;i++)expect(await box.deliver(item)).toEqual(receipt);
+ expect(port.enqueue).toHaveBeenCalledTimes(20);expect(port.status).not.toHaveBeenCalled();
+ await box.deliver(item,true);expect(port.enqueue.mock.calls.at(-1)?.[8]).toBe(true);
+});
+test('a failed native enqueue is not replaced with status or a foreground sender',async()=>{
+ const port=native();port.enqueue.mockRejectedValue(Error('Pairing conflict'));
+ const box=new BackgroundOutbox(port,async()=> 'changed');
+ await expect(box.deliver(item)).rejects.toThrow('Pairing conflict');expect(port.status).not.toHaveBeenCalled();
+});

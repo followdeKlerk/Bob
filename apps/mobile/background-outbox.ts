@@ -26,8 +26,10 @@ export class BackgroundOutbox {
  }
  async deliver(item:OutgoingMessage,retry=false):Promise<BackgroundReceipt|undefined>{
   if(item.files.length||item.foregroundOnly)return undefined;
-  await this.enqueue(item,retry);
-  const raw=await this.native.status(item.id);
+  const receipt=await this.enqueue(item,retry);
+  // Current native enqueue returns the same receipt as status after its durable
+  // handoff. Keep status fallback only for older bridges without that result.
+  const raw=typeof receipt==='string'?receipt:await this.native.status(item.id);
   return raw?JSON.parse(raw):{state:'pending'};
  }
  async recover():Promise<OutgoingMessage[]>{return (await this.native.list()).map(raw=>JSON.parse(raw));}

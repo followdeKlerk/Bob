@@ -365,3 +365,17 @@ test('Markdown editor has no formatting toolbar and footer Preview preserves the
   const cache=JSON.parse((await AsyncStorage.getItem(`notes:v1:${backend}`))!);expect(cache.pending.find((op:any)=>op.kind==='note').value.body).toBe(raw);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test('Sync remains available after local cache loading fails and recovers the mounted screen',async()=>{
+ const read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+ let fail=true,tree!:Renderer.ReactTestRenderer;
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((key:string)=>key===`notes:v1:${backend}`&&fail?Promise.reject(Error('Storage unavailable')):read(key));
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  const action=(label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+  expect(action('Create note').props.disabled).toBe(true);expect(action('Sync notes').props.disabled).toBe(false);
+  fail=false;await act(async()=>press(tree,'Sync notes'));
+  expect(action('Create note').props.disabled).toBe(false);act(()=>press(tree,'Create note'));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBeTruthy();
+ }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
+});
