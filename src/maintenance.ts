@@ -20,6 +20,9 @@ export class MaintenanceStore{
   if(row.request!==canonical)throw Error('Self-update request conflict');return JSON.parse(String(row.value));
  }
  jobs():UpdateJob[]{return this.db.prepare('SELECT value FROM jobs ORDER BY rowid DESC LIMIT 100').all().map(r=>JSON.parse(String(r.value)));}
+ /** Execution is independent of the bounded display/history window. Sole runner owns selection. */
+ nextQueued():UpdateJob|undefined{const row=this.db.prepare("SELECT value FROM jobs WHERE json_extract(value,'$.status')='queued' ORDER BY rowid LIMIT 1").get();return row?JSON.parse(String(row.value)):undefined;}
+ failInterrupted(){return this.db.prepare("UPDATE jobs SET value=json_set(value,'$.status','failed','$.stage','Interrupted; running state retained. Request a new build.','$.error','Supervisor restarted during operation; build was not replayed.','$.updated',?) WHERE json_extract(value,'$.status') IN ('building','activating')").run(Date.now()).changes;}
  job(id:string):UpdateJob|undefined{const row=this.db.prepare('SELECT value FROM jobs WHERE id=?').get(id);return row?JSON.parse(String(row.value)):undefined;}
  patch(id:string,change:Partial<UpdateJob>){const job=this.job(id);if(!job)throw Error('Unknown update');const next={...job,...change,id,updated:Date.now()};this.db.prepare('UPDATE jobs SET value=? WHERE id=?').run(JSON.stringify(next),id);return next;}
  get<T>(key:string):T|undefined{const row=this.db.prepare('SELECT value FROM settings WHERE key=?').get(key);return row?JSON.parse(String(row.value)):undefined;}

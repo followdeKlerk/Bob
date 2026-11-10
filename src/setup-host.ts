@@ -9,6 +9,7 @@ import {inspectOwner,acquireOwner} from './ownership.js';
 import {createBackendModels} from './runtime.js';
 import {hasProviderCredential,setProviderKey} from './provider-auth.js';
 import {guidedSetup,type SetupInspection,type SetupPort} from './setup-wizard.js';
+import {readControlFloor} from './maintenance-migration.js';
 import {checkSetupService,connectionEndpoint,installSetupService,renderSetupService,setupUnitName,validateConnection,verifyCertificate,verifySetupEndpoint,type SetupConnection} from './setup-service.js';
 
 export function executable(name:string){
@@ -32,8 +33,8 @@ export function inspectSetup(state:string,configPath=join(homedir(),'.config/bob
  if(!regular(database))throw Error('The control database must be a regular file.');
  let db:DatabaseSync|undefined;
  try{
+  readControlFloor(state,true); // Shared read-only authority validates current and historical floors.
   db=new DatabaseSync(database,{readOnly:true});db.exec('PRAGMA busy_timeout=1000');
-  const schema=Number(db.prepare('PRAGMA user_version').get()?.user_version)||1;if(![1,2].includes(schema))throw Error('Unsupported schema');
   const get=(key:string)=>{const row=db!.prepare('SELECT value FROM config WHERE key=?').get(key);return row?JSON.parse(String(row.value)):undefined;};
   const backendId=get('identity');setupUnitName(backendId);
   const ownership=inspectOwner(state);if(!['owned','available'].includes(ownership))throw Error('Uncertain runtime owner');

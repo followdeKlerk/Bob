@@ -19,7 +19,7 @@ let heartbeat:ReturnType<typeof setInterval>|undefined;
 try{
  const active=supervisor.recoveryRelease();
  store.set('draining',false);
- for(const job of store.jobs())if(['building','activating'].includes(job.status))store.patch(job.id,{status:'failed',stage:'Interrupted; running state retained. Request a new build.',error:'Supervisor restarted during operation; build was not replayed.'});
+ store.failInterrupted();
  await supervisor.start(active);
  // Interrupted migration may have selected a different active release before
  // any queued job runs. Hand off after health; never stay an old runner forever.
@@ -46,7 +46,7 @@ try{
  },2000);beat();
  while(!stopping){
   if(restarting){await new Promise(r=>setTimeout(r,500));continue;}
-  const job=store.jobs().reverse().find(j=>j.status==='queued');
+  const job=store.nextQueued();
   if(!job){await new Promise(r=>setTimeout(r,750));continue;}
   try{
    if(job.action==='rollback'){

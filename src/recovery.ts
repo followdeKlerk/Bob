@@ -2,9 +2,9 @@ import { backup, DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import {
   mkdirSync, rmSync, readFileSync, writeFileSync, copyFileSync, readdirSync,
-  lstatSync, chmodSync, existsSync, openSync, readSync, closeSync,
+  lstatSync, chmodSync, existsSync, openSync, readSync, closeSync, realpathSync,
 } from "node:fs";
-import { join, resolve, relative } from "node:path";
+import { join, resolve, relative, dirname, basename, isAbsolute, sep } from "node:path";
 import type { State } from "./state.js";
 import { acquireOwner } from "./ownership.js";
 import { readControlFloor, installedDurableVersion } from "./maintenance-migration.js";
@@ -78,11 +78,38 @@ function verifyMetadata(directory:string, manifest:Manifest) {
   // Both are strict parsed objects with a stable schema-defined property order.
   if(JSON.stringify(actual.floor)!==JSON.stringify(manifest.floor)) throw Error('Backup control floor metadata mismatch');
 }
+// Resolve existing ancestors without creating the output. Keep symlink/.. semantics
+// until realpath has resolved the existing prefix, then use this same path for writes.
+function backupDestination(path:string) {
+  let ancestor=isAbsolute(path)?path:process.cwd()+sep+path;
+  const missing:string[]=[];
+  while(true) {
+    try { lstatSync(ancestor); break; }
+    catch(error) {
+      if((error as NodeJS.ErrnoException).code!=='ENOENT') throw error;
+      const parent=dirname(ancestor); if(parent===ancestor) throw error;
+      // Cancelling a missing parent can expose an uncanonicalized symlink in
+      // the suffix. Refuse that ambiguity instead of normalizing it into output.
+      const component=basename(ancestor);
+      if(component==='..') throw Error('Backup destination overlap cannot be checked through unresolved parent traversal');
+      missing.unshift(component); ancestor=parent;
+    }
+  }
+  return resolve(realpathSync.native(ancestor),...missing);
+}
+function containsPath(root:string,path:string) {
+  const part=relative(root,path);
+  return part==='' || (!isAbsolute(part) && part!=='..' && !part.startsWith('..'+sep));
+}
 export async function backupState(state:State, destination:string, afterVerifiedBackup?:()=>Promise<void>) {
   const durableVersion=installedDurableVersion();
   const releaseOwner=acquireOwner(state.dir);
   try {
     if(existsSync(destination)) throw Error('Backup destination must not exist');
+    destination=backupDestination(destination);
+    if(existsSync(destination)) throw Error('Backup destination must not exist');
+    const sources=[state.dir,...['artifacts','custom-modules'].map(folder=>join(state.dir,folder)).filter(path=>existsSync(path))].map(path=>realpathSync.native(path));
+    if(sources.some(source=>containsPath(source,destination)||containsPath(destination,source))) throw Error('Backup destination overlaps source state/payloads');
     const hasDurable=existsSync(join(state.dir,'durable.sqlite'));
     const sourceMetadata=metadata(state.dir,hasDurable);
     if(sourceMetadata.backendId!==state.id) throw Error('Backup identity mismatch');
