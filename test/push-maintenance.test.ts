@@ -25,3 +25,33 @@ test('build relay does not mark failed queue admission as handled',t=>{
  jobs=[job('ready')];t.mock.timers.tick(2000);assert.equal(sent.length,0);assert.equal(log.mock.callCount(),1);
  fail=false;t.mock.timers.tick(2000);assert.deepEqual(sent,['maintenance:ready:complete']);stop();
 });
+
+test('unchanged maintenance polls and restarts do not rewrite the persisted cursor',t=>{
+ t.mock.timers.enable({apis:['setInterval']});
+ const state=fixture(),write=t.mock.method(state,'set'),sent:string[]=[];let jobs:UpdateJob[]=[];
+ const start=()=>watchPushMaintenance(state,key=>sent.push(key),{read:()=>jobs});
+ let stop=start();assert.equal(write.mock.callCount(),1,'initialize the baseline once');
+ t.mock.timers.tick(60000);assert.equal(write.mock.callCount(),1,'30 idle polls must not issue writes');
+ jobs=[job('new')];t.mock.timers.tick(2000);assert.deepEqual(sent,['maintenance:new:complete']);assert.equal(write.mock.callCount(),2);
+ jobs=[job('new','failed')];t.mock.timers.tick(2000);assert.deepEqual(sent,['maintenance:new:complete','maintenance:new:failed']);assert.equal(write.mock.callCount(),3);
+ jobs=[job('active','building'),...jobs];t.mock.timers.tick(2000);assert.equal(write.mock.callCount(),3);
+ stop();stop=start();assert.equal(write.mock.callCount(),3,'restart reuses the unchanged baseline');
+ t.mock.timers.tick(60000);assert.equal(write.mock.callCount(),3);stop();
+});
+
+test('maintenance cursor pruning persists once and failed persistence remains retryable',t=>{
+ t.mock.timers.enable({apis:['setInterval']});
+ const state=fixture();state.set('pushMaintenanceSeen',Array.from({length:205},(_,i)=>`old-${i}:complete`));
+ const write=t.mock.method(state,'set'),sent:string[]=[];let jobs:UpdateJob[]=[];
+ const stop=watchPushMaintenance(state,key=>sent.push(key),{read:()=>jobs});
+ assert.equal(write.mock.callCount(),1);assert.equal(state.get<string[]>('pushMaintenanceSeen')!.length,200);
+ t.mock.timers.tick(2000);assert.equal(write.mock.callCount(),1);
+ write.mock.mockImplementationOnce(()=>{throw Error('synthetic storage failure');});
+ const log=t.mock.method(console,'error',()=>{});
+ jobs=[job('new')];t.mock.timers.tick(2000);assert.equal(log.mock.callCount(),1);
+ assert.ok(!state.get<string[]>('pushMaintenanceSeen')!.includes('new:complete'));
+ t.mock.timers.tick(2000);
+ assert.ok(state.get<string[]>('pushMaintenanceSeen')!.includes('new:complete'));
+ assert.deepEqual(sent,['maintenance:new:complete','maintenance:new:complete'],'queue-before-cursor ordering permits deduplicated admission retry');
+ const count=write.mock.callCount();t.mock.timers.tick(2000);assert.equal(write.mock.callCount(),count);stop();
+});

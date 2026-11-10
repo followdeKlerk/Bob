@@ -492,7 +492,7 @@ export async function serve(
           const query=(url.searchParams.get('query')??'').trim().slice(0,160),limit=Math.min(Math.max(Number(url.searchParams.get('limit')??100)||100,1),100);
           const page=await chat.entries({order:'descending'},limit,cursor,ctx);
           let items=await runtime.replyPresentation(id,await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,page.items)));
-          if(query){const terms=query.toLocaleLowerCase().split(/[^\\p{L}\\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
+          if(query){const terms=query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(x=>x.length>1).slice(0,12);items=items.filter(entry=>{const text=JSON.stringify(entry).toLocaleLowerCase();return terms.some(term=>text.includes(term));});}
           return send(res,200,{backendId:state.id,conversationId:id,coverage:'stored-entries',items:mobileTranscriptEntries(items),next:encodeCursor(state,resource,page.next),...(query?{filtered:true,query}:{})});
         }
         if (action === "configure" && req.method === "GET") {
@@ -624,8 +624,15 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
               if (!state.authenticate(token)) { res.end(); return; }
               if (!res.write(`event: snapshot\ndata: ${JSON.stringify({
                 backendId: state.id, conversationId: id, view,
-              })}\n\n`))
-                await Promise.race([once(res, "drain"), once(res, "close")]);
+              })}\n\n`)) {
+                if (ended || res.destroyed) return;
+                // Whichever event wins, remove both waiters (including their
+                // error listeners) rather than retaining one until disconnect.
+                const wait = new AbortController();
+                try {
+                  await Promise.race([once(res, "drain", {signal: wait.signal}), once(res, "close", {signal: wait.signal})]);
+                } finally { wait.abort(); }
+              }
             });
             return emitting;
           };

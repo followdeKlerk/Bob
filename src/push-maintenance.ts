@@ -18,7 +18,7 @@ export function watchPushMaintenance(
   if(stopped)return;
   try{
    const jobs=read().filter(terminal);
-   let seen=state.get<string[]>(key);
+   const seen=state.get<string[]>(key);
    // An installation starts now; historical completed builds are not new alerts.
    if(!seen){state.set(key,jobs.map(job=>`${job.id}:${job.status}`));return;}
    const known=new Set(seen);
@@ -29,8 +29,8 @@ export function watchPushMaintenance(
     attention(`maintenance:${id}`);
     known.add(id);
    }
-   seen=[...known].slice(-200);
-   state.set(key,seen);
+   const next=[...known].slice(-200);
+   if(next.length!==seen.length||next.some((value,index)=>value!==seen[index]))state.set(key,next);
   }catch{
    // Don't leak journal paths or credentials. Keep cursor unchanged and try later.
    console.error('[push] Build notification relay unavailable; will retry.');
