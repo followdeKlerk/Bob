@@ -13,7 +13,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 internal data class PdfFrame(val page: Int, val generation: Long, val pageWidth: Int, val pageHeight: Int,
-    val bitmap: Bitmap, val plan: PdfRasterPlan, val detail: Boolean)
+    val bitmap: Bitmap, val plan: PdfRasterPlan, val detail: Boolean) {
+    val key get() = PdfRasterKey(page, generation, plan)
+}
 
 /** The descriptor, renderer and open pages have exactly one worker-thread owner.
  * UI acknowledgement gates the next render, so completed bitmaps cannot queue up. */
@@ -46,8 +48,12 @@ internal class PdfRenderSession(file: File, opened: (Int, String?) -> Unit,
         }
     }
     fun page(index: Int, generation: Long, width: Int, height: Int, margin: Float) = offer(Request(index, generation, width, height, margin))
-    fun detail(index: Int, generation: Long, plan: PdfRasterPlan) = offer(Request(index, generation, tile = plan))
-    private fun offer(request: Request) { if (!closed && queue.offer(request)) worker.post { renderLatest() } }
+    // Only the view's accepted detail is supplied here, never a requested or failed plan.
+    fun detail(index: Int, generation: Long, plan: PdfRasterPlan, published: PdfRasterKey?) =
+        offer(Request(index, generation, tile = plan), skipIfIdle = published == PdfRasterKey(index, generation, plan))
+    private fun offer(request: Request, skipIfIdle: Boolean = false) {
+        if (!closed && queue.offer(request, skipIfIdle)) worker.post { renderLatest() }
+    }
     private fun renderLatest() {
         val request = queue.take() ?: return
         var output: PdfFrame? = null; var allocated: Bitmap? = null; var error: String? = null

@@ -50,7 +50,7 @@ internal class PdfPreviewView(context: Context) : View(context) {
         if (disposed || base == null || !viewport.ready || currentState.loading) return@Runnable
         if (viewport.zoom <= 1.001f && base!!.plan.scale >= viewport.scale * 0.99f) { detail = null; invalidate(); return@Runnable }
         val plan = PdfViewport.raster(viewport.visible(), viewport.scale, PdfViewport.DETAIL_PIXELS)
-        session?.detail(currentState.page, generation, plan)
+        session?.detail(currentState.page, generation, plan, detail?.key)
     }
     private val pinch = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {

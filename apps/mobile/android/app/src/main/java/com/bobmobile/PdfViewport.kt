@@ -11,6 +11,7 @@ internal data class PdfRect(val left: Float, val top: Float, val right: Float, v
     val height get() = bottom - top
 }
 internal data class PdfRasterPlan(val region: PdfRect, val scale: Float, val width: Int, val height: Int)
+internal data class PdfRasterKey(val page: Int, val generation: Long, val plan: PdfRasterPlan)
 
 /** Pure PDF-point/screen-pixel geometry; never scales the app's text or controls. */
 internal class PdfViewport(val margin: Float) {
@@ -96,8 +97,9 @@ internal class LatestPdfWork<T> {
     private var scheduled = false
     private var closed = false
     private var pending: T? = null
-    @Synchronized fun offer(value: T): Boolean {
-        if (closed) return false
+    @Synchronized fun offer(value: T, skipIfIdle: Boolean = false): Boolean {
+        // Even a published match must replace pending work: an in-flight tile may supersede it.
+        if (closed || (skipIfIdle && !scheduled)) return false
         pending = value
         if (scheduled) return false
         scheduled = true; return true
