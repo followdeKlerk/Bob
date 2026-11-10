@@ -275,3 +275,126 @@ test('read-only history still paginates and its existing attachments can be prev
   expect(fetchMock.mock.calls.some(([url,options])=>String(url).endsWith('/messages')||options?.method==='PUT')).toBe(false);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test('draft read failure keeps the composer closed, retries without blocking history, and restores the original',async()=>{
+ const key=`draft:${a.backendId}:7`,read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;
+ await AsyncStorage.setItem(key,'IRREPLACEABLE UNSENT DRAFT');
+ let fail=true;
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((k:string)=>k===key&&fail?Promise.reject(Error('Temporary read failure')):read(k));
+ const tree=await mount(7);
+ try{
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(false);
+  expect(await read(key)).toBe('IRREPLACEABLE UNSENT DRAFT');
+  expect(fetchMock.mock.calls.some(([url])=>String(url).includes('/chats/7/history'))).toBe(true);
+  await press(tree,'Retry loading draft');expect(tree.root.findByType(DraftInput).props.editable).toBe(false);
+  expect(await read(key)).toBe('IRREPLACEABLE UNSENT DRAFT');
+  fail=false;await press(tree,'Retry loading draft');
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(true);
+  expect(tree.root.findByType(DraftInput).props.value).toBe('IRREPLACEABLE UNSENT DRAFT');
+ }finally{await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
+});
+test('an obsolete draft retry cannot replace another workstation draft',async()=>{
+ const key=`draft:${a.backendId}:7`,read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!,held=deferred<string>();let fail=true;
+ await AsyncStorage.setItem(`draft:${b.backendId}:7`,'Other workstation draft');
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((k:string)=>k===key?(fail?Promise.reject(Error('Read failed')):held.promise):read(k));
+ const tree=await mount(7);
+ try{
+  fail=false;await press(tree,'Retry loading draft');
+  await switchBackend(tree);await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));
+  expect(tree.root.findByType(DraftInput).props.value).toBe('Other workstation draft');
+  await act(async()=>held.resolve('Old workstation draft'));
+  expect(tree.root.findByType(DraftInput).props.value).toBe('Other workstation draft');
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(true);
+ }finally{held.resolve('Old workstation draft');await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
+});
+test('failed draft save keeps in-memory text and explicit retry saves without rehydrating',async()=>{
+ const key=`draft:${a.backendId}:7`,write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const tree=await mount(7);let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((k:string,value:string)=>k===key&&fail?Promise.reject(Error('Disk unavailable')):write(k,value));
+ try{
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(true); // An absent key is not a load failure.
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('Keep this unsaved text'));
+  expect(tree.root.findByType(DraftInput).props.value).toBe('Keep this unsaved text');
+  expect(button(tree,'Retry saving draft')).toBeDefined();
+  fail=false;await press(tree,'Retry saving draft');
+  expect(await AsyncStorage.getItem(key)).toBe('Keep this unsaved text');
+  expect(tree.root.findByType(DraftInput).props.value).toBe('Keep this unsaved text');
+  expect(button(tree,'Retry saving draft')).toBeUndefined();
+ }finally{await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test('unresolved saved pending-operation identity must keep Send closed',async()=>{
+ const key=`pending:${a.backendId}:7`,read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!,held=deferred<string>();
+ await AsyncStorage.setItem(`draft:${a.backendId}:7`,'Previously submitted text with unknown admission');
+ await AsyncStorage.setItem(key,'original-uncertain-request');
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((k:string)=>k===key?held.promise:read(k));
+ const tree=await mount(7);
+ try{
+  await press(tree,'Send message');
+  const sends=fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/messages'));
+  expect(sends).toHaveLength(0);
+ }finally{await act(async()=>held.resolve('original-uncertain-request'));await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
+});
+
+test('stale save-retry callback after A-B-A cannot overwrite the newer A draft',async()=>{
+ const key=`draft:${a.backendId}:7`,write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const tree=await mount(7);let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((k:string,value:string)=>k===key&&fail?Promise.reject(Error('Disk unavailable')):write(k,value));
+ try{
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('old failed text'));
+  const stale=button(tree,'Retry saving draft').props.onPress;
+  fail=false;await press(tree,'Retry saving draft');
+  await switchBackend(tree);await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));
+  await navigate(tree,'Workstations');
+  await act(async()=>tree.root.findByType(SideDrawer).props.workspaces.find((row:any)=>row.id===a.backendId).onPress());
+  await navigate(tree,'Sessions');await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('newest A text'));
+  expect(await AsyncStorage.getItem(key)).toBe('newest A text');
+  await act(async()=>stale());
+  expect(tree.root.findByType(DraftInput).props.value).toBe('newest A text');
+  expect(await AsyncStorage.getItem(key)).toBe('newest A text');
+ }finally{await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test('consecutive draft writes are serialized and an older failure cannot hide the newest save',async()=>{
+ const key=`draft:${a.backendId}:7`,write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const tree=await mount(7);let release!:()=>void;const held=new Promise<void>(r=>{release=r;});const entered:string[]=[];
+ (AsyncStorage.setItem as jest.Mock).mockImplementation(async(k:string,value:string)=>{if(k===key){entered.push(value);if(value==='first'){await held;throw Error('First write failed');}}return write(k,value);});
+ try{
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('first'));
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('second'));
+  expect(entered).toEqual(['first']);
+  await act(async()=>release());
+  expect(entered).toEqual(['first','second']);expect(await AsyncStorage.getItem(key)).toBe('second');
+  expect(button(tree,'Retry saving draft')).toBeUndefined();
+ }finally{release();await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test.each([false,true])('a stale save retry cannot admit captured text in the same or another scope (switch=%s)',async(changeScope)=>{
+ const key=`draft:${a.backendId}:7`,write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const tree=await mount(7);let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((k:string,value:string)=>k===key&&fail?Promise.reject(Error('Disk unavailable')):write(k,value));
+ try{
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('old failed text'));
+  const stale=button(tree,'Retry saving draft').props.onPress;fail=false;
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('newest A text'));
+  if(changeScope){await switchBackend(tree);await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));}
+  const count=(AsyncStorage.setItem as jest.Mock).mock.calls.filter(([k])=>k===key).length;
+  await act(async()=>stale());expect(await AsyncStorage.getItem(key)).toBe('newest A text');
+  expect((AsyncStorage.setItem as jest.Mock).mock.calls.filter(([k])=>k===key)).toHaveLength(count);
+ }finally{await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+test('pending recovery from an old scope cannot unlock or block the newly selected chat',async()=>{
+ const key=`pending:${a.backendId}:7`,read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!,held=deferred<string>();
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((k:string)=>k===key?held.promise:read(k));
+ const tree=await mount(7);
+ try{
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(false);
+  await switchBackend(tree);await act(async()=>tree.root.findByType(AgentsScreen).props.onOpenSession(7));
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(true);
+  await act(async()=>held.resolve('original-uncertain-request'));
+  expect(tree.root.findByType(DraftInput).props.editable).toBe(true);
+  await act(async()=>tree.root.findByType(DraftInput).props.onChangeText('new scope message'));
+  expect(button(tree,'Send message').props.disabled).toBe(false);
+ }finally{held.resolve('original-uncertain-request');await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
+});

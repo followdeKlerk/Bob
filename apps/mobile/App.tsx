@@ -271,8 +271,14 @@ function Main() {
     stream = useRef<SnapshotStream | null>(null),
     draftReady = useRef(false);
   const scope = backend && chat ? `${backend.backendId}:${chat}` : '';
-  const [draftLoadedScope,setDraftLoadedScope]=useState('');
-  const composerReady=!!scope&&draftLoadedScope===scope;
+  const draftVisit=useRef({scope});if(draftVisit.current.scope!==scope)draftVisit.current={scope};
+  const currentDraftVisit=draftVisit.current;
+  const [draftLoadedVisit,setDraftLoadedVisit]=useState<object>(),[pendingLoadedVisit,setPendingLoadedVisit]=useState<object>();
+  const [draftError,setDraftError]=useScopedSnapshot<'load'|'save'>(scope);
+  const [draftLoadAttempt,setDraftLoadAttempt]=useState(0);
+  const draftWrites=useRef<Promise<void>>(Promise.resolve()),draftWriteVersion=useRef(0);
+  const renderedDraftWriteVersion=draftWriteVersion.current;
+  const composerReady=!!scope&&draftLoadedVisit===currentDraftVisit&&pendingLoadedVisit===currentDraftVisit;
   useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,screen]);
   identity.current = scope;
   const [view,setView]=useScopedSnapshot<Snapshot>(scope),[childView,setChildView]=useScopedSnapshot<Snapshot>(`${scope}:child:${child}`);
@@ -469,11 +475,9 @@ function Main() {
   useEffect(() => {
     let cancelled=false,events:SnapshotStream|undefined,lastRaw:string|undefined;
     stream.current?.close();
-    draftReady.current = false;
-    setDraftLoadedScope('');
     setView(undefined);
-    setPending(undefined);
-    setDraft('');setChild(undefined);setChildView(undefined);
+    setPending(undefined);setPendingLoadedVisit(undefined);
+    setChild(undefined);setChildView(undefined);
     if (!backend || !chat) return;
     setStatus('Connecting…');
     const current = scope,
@@ -481,20 +485,17 @@ function Main() {
     const cache=snapshotPersistence(`history:${current}`);
     const cacheLifecycle=AppState.addEventListener('change',state=>{if(state!=='active')void cache.flush();});
     void (async () => {
-      const [saved, cached, op] = await Promise.all([
-        AsyncStorage.getItem(`draft:${current}`).catch(()=>null),
+      const [cached, op] = await Promise.all([
         readHistoryCache(`history:${current}`),
         AsyncStorage.getItem(`pending:${current}`).catch(()=>null),
       ]);
       if (cancelled||identity.current !== current) return;
-      setDraft(saved ?? '');
-      draftReady.current = true;
-      setDraftLoadedScope(current);
       if (cached) {
         try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(snapshot);setStatus('Cached • reconnecting');}}catch{}
       }
       setPending(op ?? undefined);
       if(op)pendingOperations.current.set(current,op);else pendingOperations.current.delete(current);
+      setPendingLoadedVisit(currentDraftVisit);
       await AsyncStorage.setItem(
         'selection',
         JSON.stringify({ backendId: b.backendId, chat }),
@@ -555,9 +556,33 @@ function Main() {
     })();
     return()=>{cancelled=true;events?.close();cacheLifecycle.remove();void cache.close();};
   },[scope,child,screen]);
+  // Draft storage is not an optional transcript cache: a failed read must not
+  // expose a writable blank draft that can overwrite text we never recovered.
+  useEffect(()=>{
+    let cancelled=false;
+    draftReady.current=false;setDraftLoadedVisit(undefined);setDraftError(undefined);setDraft('');
+    if(!scope)return;
+    const current=scope;
+    void draftWrites.current.then(()=>AsyncStorage.getItem(`draft:${current}`)).then(saved=>{
+      if(cancelled||identity.current!==current)return;
+      setDraft(saved??'');draftReady.current=true;setDraftLoadedVisit(currentDraftVisit);
+    }).catch(()=>{if(!cancelled&&identity.current===current)setDraftError('load');});
+    return()=>{cancelled=true;};
+  },[scope,draftLoadAttempt]);
+  function persistDraft(current:string,value:string,expectedVersion?:number){
+    // Fence admission, not just completion: an old Retry callback must not enqueue
+    // captured text after newer edits or a return to the same scope (A→B→A).
+    if(draftVisit.current!==currentDraftVisit||identity.current!==current||!draftReady.current||latestDraft.current!==value||(expectedVersion!==undefined&&expectedVersion!==draftWriteVersion.current))return Promise.resolve();
+    const version=++draftWriteVersion.current;
+    draftWrites.current=draftWrites.current.then(()=>AsyncStorage.setItem(`draft:${current}`,value)).then(()=>{
+      if(draftVisit.current===currentDraftVisit&&draftWriteVersion.current===version)setDraftError(undefined);
+    }).catch(()=>{
+      if(draftVisit.current===currentDraftVisit&&draftWriteVersion.current===version)setDraftError('save');
+    });
+    return draftWrites.current;
+  }
   useEffect(() => {
-    if (scope && draftReady.current)
-      void AsyncStorage.setItem(`draft:${scope}`, draft);
+    if (scope && draftReady.current)void persistDraft(scope,draft);
   }, [draft, scope]);
   async function pair(invitation = pairing) {
     const p = PairingInvitation.parse(JSON.parse(invitation));
@@ -1044,9 +1069,9 @@ function Main() {
           </View>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
             <View testID="composer-heading" style={styles.composerHeading}>
-              <View style={{flex:1,minWidth:0}}>{!composerReady&&chat?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:(((activity.phase!=='idle'&&activity.phase!=='connecting')||parentLinked.rawEntries.length>0)&&(
+              <View style={{flex:1,minWidth:0}}>{!composerReady&&chat&&!draftError?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:(((activity.phase!=='idle'&&activity.phase!=='connecting')||parentLinked.rawEntries.length>0)&&(
             <ComposerStatus animate={activity.animate&&screen==='Chat'} text={activity.text}/>
-            ))}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
+            ))}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
               <ChatNavigation showTrigger={screen==='Chat'} open={navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
             </View>
             <View testID="composer-row" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerRowHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={styles.composerRow}>
