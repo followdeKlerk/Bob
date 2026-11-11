@@ -66,6 +66,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
   let closeMaintenanceReports=async()=>{};
   let closeCodemode=async()=>{};
   let closeWeb=async()=>{};
+  let closeReplyPresentation=()=>{};
   let disposeInteractive=()=>{};
   let openedHarness:import('@earendil-works/pi-durable').Harness|undefined;
   let closing:Promise<void>|undefined;
@@ -73,7 +74,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     const errors:unknown[]=[];
     // Join native invocations before destroying the VM host. Attempt every cleanup,
     // even on startup failure or when another resource's close throws.
-    for(const dispose of [disposeInteractive,closeMaintenanceReports,closePush,closeLearning,closeMemory,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
+    for(const dispose of [disposeInteractive,closeMaintenanceReports,closePush,closeLearning,closeMemory,closeReplyPresentation,()=>openedHarness?.close(ctx),closeCodemode,closeWeb,disposeCustom,releaseOwner]){
       try {await dispose();} catch(error){errors.push(error);}
     }
     if(errors.length)throw new AggregateError(errors,'Runtime cleanup failed');
@@ -161,6 +162,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
       ctx
     );
     openedHarness=harness;
+    const replyPresentation=createReplyPresentation(storage,harness);closeReplyPresentation=()=>replyPresentation.close();
     chmodSync(join(state.dir, "durable.sqlite"), 0o600);
     const library = await harness.root(ctx);
     libraryId = library.id;
@@ -193,7 +195,7 @@ export async function openRuntime(state: State, testModels?: Models, testMcpTran
     }
     return {
       harness,
-      replyPresentation:createReplyPresentation(storage),
+      replyPresentation,
       push,
       scheduling,
       learning:{...learning,flush:async()=>{await learningAttached?.flush();}},
