@@ -21,7 +21,9 @@ async function fixture(){
  const dir=mkdtempSync(join(tmpdir(),'bob-agent-overview-')),state=new State(dir),runtime=await openRuntime(state,undefined,undefined,{resume:false});
  runtime.registry.install(defineExtension({name:'test.agent-overview',tasks:[held]}));
  const app=await serve(state,{port:0,runtime}),pair=state.pair(state.invite().token,'Agent overview test');
- const headers={authorization:`Bearer ${pair.credential}`,'x-bob-backend':state.id},base=`http://127.0.0.1:${(app.server.address() as any).port}/v1`;
+ // Bulk synchronous fixture writes can outlive HTTP keep-alive while its timers
+ // cannot run. Test endpoint semantics on fresh sockets, not a stale client pool.
+ const headers={connection:'close',authorization:`Bearer ${pair.credential}`,'x-bob-backend':state.id},base=`http://127.0.0.1:${(app.server.address() as any).port}/v1`;
  const create=(title:string)=>runtime.harness.createConversation({ownership:{kind:'ownerless'},init:async(tx,id)=>{(await tx.doc(ChatMeta,id)).title=title;}},ctx);
  const request=(suffix='',options:RequestInit={})=>fetch(base+'/agent-overview'+suffix,{headers,...options});
  async function overview(cursor?:string,filter?:AgentOverviewFilter){const query=new URLSearchParams();if(cursor)query.set('cursor',cursor);if(filter)query.set('filter',filter);const response=await request('?'+query);assert.equal(response.status,200,await response.clone().text());return await response.json() as AgentOverview;}
@@ -122,6 +124,8 @@ test('overview pagination never drops overflow roots after owned children; curso
   // A bounded sparse request can return no roots, but must still let the
   // caller cross the owned-child gap and eventually reach every root.
   for(let i=0;i<305;i++)await f.child(roots[0],`gap ${i}`);
+  // Exercise the expired-idle-connection boundary without adding a wall-clock wait.
+  f.app.server.closeIdleConnections();
   let page=await f.overview();assert.deepEqual(page.sessions,[]);assert.ok(page.next);
   const seen:ConversationId[]=[];let pages=1;
   while(page.next){page=await f.overview(page.next);seen.push(...page.sessions.map(s=>s.conversationId));assert.ok(page.sessions.length<=30);assert.ok(++pages<10);}
