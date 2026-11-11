@@ -398,3 +398,29 @@ test('pending recovery from an old scope cannot unlock or block the newly select
   expect(button(tree,'Send message').props.disabled).toBe(false);
  }finally{held.resolve('original-uncertain-request');await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
 });
+
+test('streamed prose does not rebuild unchanged history linking, output placement or image decks',async()=>{
+ const publish=snapshots(),tree=await mount(7);
+ const functions=[jest.spyOn(require('../tool-results'),'linkToolResults'),jest.spyOn(require('../surface-placement'),'surfaceAnchors'),jest.spyOn(require('../chat-replies'),'replyOutputPlacement'),jest.spyOn(require('../image-attachment-rows'),'imageAttachmentRows')];
+ const entries=Array.from({length:120},(_,i)=>({id:i+1,kind:'bob.user',data:{text:`Stored ${i}`}}));
+ const live=(text:string)=>({run:{taskId:900,first:121},generation:{message:{role:'assistant',content:[{type:'text',text}]}},tools:[],nestedTools:[]});
+ try{
+  await publish({'pi.live':live('Start')},entries);
+  const lists=()=>tree.root.findAllByType(require('react-native').FlatList).find(n=>n.props.testID==='chat-history-list')!;
+  const before=lists(),old=before.props.data.find((e:any)=>e.id===100);
+  for(const fn of functions)fn.mockClear();
+  for(let i=1;i<=20;i++)await publish({'pi.live':live(`Reply ${i}`)},entries);
+  expect(lists()).toBe(before);expect(lists().props.data.find((e:any)=>e.id===100)).toBe(old);
+  expect(lists().props.data[0].displayKey).toBe('generation:900');
+  expect(lists().props.data[0].model[0].content[0].text).toBe('Reply 20');
+  expect(functions.map(fn=>fn.mock.calls.length)).toEqual([0,0,0,0]);
+  await publish({'pi.live':{tools:[],nestedTools:[]}},[...entries,{id:121,kind:'pi.assistant',byTaskId:900,model:[{role:'assistant',content:[{type:'text',text:'Final answer'}]}]}]);
+  expect(lists()).toBe(before);expect(lists().props.data[0].displayKey).toBe('generation:900');
+  expect(lists().props.data.filter((e:any)=>e.displayKey==='generation:900')).toHaveLength(1);
+  expect(lists().props.data[0].liveResponse).toBeUndefined();expect(lists().props.data.find((e:any)=>e.id===100)).toBe(old);
+  expect(functions.slice(0,3).map(fn=>fn.mock.calls.length)).toEqual([1,1,1]);
+  // Ending a run also refreshes surface membership; image placement may update
+  // again for that independent response, unlike the prose-only token path.
+  expect(functions[3]).toHaveBeenCalled();
+ }finally{await act(async()=>tree.unmount());}
+});

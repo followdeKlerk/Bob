@@ -71,6 +71,7 @@ import {useScopedSnapshot} from './use-scoped-snapshot';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults} from './tool-results';
+import {useTranscriptLiveTools} from './transcript-live-tools';
 import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry,chatEntryGap} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
@@ -886,17 +887,17 @@ function Main() {
   const showStop=busy&&!hasDraft;
   const waitingForAnswer=!!view?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===view.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted));
   const activity=composerActivity({connection:status,hasConversation:!!chat,storageError:!!outboxError,sending:outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted),waitingForAnswer,live:view?.docs['pi.live'],work:view?.work});
-  const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page)=>{
+  const parentLiveTools=useTranscriptLiveTools(view?.docs['pi.live']),childLiveTools=useTranscriptLiveTools(childView?.docs['pi.live']);
+  const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page,liveTools:ReturnType<typeof useTranscriptLiveTools>)=>{
     const entries=page?Array.from(new Map([...(page.items as Entry[]),...(snapshot?.entries??[])].map(entry=>[entry.id,entry])).values()).sort((a,b)=>a.id-b.id):snapshot?.entries??[];
-    const linked=linkToolResults(entries,snapshot?.docs['pi.live']),anchors=surfaceAnchors(entries,snapshot?.docs['pi.live']),placement=replyOutputPlacement(entries,anchors),surfaceEntries=new Set(placement.surfaces.values());
+    const linked=linkToolResults(entries,liveTools),anchors=surfaceAnchors(entries,liveTools),placement=replyOutputPlacement(entries,anchors),surfaceEntries=new Set(placement.surfaces.values());
     return {...linked,rawEntries:entries,historyWindows:[page?.items??[],snapshot?.entries??[]],entries:compactMemoryStatuses((linked.entries as Entry[]).filter(entry=>entry.kind!=='pi.system'&&(hasInlineChatContent(entry)||surfaceEntries.has(entry.id)))).reverse(),surfaceAnchors:placement.surfaces,originalSurfaceAnchors:anchors,replyFiles:placement.files};
   };
   const parentLinked=useMemo(()=>{
-    const linked=linkedTranscript(view,parentHistory.page);
+    const linked=linkedTranscript(view,parentHistory.page,parentLiveTools);
     const merged=mergeOutgoing(linked.entries,outgoing,scope,item=>({id:item.localId,kind:'bob.user',data:{text:item.message.text,requestId:item.id,localDelivery:outgoingLabel(item),deliveryError:item.rejected?item.lastError:undefined}}));
-    const live=withLiveResponse([...merged].reverse(),linked.rawEntries,view?.docs['pi.live']);
-    return {...linked,entries:live.entries.reverse(),legacyLive:live.legacyLive};
-  },[view?.entries,view?.docs['pi.live'],parentHistory.page,outgoing,scope]);
+    return {...linked,entries:merged};
+  },[view?.entries,parentLiveTools,parentHistory.page,outgoing,scope]);
   useEffect(()=>{
     const entries=[...(parentHistory.page?.items??[]),...(view?.entries??[])];
     for(const item of outgoing){
@@ -905,7 +906,7 @@ function Main() {
       else if(item.afterEntryId===undefined&&entries.length)void outbox.update(item.id,{afterEntryId:outgoingAnchor(item,entries)}).catch(()=>{});
     }
   },[outgoing,scope,view?.entries,parentHistory.page,outbox]);
-  const childLinked=useMemo(()=>{const linked=linkedTranscript(childView,childHistory.page),live=withLiveResponse([...linked.entries].reverse(),linked.rawEntries,childView?.docs['pi.live']);return {...linked,entries:live.entries.reverse(),legacyLive:live.legacyLive};},[childView?.entries,childView?.docs['pi.live'],childHistory.page]);
+  const childLinked=useMemo(()=>linkedTranscript(childView,childHistory.page,childLiveTools),[childView?.entries,childLiveTools,childHistory.page]);
   useEffect(()=>noteLoadedEntries(parentLinked.rawEntries.length+childLinked.rawEntries.length),[parentLinked.rawEntries.length,childLinked.rawEntries.length]);
   const positionedSurfaces=useMemo(()=>{
     const grouped=new Map<number,typeof surfaces>();
@@ -929,7 +930,11 @@ function Main() {
   function transcript(v?: Snapshot,isChild=false,footerClearance=0) {
     const history=!isChild?parentHistory:childHistory,stored=history.page;
     const follow=!isChild?parentFollow:childFollow;
-    const linked=isChild?{...childLinked,entries:childOutputEntries}:{...parentLinked,entries:parentOutputEntries};
+    const recorded=isChild?childLinked:parentLinked,output=isChild?childOutputEntries:parentOutputEntries;
+    // Attach the changing generation after stable history/output/image work.
+    // Native generation identity and legacy fallback still use the full live doc.
+    const live=withLiveResponse([...output].reverse(),recorded.rawEntries,v?.docs['pi.live']);
+    const linked={...recorded,entries:live.entries.reverse() as ImageAttachmentRow[],legacyLive:live.legacyLive};
     // Native separators know only their leading item. Resolve the adjacent pair
     // from the actual inverted display order, without regrouping recorded rows.
     const entryGaps=new Map(linked.entries.map((entry,index)=>{

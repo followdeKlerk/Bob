@@ -33,7 +33,16 @@ export function reuseSnapshotEntries<T extends {entries:Entry[]}>(previous:T|und
   if(key==='entries')continue;
   const value=result[key];
   if(key==='docs'&&record(value)&&record(before.docs)){
-   const docs={...value};for(const id of Object.keys(docs))if(same(before.docs[id],docs[id]))docs[id]=before.docs[id];
+   const docs={...value};for(const id of Object.keys(docs)){
+    if(same(before.docs[id],docs[id]))docs[id]=before.docs[id];
+    else if(id==='pi.live'&&record(before.docs[id])&&record(docs[id])){
+     // Text tokens replace pi.live, but unchanged tool/nested-tool state need
+     // not invalidate the recorded-history projection. Never resurrect removed fields.
+     const prior=before.docs[id] as Record<string,unknown>,live={...docs[id] as Record<string,unknown>};
+     for(const field of ['tools','nestedTools'])if(Object.hasOwn(live,field)&&same(prior[field],live[field]))live[field]=prior[field];
+     docs[id]=live;
+    }
+   }
    result.docs=sameFields(before.docs,docs)?before.docs:sameFields(value,docs)?value:docs;
   }else if(same(before[key],value))result[key]=before[key];
  }

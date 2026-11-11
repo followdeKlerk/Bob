@@ -64,3 +64,18 @@ test('native reply associations refresh live and cached entry identities exactly
  const page={backendId:'11111111-1111-4111-8111-111111111111',conversationId:7,coverage:'stored-entries',items:previous.entries};
  expect(mergeLatestHistory(page,{...page,items:next.entries}).items[0].mobileReply).toEqual(mobileReply);
 });
+
+test('text tokens retain unchanged tool subtrees but changed, cleared and removed tools stay authoritative',()=>{
+ const previous={entries:[{id:1}],docs:{'pi.live':{generation:{message:{content:[{type:'text',text:'A'}]}},tools:[{callId:'c',status:'running',output:'one'}],nestedTools:[{callId:'child',status:'running'}]}}};
+ const next=JSON.parse(JSON.stringify(previous));next.docs['pi.live'].generation.message.content[0].text='AB';
+ const updated=reuseSnapshotEntries(previous,next);
+ expect(updated.docs['pi.live']).not.toBe(previous.docs['pi.live']);
+ expect(updated.docs['pi.live'].tools).toBe(previous.docs['pi.live'].tools);
+ expect(updated.docs['pi.live'].nestedTools).toBe(previous.docs['pi.live'].nestedTools);
+ expect(updated.docs['pi.live'].generation.message.content[0].text).toBe('AB');
+ const changed=JSON.parse(JSON.stringify(next));changed.docs['pi.live'].tools[0].output='two';changed.docs['pi.live'].nestedTools[0].status='done';
+ const result=reuseSnapshotEntries(updated,changed);expect(result.docs['pi.live'].tools).toBe(changed.docs['pi.live'].tools);expect(result.docs['pi.live'].nestedTools).toBe(changed.docs['pi.live'].nestedTools);
+ const cleared={entries:[{id:1}],docs:{'pi.live':{tools:[],nestedTools:[]}}};expect(reuseSnapshotEntries(result,cleared).docs['pi.live']).toEqual(cleared.docs['pi.live']);
+ const removed={entries:[{id:1}],docs:{'pi.live':{}}};expect(reuseSnapshotEntries(result,removed).docs['pi.live']).toEqual({});
+ expect(previous.docs['pi.live'].generation.message.content[0].text).toBe('A');
+});
