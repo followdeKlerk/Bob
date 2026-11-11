@@ -37,7 +37,8 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  store.patch(job.id,{validation:{lane:fast?'ui-fast':'full',reason:decision.reason,baselineId:decision.baselineId,changedFiles:decision.changedFiles}});
  if(!fast){
   stage('Compiling backend');await run('npm',['run','build']);
-  stage('Running automated backend checks');await run('npm',['test'],root,600000);
+  // The complete bounded-concurrency backend suite can outgrow the mobile-test allowance.
+  stage('Running automated backend checks');await run('npm',['test']);
  }
  const release:Release={id:job.id,cli:fast?active!.cli:'',sourceHash,compatibility,durableVersion};
  if(android){

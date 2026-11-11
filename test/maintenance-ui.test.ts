@@ -193,6 +193,16 @@ for(const target of ['all','backend'] as const)test(target+' always runs backend
  }finally{f.close();}
 });
 
+test('full backend suite uses the standard bounded build allowance, not the shorter mobile allowance',async t=>{
+ const deadlines:number[]=[],original=globalThis.setTimeout;
+ t.mock.method(globalThis,'setTimeout',((callback:Parameters<typeof setTimeout>[0],delay?:number,...args:unknown[])=>{deadlines.push(delay??0);return original(callback,delay,...args);}) as typeof setTimeout);
+ const f=builderFixture();try{
+  await f.build('backend');
+  assert.deepEqual(deadlines.slice(0,2),[1800000,1800000],'compile and complete backend suite both need the normal build-stage allowance');
+  assert.ok(f.operations().includes('backend-tests'));
+ }finally{f.close();}
+});
+
 test('risky delta triggers full fallback and successful full checks replace the baseline',async()=>{
  const f=builderFixture();try{
   await f.build();f.put('tools/build.sh','echo risky change\n');f.clear();
