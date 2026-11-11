@@ -29,6 +29,42 @@ const state=(page:Page)=>page.evaluate(()=>{
 const overflows=async(page:Page)=>(await state(page)).requests.filter(request=>request.payload.method==='overflow');
 const waitFit=(page:Page)=>page.waitForFunction(()=>document.querySelector('iframe')?.style.opacity==='1');
 const waitFallback=(page:Page)=>page.waitForFunction(()=>document.querySelector('iframe')?.style.visibility==='hidden');
+// Only the parent host's layout guard clock is controlled. Child measurement,
+// animation frames, Resize/MutationObservers and native viewport ACKs stay real.
+// Capture only the 3s layout deadline, not unrelated browser/Playwright timers.
+const guardClockScript=`(()=>{
+ if(window!==window.top)return;
+ let now=0,next=-1;
+ const timers=new Map(),set=window.setTimeout.bind(window),clear=window.clearTimeout.bind(window);
+ Object.defineProperty(performance,'now',{value:()=>now});
+ window.setTimeout=(callback,delay=0,...args)=>{
+  if(delay!==3000)return set(callback,delay,...args);
+  const id=next--;timers.set(id,{at:now+delay,run:()=>callback(...args)});return id;
+ };
+ window.clearTimeout=id=>{if(!timers.delete(id))clear(id);};
+ window.__guardClock={advance(elapsed){
+  now+=elapsed;
+  for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.run();}
+  return {now,pending:timers.size};
+ }};
+})()`;
+const advanceGuard=(page:Page,elapsed:number)=>page.evaluate(elapsed=>(window as any).__guardClock.advance(elapsed) as {now:number;pending:number},elapsed);
+// Let real observers/measurement run, then ACK earlier same-source telemetry at
+// the parent. Chromium suspends rAF in a hidden fallback iframe, so use parent
+// frames there. Scheduling returns immediately; normal waitForFunction deadlines
+// bound the ACK instead of awaiting an unbounded frame.evaluate promise.
+let nextTurn=0;
+async function measurementTurn(page:Page){
+ const id=++nextTurn,child=page.frames().find(frame=>frame!==page.mainFrame())!;
+ if((await state(page)).visibility==='hidden'){
+  await page.evaluate(id=>{requestAnimationFrame(()=>requestAnimationFrame(()=>{(window as any).__parentTurn=id;}));},id);
+  await page.waitForFunction(id=>(window as any).__parentTurn===id,id);
+  await child.evaluate(id=>parent.postMessage({testTurn:id},'*'),id);
+ }else{
+  await child.evaluate(id=>{requestAnimationFrame(()=>requestAnimationFrame(()=>parent.postMessage({testTurn:id},'*')));},id);
+ }
+ await page.waitForFunction(id=>(window as any).__turn===id,id);
+}
 export function registerInlineVisualLifecycle(){
 test('inline visual size and data lifecycle in the actual isolated host document',{timeout:120000},async t=>{
  const bundle=(await build({entryPoints:['apps/interactive/host.ts'],bundle:true,minify:true,write:false,format:'iife',platform:'browser'})).outputFiles[0].text;
@@ -36,21 +72,26 @@ test('inline visual size and data lifecycle in the actual isolated host document
  let cleanupBrowser:Awaited<ReturnType<typeof launchTestChromium>>|undefined;
  t.after(async()=>{await cleanupBrowser?.close();assert.deepEqual(scriptErrors,[],'host/fixture scripts must not fail silently');});
  const browser=cleanupBrowser=await launchTestChromium();
+ // Keep each fixture in a fresh page/document, but avoid 23 independent browser
+ // contexts. Opaque child origin and CSP are still supplied by the real host.
+ const context=await browser.newContext({viewport:{width:313,height:420}});
  async function open(html=compact,options:{measure?:string;inline?:boolean;resize?:boolean;visualData?:unknown}={}){
-  const page=await browser.newPage({viewport:{width:313,height:420}});
+  const page=await context.newPage();
   page.on('pageerror',error=>scriptErrors.push(error.message));
   page.setDefaultTimeout(15000);page.setDefaultNavigationTimeout(30000);
   await page.exposeFunction('testResize',async(height:number)=>{if(options.resize!==false)await page.setViewportSize({width:313,height});});
   // String form avoids tsx function-name helpers leaking into the browser.
-  await page.addInitScript(`
-   window.__requests=[];window.__reports=[];
+  await page.addInitScript(guardClockScript);
+  await page.addInitScript(`(()=>{
+   if(window!==window.top)return;
+   window.__requests=[];window.__reports=[];window.__turn=0;
    window.BobNative={request(raw,nonce){
     if(nonce!==${JSON.stringify(nativeNonce)})return;
     const payload=JSON.parse(raw);window.__requests.push({payload,nonce});
     if(payload.method==='layout')window.testResize(payload.height);
    }};
-   window.addEventListener('message',event=>{if(event.data?.bobLayout)window.__reports.push(event.data);});
-  `);
+   window.addEventListener('message',event=>{if(event.data?.bobLayout)window.__reports.push(event.data);if(event.source===document.querySelector('iframe')?.contentWindow&&event.data?.testTurn)window.__turn=event.data.testTurn;});
+  })()`);
   await page.route('https://bob.invalid/',route=>route.fulfill({contentType:'text/html',body:documentHtml(bundle,html,options.measure??measurement,options.inline??true,options.visualData)}));
   await page.goto('https://bob.invalid/');return page;
  }
@@ -62,14 +103,15 @@ test('inline visual size and data lifecycle in the actual isolated host document
    assert.ok(first.reports.some(report=>report.fits));assert.ok(first.reports.every(report=>report.bobLayout!==nativeNonce));
    assert.ok(!first.srcdoc.includes(nativeNonce),'native authority must never enter the opaque child');
    const child=page.frames().find(frame=>frame!==page.mainFrame())!;
+   assert.deepEqual(await child.evaluate(()=>({clock:'__guardClock' in window,native:'BobNative' in window})),{clock:false,native:false},'test clock/native shim must remain in the parent');
    const bounds=await child.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));
    assert.equal(bounds.width,313);assert.equal(bounds.height,first.height);assert.equal(bounds.scrollWidth,313);assert.equal(bounds.scrollHeight,first.height);
    await page.frameLocator('iframe').getByRole('button').click();assert.equal(await page.frameLocator('iframe').getByRole('button').textContent(),'Clicked');
-   await page.waitForTimeout(3300);
+   await advanceGuard(page,3300);
    const stable=await state(page);assert.equal(stable.opacity,'1');assert.notEqual(stable.visibility,'hidden');assert.equal(stable.pointerEvents,'auto');assert.equal(stable.status,'');assert.deepEqual(await overflows(page),[]);
    await child.evaluate(()=>{document.body.style.height='8193px';});await waitFallback(page);
    assert.deepEqual(await overflows(page),[{payload:{method:'overflow',reason:'content-overflow'},nonce:nativeNonce}]);
-   await child.evaluate(()=>{document.body.style.height='100px';});await page.waitForTimeout(400);
+   await child.evaluate(()=>{document.body.style.height='100px';});await measurementTurn(page);await advanceGuard(page,400);
    assert.equal((await state(page)).visibility,'hidden');assert.equal((await overflows(page)).length,1);
   }finally{await page.close();}
  });
@@ -106,9 +148,15 @@ test('inline visual size and data lifecycle in the actual isolated host document
   for(const options of [{measure:''},{measure:measurement.replace('__BOB_INLINE_LAYOUT_KEY__',JSON.stringify(nativeNonce))},{resize:false}]){
    const page=await open(compact,options);
    try{
+    await measurementTurn(page);
+    const before=(await state(page)).requests.length;
     const key=/const key\s*=\s*"([^"]+)"/.exec((await state(page)).srcdoc)?.[1];
     await page.evaluate(key=>window.dispatchEvent(new MessageEvent('message',{source:window,data:{bobLayout:key,fits:true,contentHeight:1,viewportWidth:313,viewportHeight:420,viewportFits:true}})),key);
-    assert.equal((await state(page)).opacity,'0');await waitFallback(page);
+    assert.equal((await state(page)).requests.length,before,'self-sourced telemetry must not request a native resize');
+    await measurementTurn(page);
+    assert.equal((await state(page)).opacity,'0');
+    assert.equal((await advanceGuard(page,2999)).pending,1);assert.deepEqual(await overflows(page),[]);
+    await advanceGuard(page,1);await waitFallback(page);
     assert.deepEqual(await overflows(page),[{payload:{method:'overflow',reason:'measurement-timeout'},nonce:nativeNonce}]);
    }finally{await page.close();}
   }
@@ -142,7 +190,7 @@ test('inline visual size and data lifecycle in the actual isolated host document
   const page=await open(compact+'<img id="late" style="display:block;max-width:100%">');
   try{
    await waitFit(page);const initial=(await state(page)).height,child=page.frames().find(frame=>frame!==page.mainFrame())!;
-   await page.waitForTimeout(350);
+   await measurementTurn(page);
    await child.evaluate(()=>{(document.getElementById('late') as HTMLImageElement).src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="1000"></svg>');});
    await page.waitForFunction(()=>innerHeight>1000&&document.querySelector('iframe')?.style.opacity==='1');
    const bounds=await child.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));
@@ -158,28 +206,8 @@ test('inline visual size and data lifecycle in the actual isolated host document
    try{
     await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
     const initialRequests=(await state(page)).requests.filter(request=>request.payload.method==='layout').length;
-    // Exercise the burst window deterministically while retaining real Chromium
-    // layout/ACKs. A heavily loaded build host can stretch 20 fast requests past
-    // 1500ms, legitimately invoking the continuous guard instead of the burst.
-    // Pause both parent guard clocks: freezing performance.now alone leaves the
-    // 3s unsettled-layout timeout racing the burst under full-suite CPU load,
-    // especially for 100vh+10px, which intentionally never ACKs a stable fit.
-    // Child measurement, animation frames, Chromium layout and native ACKs stay
-    // real. The missing-measurement test above exercises the real deadline.
-    await page.evaluate(`(()=>{
-     let now=performance.now(),next=-1;
-     const timers=new Map(),clear=window.clearTimeout.bind(window);
-     Object.defineProperty(performance,'now',{value:()=>now});
-     window.setTimeout=(callback,delay=0,...args)=>{
-      const id=next--;timers.set(id,{at:now+delay,run:()=>callback(...args)});return id;
-     };
-     window.clearTimeout=id=>{if(!timers.delete(id))clear(id);};
-     window.__advanceOverflowClock=elapsed=>{
-      now+=elapsed;
-      for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.run();}
-      return timers.size;
-     };
-    })()`);
+    // With both parent guard clocks paused, ACK/measurement work stays real
+    // without CPU scheduling turning a burst into the slower continuous guard.
     if(runaway){
      await child.evaluate(()=>{document.body.style.height='calc(100vh + 10px)';});
      await waitFallback(page);
@@ -196,7 +224,7 @@ test('inline visual size and data lifecycle in the actual isolated host document
     assert.ok(requests.filter(request=>request.payload.method==='layout').length-initialRequests<=16);
     assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
     // Advancing the paused deadline cannot cause a second promotion.
-    await page.evaluate('window.__advanceOverflowClock(3001)');
+    await advanceGuard(page,3001);
     assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
    }finally{await page.close();}
   }
@@ -207,11 +235,12 @@ test('inline visual size and data lifecycle in the actual isolated host document
    await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!,started=Date.now();
    for(let i=0;i<24;i++){
     if((await overflows(page)).length)break;
-    await page.waitForTimeout(350);const height=i%2?400:600;
+    await advanceGuard(page,350);const height=i%2?400:600;
     await child.evaluate(height=>{document.body.style.height=height+'px';},height);
     await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1'||document.querySelector('iframe')?.style.visibility==='hidden',height);
    }
    await waitFallback(page);assert.ok(Date.now()-started<10000);
+   assert.ok((await advanceGuard(page,0)).now>=6000,'must exercise the continuous guard, not the burst');
    assert.equal((await overflows(page)).length,1);assert.equal((await overflows(page))[0].payload.reason,'content-overflow');
   }finally{await page.close();}
  });
@@ -220,7 +249,7 @@ test('inline visual size and data lifecycle in the actual isolated host document
   try{
    await waitFit(page);
    for(let i=0;i<4;i++){
-    await page.waitForTimeout(2000);const height=i%2?650:1200;
+    await advanceGuard(page,2000);const height=i%2?650:1200;
     await page.evaluate(({height,revision})=>window.__bobVisualData!({revision,data:{height},updatedAt:revision}),{height,revision:i+1});
     await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1',height);
    }
@@ -231,14 +260,9 @@ test('inline visual size and data lifecycle in the actual isolated host document
   const page=await open();
   try{
    await waitFit(page);const child=page.frames().find(frame=>frame!==page.mainFrame())!;
-   // Control only the parent's guard clock, as in the burst test above. Real
-   // layout, measurement, native resize ACKs and timeout timers still run.
-   // Wall-clock sleeps plus ACK/polling delays can turn these 20 spaced updates
-   // into a >6s continuous run on a busy host, correctly invoking that guard.
-   // 180ms steps expire the 1500ms burst window while staying below 6000ms.
-   await page.evaluate("(()=>{let now=performance.now();window.__advanceResizeClock=()=>{now+=180;};Object.defineProperty(performance,'now',{value:()=>now});})()");
+   // 180ms guard-clock steps expire the burst window without a >6s run.
    for(let i=0;i<20;i++){
-    await page.evaluate('window.__advanceResizeClock()');const height=i%2?650:1200;
+    await advanceGuard(page,180);const height=i%2?650:1200;
     await child.evaluate(height=>{document.body.style.height=height+'px';},height);
     await page.waitForFunction(height=>innerHeight===height&&document.querySelector('iframe')?.style.opacity==='1'||document.querySelector('iframe')?.style.visibility==='hidden',height);
     const resized=await state(page);assert.notEqual(resized.visibility,'hidden',`Resize ${i+1}: ${resized.reason}`);
@@ -256,12 +280,12 @@ test('inline visual size and data lifecycle in the actual isolated host document
     parent.postMessage({bobLayout:'wrong-key',fits:true,contentHeight:1200,viewportWidth:innerWidth,viewportHeight:innerHeight,viewportFits:true},'*');
     parent.postMessage({bobLayout:key,fits:false,contentHeight:9000,viewportWidth:innerWidth,viewportHeight:innerHeight+100,viewportFits:false},'*');
    },key);
-   await page.waitForTimeout(80);assert.equal((await state(page)).requests.length,before);
-   await child.evaluate(()=>dispatchEvent(new Event('resize')));await waitFit(page);assert.deepEqual(await overflows(page),[]);
+   await measurementTurn(page);assert.equal((await state(page)).requests.length,before);
+   await child.evaluate(()=>dispatchEvent(new Event('resize')));await measurementTurn(page);await waitFit(page);assert.deepEqual(await overflows(page),[]);
+   const reports=(await state(page)).reports.length;
    await page.evaluate(()=>dispatchEvent(new Event('pagehide')));
    await child.evaluate(()=>{dispatchEvent(new Event('pagehide'));document.body.style.height='1200px';dispatchEvent(new Event('resize'));});
-   const reports=(await state(page)).reports.length;
-   await page.waitForTimeout(3300);
+   await measurementTurn(page);await advanceGuard(page,3300);
    assert.equal((await state(page)).reports.length,reports);assert.equal((await state(page)).requests.length,before);
   }finally{await page.close();}
  });
