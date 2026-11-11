@@ -145,10 +145,32 @@ export function createLearning(getHarness:()=>Harness,getLibraryId:()=>Conversat
   // Quiet automatic reviews stay silent. Saved changes survive later failure/cancellation.
   if(explicit||savedSummary||pending||status==='failed')await tx.appendEntry(sourceId as ConversationId,{kind:'bob.learning-status',data:{taskId,status,at,text:lines.join('\n'),...(changes?{changes}: {}),...(error?{error}: {})}});
  }
+ // Ownership is immutable. Only these exclusions may be acknowledged without resolving
+ // the agent; absent conversations/modules and failed captures must remain retryable.
+ // Recovery calls this once per scan page, not once per historical input.
+ async function pendingInputs(submissions:SubmissionRecord[]){
+  return getHarness().commit(async tx=>{
+   const pending:SubmissionRecord[]=[];
+   for(const s of submissions){
+    if(s.type!=='input'||s.status!=='done')continue;
+    const record=await tx.conversation(s.conversationId);if(!record)continue;
+    if(record.owner||record.id===getLibraryId()){
+     (await tx.doc(LearningReceipts,record.id,String(s.id),null)).processed=true;
+     continue;
+    }
+    pending.push(s);
+   }
+   return pending;
+  },ctx);
+ }
  async function capture(submission:SubmissionRecord){
   if(submission.type!=='input'||submission.status!=='done')return;
   const h=getHarness(),installation=await h.snapshot(LearningInstallation,ctx);if(!installation||submission.id<=installation.floor)return;
-  const c=await h.conversation(submission.conversationId,ctx);if(!c)return;
+  for(const pending of await pendingInputs([submission]))await capturePending(pending);
+ }
+ async function capturePending(submission:SubmissionRecord){
+  if(submission.type!=='input'||submission.status!=='done')return;
+  const h=getHarness(),c=await h.conversation(submission.conversationId,ctx);if(!c)return;
   const agent=await c.agent(ctx);if(!agent.extensions.some(e=>e.name==='bob.resources'))return;
   await h.commit(async tx=>{
    const record=await tx.conversation(submission.conversationId);if(!record||record.owner||record.id===getLibraryId())return;
@@ -244,9 +266,17 @@ export function createLearning(getHarness:()=>Harness,getLibraryId:()=>Conversat
   try{
    if(!await h.snapshot(LearningInstallation,ctx)){const newest=await storage.scanSubmissions({order:'descending'},1,undefined,ctx);await h.commit(async tx=>{(await tx.doc(LearningInstallation)).floor=newest.items[0]?.id??0;await tx.doc(LearningSettings);},ctx);}
    const installation=(await h.snapshot(LearningInstallation,ctx))!;let cursor:Cursor|undefined,stop=false;const pending:SubmissionRecord[]=[];
-   do{const page=await storage.scanSubmissions({status:'done',order:'descending'},100,cursor,ctx);for(const s of page.items){if(s.id<=installation.floor){stop=true;break;}if(!(await h.snapshot(LearningReceipts,s.conversationId,String(s.id),ctx))?.processed)pending.push(s);}cursor=page.next;}while(cursor&&!stop);
-   // Reconcile in admission order so an older skill write cannot reset newer iteration counts.
-   for(const submission of pending.sort((a,b)=>a.id-b.id))await capture(submission);
+   do{
+    const page=await storage.scanSubmissions({status:'done',order:'descending'},100,cursor,ctx),candidates:SubmissionRecord[]=[];
+    for(const s of page.items){if(s.id<=installation.floor){stop=true;break;}if(s.type==='input'&&s.status==='done')candidates.push(s);}
+    // Read eligible receipts off the mutation line: tx.doc would create empty
+    // receipts for them, adding a persisted write before every normal capture.
+    if(candidates.length)for(const s of await pendingInputs(candidates))if(!(await h.snapshot(LearningReceipts,s.conversationId,String(s.id),ctx))?.processed)pending.push(s);
+    cursor=page.next;
+   }while(cursor&&!stop);
+   // Reconcile eligible inputs in admission order; permanent exclusions never enter
+   // this backlog, and an older skill write cannot reset newer iteration counts.
+   for(const submission of pending.sort((a,b)=>a.id-b.id))await capturePending(submission);
    return {flush:async()=>{await chain;},close:async()=>{unsubscribe();await chain;closing=true;}};
   }catch(error){unsubscribe();throw error;}
  }
