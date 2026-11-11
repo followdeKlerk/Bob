@@ -1,26 +1,13 @@
 #!/usr/bin/env node
-import {installedDurableVersion} from './recovery.js';
-import {describeDelegationBehavior,readDelegationBehavior,saveDelegationBehavior} from './delegation-behavior.js';
-import {describeDelegation,readDelegationConfig,saveDelegationConfig,setDelegationSecret} from './delegation-config.js';
+import {installedDurableVersion} from './maintenance-migration.js';
+import type {McpConnectionConfig} from '@bob-local/interactive';
 import { Command } from "commander";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { Server as HttpsServer } from "node:https";
-import QRCode from "qrcode";
 import { State } from "./state.js";
-import { serve } from "./server.js";
-import { backupState, restoreState } from "./recovery.js";
-import {McpConnection,validateMcpEndpoint,type McpConnectionConfig} from './interactive.js';
-import {moduleCatalog,moduleState,changeModule} from './modules.js';
-import {openRuntime,createBackendModels} from './runtime.js';
-import {importCustomModule} from './custom-modules.js';
-import {grantPeer,connectPeer,listPeers,revokePeer} from './peer-config.js';
-import {diagnose} from './doctor.js';
-import {migrateState,updateRelease} from './update.js';
-import {migrateCustomModule} from './custom-migration.js';
-import {setProviderKey} from './provider-auth.js';
 const configPath = join(homedir(), ".config/bob/cli.json");
 const localConfig: { state?: string; endpoint?: string } = existsSync(configPath)
   ? JSON.parse(readFileSync(configPath, "utf8")) : {};
@@ -76,6 +63,8 @@ cli
     key = key.trim();
     if (!key) throw new Error("No credential supplied on stdin");
     if(!["openai","anthropic"].includes(o.provider))throw Error("Unsupported provider");
+    const {createBackendModels}=await import('./backend-models.js');
+    const {setProviderKey}=await import('./provider-auth.js');
     const s = state();
     try{
       if(!createBackendModels(s).getModel(o.provider,o.model))throw Error('Unknown model');
@@ -93,6 +82,7 @@ cli
   .action(async (o) => {
     if ((o.cert !== undefined) !== (o.key !== undefined))
       throw new Error("--cert and --key must be supplied together");
+    const {serve}=await import('./server.js');
     const s = state();
     const app = await serve(s, {
       host: o.host,
@@ -144,6 +134,7 @@ cli
       throw new Error("HTTPS required");
     if (!o.devLoopback && !u.hostname.endsWith(".ts.net"))
       throw new Error("Remote endpoint must be a Tailscale HTTPS name");
+    const {default:QRCode}=await import('qrcode');
     const s = state(),
       i = s.invite();
     const payload = {
@@ -232,6 +223,7 @@ for (const verb of ["start", "stop", "status"])
     }
   });
 cli.command('login').description('Bob-owned ChatGPT subscription OAuth; no unrelated credential import').option('--provider <id>','Supported subscription provider','openai').requiredOption('--model <id>').action(async o=>{
+ const {createBackendModels}=await import('./backend-models.js');
  const s=state();
  try{
   if(o.provider!=='openai')throw Error('Only the supported OpenAI ChatGPT login is enabled');
@@ -249,12 +241,14 @@ cli.command('login').description('Bob-owned ChatGPT subscription OAuth; no unrel
 cli.command("doctor")
  .description('Inspect existing local state without initializing it; JSON, no network or repairs')
  .option('--check','Exit 1 for configuration errors (warnings alone exit 0)',false)
- .action(o=>{
+ .action(async o=>{
+  const {diagnose}=await import('./doctor.js');
   const report=diagnose(resolve(cli.opts().state));
   console.log(JSON.stringify(report,null,2));
   if(o.check&&report.status==='error')process.exitCode=1;
  });
 cli.command("backup <destination>").action(async (path) => {
+  const {backupState}=await import("./recovery.js");
   const s = state();
   try {
     console.log(JSON.stringify(await backupState(s, resolve(path)), null, 2));
@@ -262,7 +256,8 @@ cli.command("backup <destination>").action(async (path) => {
     s.close();
   }
 });
-cli.command("restore <source> <destination>").action((source, destination) => {
+cli.command("restore <source> <destination>").action(async (source, destination) => {
+  const {restoreState}=await import("./recovery.js");
   console.log(
     JSON.stringify(restoreState(resolve(source), resolve(destination)), null, 2)
   );
@@ -271,6 +266,7 @@ cli
   .command("export <destination>")
   .description("Full sensitive backup export; see explicit manifest coverage")
   .action(async (path) => {
+    const {backupState}=await import("./recovery.js");
     const s = state();
     try {
       console.log(JSON.stringify(await backupState(s, resolve(path)), null, 2));
@@ -288,46 +284,55 @@ cli
   .requiredOption('--backup <directory>','New verified rollback backup')
   .option('--trust-release-code','Explicitly trust the release code',false)
   .action(async (o) => {
+    const {updateRelease}=await import('./update.js');
     const s=state();try{console.log(JSON.stringify(await updateRelease(s,o),null,2));}finally{s.close();}
   });
 cli.command('migrate').description('Explicit control-schema migration; requires settled state and verified backup')
-  .requiredOption('--backup <directory>').action(async o=>{const s=state();try{console.log(JSON.stringify(await migrateState(s,resolve(o.backup))));}finally{s.close();}});
+  .requiredOption('--backup <directory>').action(async o=>{const {migrateState}=await import('./update.js');const s=state();try{console.log(JSON.stringify(await migrateState(s,resolve(o.backup))));}finally{s.close();}});
 const mcp=cli.command('mcp').description('Explicit MCP Apps connections; credentials stay on this backend');
 mcp.command('list').action(()=>{const s=state();try{console.log(JSON.stringify((s.get<McpConnectionConfig[]>('mcpConnections')??[]).map(c=>({...c,credentialPresent:!!s.get(`mcpKey:${c.id}`)})),null,2));}finally{s.close();}});
-mcp.command('configure <id>').requiredOption('--endpoint <url>').requiredOption('--tools <comma-separated>').option('--disabled','Install configuration without enabling',false).action((id,o)=>{
+mcp.command('configure <id>').requiredOption('--endpoint <url>').requiredOption('--tools <comma-separated>').option('--disabled','Install configuration without enabling',false).action(async(id,o)=>{
+  const {McpConnection,validateMcpEndpoint}=await import('@bob-local/interactive');
   const connection=McpConnection.parse({id,endpoint:o.endpoint,allowedTools:o.tools.split(',').map((x:string)=>x.trim()),enabled:!o.disabled});validateMcpEndpoint(connection.endpoint);
   const s=state();try{const entries=s.get<McpConnectionConfig[]>('mcpConnections')??[];if(entries.some(c=>c.id===id&&c.endpoint!==connection.endpoint))s.delete(`mcpKey:${id}`);s.set('mcpConnections',[...entries.filter(c=>c.id!==id),connection]);console.log(JSON.stringify(connection));}finally{s.close();}
 });
 mcp.command('key <id>').description('Set MCP bearer credential from stdin; never argv').action(async id=>{
+  const {McpConnection}=await import('@bob-local/core/contracts');
   McpConnection.shape.id.parse(id);let key='';for await(const chunk of process.stdin){key+=chunk;if(key.length>10000)throw Error('Credential too long');}key=key.trim();if(!key)throw Error('No credential on stdin');
   const s=state();try{if(!(s.get<McpConnectionConfig[]>('mcpConnections')??[]).some(c=>c.id===id))throw Error('Configure this connection first');s.set(`mcpKey:${id}`,key);console.log('MCP credential stored on backend.');}finally{s.close();}
 });
-for(const action of ['enable','disable','remove'] as const)mcp.command(`${action} <id>`).action(id=>{
+for(const action of ['enable','disable','remove'] as const)mcp.command(`${action} <id>`).action(async id=>{
+  const {McpConnection}=await import('@bob-local/core/contracts');
   McpConnection.shape.id.parse(id);const s=state();try{const entries=s.get<McpConnectionConfig[]>('mcpConnections')??[];if(!entries.some(c=>c.id===id))throw Error('Unknown MCP connection');s.set('mcpConnections',action==='remove'?entries.filter(c=>c.id!==id):entries.map(c=>c.id===id?{...c,enabled:action==='enable'}:c));if(action==='remove')s.delete(`mcpKey:${id}`);console.log(`${action}: ${id}`);}finally{s.close();}
 });
 const modules=cli.command('module').description('Validated separate Durable packages; installation, defaults and conversation selections are distinct');
 modules.command('migrate <id> <directory>').description('Explicit native document migration on a new staged state; original and backup retained').requiredOption('--replace <exact-previous-version>').requiredOption('--backup <new-directory>').requiredOption('--destination <new-directory>').option('--trust-backend-code','Explicitly trust unrestricted backend-account code',false).action(async(id,directory,o)=>{
  if(!o.trustBackendCode)throw Error('Explicit --trust-backend-code is required');
+ const {migrateCustomModule}=await import('./custom-migration.js');
  const s=state();try{console.log(JSON.stringify(await migrateCustomModule(s,id,directory,o.replace,o.backup,o.destination)));}finally{s.close();}
 });
-modules.command('list').action(()=>{const s=state();try{const configured=moduleState(s);console.log(JSON.stringify(moduleCatalog(s).map(m=>({...m,available:true,installed:configured.installed.includes(m.id),defaultSelected:configured.defaults.includes(m.id),registration:'Inspect through the paired client; CLI configuration is not proof of a running service.'})),null,2));}finally{s.close();}});
+modules.command('list').action(async()=>{const {moduleCatalog,moduleState}=await import('./modules.js');const s=state();try{const configured=moduleState(s);console.log(JSON.stringify(moduleCatalog(s).map(m=>({...m,available:true,installed:configured.installed.includes(m.id),defaultSelected:configured.defaults.includes(m.id),registration:'Inspect through the paired client; CLI configuration is not proof of a running service.'})),null,2));}finally{s.close();}});
 modules.command('import <id> <directory>').description('Import explicitly trusted built ESM code; no scripts/downloads. Exact host dependencies only. Replacement does not imply a schema migration.').requiredOption('--backup <new-directory>','Verified quiescent pre-change backup, including custom package code').option('--trust-backend-code','Explicitly trust unrestricted backend-account code').option('--replace <exact-previous-version>','Replace this exact existing custom version; restore backup for rollback').action(async(id,directory,o)=>{
  if(!o.trustBackendCode)throw Error('Explicit --trust-backend-code is required; custom modules are not sandboxed');
+ const {backupState}=await import('./recovery.js'),{openRuntime}=await import('./runtime.js'),{importCustomModule}=await import('./custom-modules.js');
  const s=state();try{await backupState(s,o.backup);const runtime=await openRuntime(s,undefined,undefined,{resume:false});try{console.log(JSON.stringify(await importCustomModule(s,runtime,id,directory,o.replace)));}finally{await runtime.close();}}finally{s.close();}
 });
 for(const action of ['install','remove','enable','disable'] as const)modules.command(`${action} <id>`).option('--version <exact>','Validated package version','0.1.0').action(async(id,o)=>{
+ const {moduleCatalog,changeModule}=await import('./modules.js'),{openRuntime}=await import('./runtime.js');
  const s=state();try{if(moduleCatalog(s).find(m=>m.id===id)?.version!==o.version)throw Error('Unvalidated module version; no change made');const runtime=await openRuntime(s,undefined,undefined,{resume:false});try{console.log(JSON.stringify(await changeModule(s,runtime,action,id)));}finally{await runtime.close();}}finally{s.close();}
 });
 const peers=cli.command('peer').description('Explicit one-way backend trust; unrelated to device pairing or native child ownership');
-peers.command('list').action(()=>{const s=state();try{console.log(JSON.stringify(listPeers(s),null,2));}finally{s.close();}});
-peers.command('grant <origin-backend-id>').requiredOption('--name <name>').requiredOption('--endpoint <origin>','This destination backend HTTPS origin').requiredOption('--output <file>','New owner-only credential handoff file').option('--read <ids>','Comma-separated readable conversation IDs','').option('--message <ids>','Comma-separated writable conversation IDs','').option('--dev-loopback','Isolated loopback test only',false).action((peerId,o)=>{
+peers.command('list').action(async()=>{const {listPeers}=await import('./peer-config.js');const s=state();try{console.log(JSON.stringify(listPeers(s),null,2));}finally{s.close();}});
+peers.command('grant <origin-backend-id>').requiredOption('--name <name>').requiredOption('--endpoint <origin>','This destination backend HTTPS origin').requiredOption('--output <file>','New owner-only credential handoff file').option('--read <ids>','Comma-separated readable conversation IDs','').option('--message <ids>','Comma-separated writable conversation IDs','').option('--dev-loopback','Isolated loopback test only',false).action(async(peerId,o)=>{
+ const {grantPeer}=await import('./peer-config.js');
  const ids=(value:string)=>value?value.split(',').map(v=>Number(v.trim())):[];
  const s=state();try{console.log(JSON.stringify(grantPeer(s,{peerId,name:o.name,endpoint:o.endpoint,read:ids(o.read),message:ids(o.message),output:resolve(o.output),devLoopback:o.devLoopback})));}finally{s.close();}
 });
-peers.command('connect <handoff-file>').requiredOption('--name <name>').option('--dev-loopback','Isolated loopback test only',false).action((file,o)=>{const s=state();try{console.log(JSON.stringify(connectPeer(s,resolve(file),o.name,o.devLoopback)));}finally{s.close();}});
-peers.command('revoke <id>').requiredOption('--direction <direction>','inbound or outbound').action((id,o)=>{if(!['inbound','outbound'].includes(o.direction))throw Error('Specify inbound or outbound');const s=state();try{console.log(JSON.stringify(revokePeer(s,id,o.direction)));}finally{s.close();}});
+peers.command('connect <handoff-file>').requiredOption('--name <name>').option('--dev-loopback','Isolated loopback test only',false).action(async(file,o)=>{const {connectPeer}=await import('./peer-config.js');const s=state();try{console.log(JSON.stringify(connectPeer(s,resolve(file),o.name,o.devLoopback)));}finally{s.close();}});
+peers.command('revoke <id>').requiredOption('--direction <direction>','inbound or outbound').action(async(id,o)=>{if(!['inbound','outbound'].includes(o.direction))throw Error('Specify inbound or outbound');const {revokePeer}=await import('./peer-config.js');const s=state();try{console.log(JSON.stringify(revokePeer(s,id,o.direction)));}finally{s.close();}});
 const delegation=cli.command('delegation').description('Bob-native Advanced Delegation; validated settings apply to new chats');
 delegation.command('config').option('--show','Show configured mode/routes, never credentials').option('--set <file>','Merge a validated JSON configuration patch; - reads stdin').option('--mode <mode>','default, model_map or profile_routes').action(async o=>{
+ const {describeDelegation,readDelegationConfig,saveDelegationConfig}=await import('./delegation-config.js');
  const s=state();try{
   if(o.show&&(o.set||o.mode))throw Error('Use --show separately from edits');
   if(!o.set&&!o.mode){console.log(describeDelegation(readDelegationConfig(s)));return;}
@@ -335,10 +340,12 @@ delegation.command('config').option('--show','Show configured mode/routes, never
   if(o.set){let input='';if(o.set==='-'){for await(const chunk of process.stdin){input+=chunk;if(input.length>500000)throw Error('Delegation configuration too large');}}else{if(statSync(resolve(o.set)).size>500000)throw Error('Delegation configuration too large');input=readFileSync(resolve(o.set),'utf8');}try{patch=JSON.parse(input);}catch{throw Error('Invalid delegation JSON; credential values must be supplied separately with delegation secret');}}
   if(!patch||typeof patch!=='object'||Array.isArray(patch))throw Error('Delegation patch must be a JSON object');
   if(o.mode)patch={...patch,mode:o.mode};
+  const {createBackendModels}=await import('./backend-models.js');
   const saved=await saveDelegationConfig(s,createBackendModels(s),patch);console.log(describeDelegation(saved));console.log('Saved for new chats; live inference not verified. Existing chat schemas were not changed.');
  }finally{s.close();}
 });
 delegation.command('behavior').description('Owner opt-in and deterministic helper bounds; off by default').option('--show','Show behavior and profile tool filters').option('--set <file>','Validated JSON patch; - reads stdin').option('--enabled <on|off>','Standing owner opt-in; never overrides allowSubagents:false').action(async o=>{
+ const {describeDelegationBehavior,readDelegationBehavior,saveDelegationBehavior}=await import('./delegation-behavior.js');
  const s=state();try{
   if(o.show&&(o.set||o.enabled))throw Error('Use --show separately from edits');
   let patch:Record<string,unknown>={};
@@ -350,6 +357,7 @@ delegation.command('behavior').description('Owner opt-in and deterministic helpe
 });
 delegation.command('secret <name>').description('Store a dedicated profile/endpoint API key from stdin, never argv or configuration JSON').action(async name=>{
  let key='';for await(const chunk of process.stdin){key+=chunk;if(key.length>10000)throw Error('Credential too long');}
+ const {setDelegationSecret}=await import('./delegation-config.js');
  const s=state();try{setDelegationSecret(s,name,key);console.log('Dedicated delegation credential stored; live inference not verified.');}finally{s.close();}
 });
 await cli.parseAsync();

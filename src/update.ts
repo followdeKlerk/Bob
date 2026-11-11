@@ -5,13 +5,14 @@ import {spawnSync} from 'node:child_process';
 import {State} from './state.js';
 import {backupState,restoreState,installedDurableVersion} from './recovery.js';
 import {controlSchema,migrateControl} from './control-migrations.js';
-import {openRuntime,ctx} from './runtime.js';
+import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {requireDisjoint} from './custom-migration.js';
 
 export const releaseVersion='0.3.0';
 export async function migrateState(state:State,backup:string){
   // resume:false pauses scheduling, not native storage migrations/recovery.
   // openRuntime enforces the committed Pi 1.5 floor before any native open.
+  const {openRuntime}=await import('./runtime.js');
   const runtime=await openRuntime(state,undefined,undefined,{resume:false});
   try{const inspection=await runtime.harness.inspect(ctx);if(inspection.tasks.length||inspection.submissions.length)throw Error('Settle all Durable work before migration');}
   finally{await runtime.close();}
@@ -34,6 +35,7 @@ export async function updateRelease(state:State,options:UpdateOptions){
   if([installation,destination,backup].some(p=>nested(p,archive)))throw Error('Archive must be outside output directories');
   const digest=createHash('sha256');for await(const chunk of createReadStream(archive))digest.update(chunk);
   if(digest.digest('hex')!==options.sha256)throw Error('Release archive checksum mismatch');
+  const {openRuntime}=await import('./runtime.js');
   const runtime=await openRuntime(state,undefined,undefined,{resume:false});
   try{const inspection=await runtime.harness.inspect(ctx);if(inspection.tasks.length||inspection.submissions.length)throw Error('Settle all Durable work before update');}
   finally{await runtime.close();}

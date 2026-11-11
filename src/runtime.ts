@@ -23,9 +23,7 @@ import {hostname} from "node:os";
 import {conversationOperation} from "./conversation-network.js";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { createModels, type Models } from "@earendil-works/pi-ai/models";
-import {bobOpenAIProvider} from "./openai-provider.js";
-import {anthropicProvider} from "@earendil-works/pi-ai/providers/anthropic";
+import type { Models } from "@earendil-works/pi-ai/models";
 import {
   Harness,
   createRegistry,
@@ -47,16 +45,9 @@ import {registerModules} from './modules.js';
 import {createPeerTools} from '@bob-local/peers';
 import {listPeers,requestPeer} from './peer-config.js';
 import {loadCustomModules} from './custom-modules.js';
-import {providerCredentials} from './provider-auth.js';
+import {createBackendModels} from './backend-models.js';
 export { ctx };
-export function createBackendModels(state:State){
-  const models=createModels({credentials:providerCredentials(state),authContext:{
-    env:async name=>name==='OPENAI_API_KEY'?state.get<string>('openaiKey'):name==='ANTHROPIC_API_KEY'?state.get<string>('anthropicKey'):undefined,
-    fileExists:async()=>false,
-  }});
-  models.setProvider(bobOpenAIProvider());models.setProvider(anthropicProvider());
-  return models;
-}
+export {createBackendModels} from './backend-models.js';
 export async function openRuntime(state: State, testModels?: Models, testMcpTransport?: Parameters<typeof createInteractive>[1], options:{resume?:boolean}={}) {
   const releaseOwner=acquireOwner(state.dir);
   let disposeCustom=()=>{};

@@ -2,7 +2,6 @@ import {existsSync,rmSync,realpathSync} from 'node:fs';
 import {resolve,dirname,basename,join,relative,isAbsolute} from 'node:path';
 import {State} from './state.js';
 import {backupState,restoreState} from './recovery.js';
-import {openRuntime} from './runtime.js';
 import {importCustomModule} from './custom-modules.js';
 
 /** Resolve existing ancestors too: a symlink must not disguise overlapping output paths. */
@@ -23,6 +22,7 @@ export async function migrateCustomModule(state:State,id:string,source:string,pr
  backup=resolve(backup);destination=resolve(destination);
  requireDisjoint([state.dir,backup,destination]);
  if(existsSync(backup)||existsSync(destination))throw Error('Migration backup and destination must be new');
+ const {openRuntime}=await import('./runtime.js');
  let result:unknown;
  await backupState(state,backup,async()=>{
   restoreState(backup,destination);

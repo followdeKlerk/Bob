@@ -6,7 +6,7 @@ import {homedir,tmpdir,userInfo} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {State} from './state.js';
 import {inspectOwner,acquireOwner} from './ownership.js';
-import {createBackendModels} from './runtime.js';
+import {createBackendModels} from './backend-models.js';
 import {hasProviderCredential,setProviderKey} from './provider-auth.js';
 import {guidedSetup,type SetupInspection,type SetupPort} from './setup-wizard.js';
 import {readControlFloor} from './maintenance-migration.js';

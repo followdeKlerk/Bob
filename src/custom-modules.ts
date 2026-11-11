@@ -7,7 +7,7 @@ import {z} from 'zod';
 import {createRegistry,type Extension,type ConversationDocToken,type JsonObject,type Cursor} from '@earendil-works/pi-durable';
 import type {State} from './state.js';
 import type {Runtime} from './runtime.js';
-import {ctx} from './runtime.js';
+import {BACKGROUND_CONTEXT as ctx} from '@earendil-works/chord/context';
 import {installedDurableVersion,supportedDurableVersion} from './recovery.js';
 const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),Version=z.string().regex(/^\d+\.\d+\.\d+$/);
 const hostDependencies=(durable:string):Record<string,string>=>({'@earendil-works/pi-durable':durable,'@earendil-works/pi-ai':durable,'@earendil-works/chord':durable,'@bob-local/core':'0.1.0'});
