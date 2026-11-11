@@ -62,12 +62,8 @@ class BobPreviewActivity : Activity() {
             val file = previewFile()
             when {
                 mime.startsWith("text/") -> {
-                    val text = file.inputStream().use { input ->
-                        val bytes = ByteArray(200001); var count = 0
-                        while (count < bytes.size) { val n = input.read(bytes, count, bytes.size - count); if (n < 0) break; count += n }
-                        String(bytes, 0, count, Charsets.UTF_8)
-                    }
-                    val body = label(16f, monospaced = true).apply { setTextIsSelectable(true); this.text = text.take(200000) + if (text.length > 200000) "\n[Preview truncated; download retains original bytes]" else "" }
+                    val text = file.inputStream().use { Utf8Preview.read(it) }
+                    val body = label(16f, monospaced = true).apply { setTextIsSelectable(true); this.text = text }
                     layout.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; isHorizontalScrollBarEnabled = false; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
                 }
                 mime.startsWith("image/") -> {
