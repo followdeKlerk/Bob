@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicReference
 private fun prefs(context: Context) = context.getSharedPreferences("phone-location", Context.MODE_PRIVATE)
 private fun permitted(context: Context, permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 private fun locationAllowed(context: Context) = permitted(context, Manifest.permission.ACCESS_FINE_LOCATION) || permitted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
-private data class LocationConnection(val endpoint: String, val identity: String, val token: String)
+private val locationSessions = PhoneLocationSessions()
 
-/** Tokens live only in the non-exported service's memory; no credentials or coordinates in preferences. */
+/** Tokens live only in process memory; no credentials or coordinates in preferences. */
 class BobLocation(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     override fun getName() = "BobLocation"
     @ReactMethod fun enabled(identity: String, promise: Promise) { promise.resolve(prefs(context).getString("identity", null) == identity) }
@@ -37,22 +37,35 @@ class BobLocation(private val context: ReactApplicationContext) : ReactContextBa
             if (Build.VERSION.SDK_INT >= 33) require(permitted(context, Manifest.permission.POST_NOTIFICATIONS)) { "Allow notifications for the visible location service" }
             require(context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()) { "Allow Bob notifications in Android settings" }
             if (Build.VERSION.SDK_INT >= 26) require(context.getSystemService(NotificationManager::class.java).getNotificationChannel("bob-location")?.importance != NotificationManager.IMPORTANCE_NONE) { "Allow the Automatic location notification channel in Android settings" }
-            val previous = prefs(context).getString("identity", null)
-            if (!PhoneLocationPolicy.mayStart(previous, identity, allowEnable)) { promise.resolve(false); return }
-            require(previous == null || previous == identity) { "Location is enabled for another backend. Disable it there first." }
-            prefs(context).edit().putString("identity", identity).apply()
-            try {
-                val intent = Intent(context, BobLocationService::class.java).putExtra("endpoint", origin).putExtra("identity", identity).putExtra("token", token)
-                if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
-            } catch (e: Exception) { prefs(context).edit().remove("identity").apply(); throw e }
+            synchronized(locationSessions) {
+                val previous = prefs(context).getString("identity", null)
+                if (!PhoneLocationPolicy.mayStart(previous, identity, allowEnable)) { promise.resolve(false); return }
+                require(previous == null || previous == identity) { "Location is enabled for another backend. Disable it there first." }
+                prefs(context).edit().putString("identity", identity).apply()
+                val old = locationSessions.current()
+                val session = locationSessions.refresh(LocationConnection(origin, identity, token))
+                try {
+                    // No credentials in the queued intent. A stopped/replaced generation cannot restart work.
+                    val intent = Intent(context, BobLocationService::class.java).putExtra("generation", session.generation)
+                    if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+                    BobLocationService.active?.refresh(old !== session)
+                } catch (e: Exception) {
+                    locationSessions.ifCurrent(session) { locationSessions.stop(); prefs(context).edit().remove("identity").apply() }
+                    BobLocationService.active?.refresh(true)
+                    throw e
+                }
+            }
             promise.resolve(true)
         } catch (e: Exception) { promise.reject("location", e.message ?: "Unable to enable automatic location") }
     }
     @ReactMethod fun stop(endpoint: String, identity: String, token: String, promise: Promise) {
-        if (prefs(context).getString("identity", null) == identity) {
-            prefs(context).edit().remove("identity").apply()
-            BobLocationService.active?.shutdown()
-            context.stopService(Intent(context, BobLocationService::class.java))
+        synchronized(locationSessions) {
+            if (prefs(context).getString("identity", null) == identity) {
+                prefs(context).edit().remove("identity").apply()
+                locationSessions.stop()
+                BobLocationService.active?.shutdown()
+                context.stopService(Intent(context, BobLocationService::class.java))
+            }
         }
         Thread {
             try { LocationHttp.call(LocationConnection(PhoneLocationPolicy.endpoint(endpoint, BuildConfig.DEBUG), identity, token), "/availability", JSONObject().put("enabled", false)) } catch (_: Exception) { /* Local stop is authoritative even offline. Server presence expires. */ }
@@ -68,10 +81,14 @@ class BobLocation(private val context: ReactApplicationContext) : ReactContextBa
 }
 
 private object LocationHttp {
-    fun call(config: LocationConnection, suffix: String, body: JSONObject? = null, connectionRef: AtomicReference<HttpURLConnection?>? = null): JSONObject {
+    fun call(config: LocationConnection, suffix: String, body: JSONObject? = null, connectionRef: AtomicReference<HttpURLConnection?>? = null, session: PhoneLocationSessions.Session? = null): JSONObject {
         val connection = URI(config.endpoint + "/v1/location" + suffix).toURL().openConnection() as HttpURLConnection
-        connectionRef?.set(connection)
         try {
+            // Admission and cancellation registration share the refresh/stop monitor. A stale
+            // worker cannot register an uncancellable request after replacement has won.
+            if (session == null) connectionRef?.set(connection)
+            else if (!locationSessions.ifCurrent(session) { connectionRef?.set(connection) }) throw InterruptedException()
+
             connection.instanceFollowRedirects = false; connection.connectTimeout = 5000; connection.readTimeout = if (body == null) 22000 else 5000
             connection.setRequestProperty("Authorization", "Bearer " + config.token); connection.setRequestProperty("x-bob-backend", config.identity)
             if (body != null) { connection.requestMethod = "POST"; connection.doOutput = true; connection.setRequestProperty("Content-Type", "application/json"); connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) } }
@@ -140,7 +157,6 @@ private object PhoneFix {
 class BobLocationService : Service() {
     companion object { @Volatile var active: BobLocationService? = null }
     @Volatile private var running = true
-    private var config: LocationConnection? = null
     private var worker: Thread? = null
     private val wake = java.util.concurrent.Semaphore(0)
     private val connection = AtomicReference<HttpURLConnection?>(null)
@@ -161,42 +177,67 @@ class BobLocationService : Service() {
                 .addAction(Notification.Action.Builder(null, "Stop location", stop).build())
             if (Build.VERSION.SDK_INT >= 31) builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
             if (Build.VERSION.SDK_INT >= 29) startForeground(4200, builder.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) else startForeground(4200, builder.build())
-        } catch (_: Exception) { running = false; prefs(this).edit().remove("identity").apply(); stopSelf() }
+        } catch (_: Exception) { synchronized(locationSessions) { prefs(this).edit().remove("identity").apply(); shutdown(); stopSelf() } }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "stop-location") {
-            val old = config; prefs(this).edit().remove("identity").apply(); shutdown(); stopSelf()
-            if (old != null) Thread { try { LocationHttp.call(old, "/availability", JSONObject().put("enabled", false)) } catch (_: Exception) {} }.start()
-            return START_NOT_STICKY
+        synchronized(locationSessions) {
+            if (intent?.action == "stop-location") {
+                val old = locationSessions.current()?.config
+                prefs(this).edit().remove("identity").apply(); shutdown(); stopSelf()
+                if (old != null) Thread { try { LocationHttp.call(old, "/availability", JSONObject().put("enabled", false)) } catch (_: Exception) {} }.start()
+                return START_NOT_STICKY
+            }
+            if (intent == null || !running) { stopSelf(); return START_NOT_STICKY }
+            val session = locationSessions.current()
+            if (session == null) { shutdown(); stopSelf(); return START_NOT_STICKY }
+            if (!locationSessions.accepts(intent.getLongExtra("generation", -1))) return START_NOT_STICKY
+            if (prefs(this).getString("identity", null) != session.config.identity) { shutdown(); stopSelf(); return START_NOT_STICKY }
+            if (worker == null) worker = Thread { monitor() }.apply { name = "bob-location"; start() }
+            else refresh(false)
         }
-        if (intent == null || !running) { stopSelf(); return START_NOT_STICKY }
-        if (worker != null) { if (wake.availablePermits() == 0) wake.release(); return START_NOT_STICKY }
-        try {
-            val endpoint = PhoneLocationPolicy.endpoint(intent.getStringExtra("endpoint") ?: "", BuildConfig.DEBUG)
-            val identity = intent.getStringExtra("identity") ?: ""; java.util.UUID.fromString(identity)
-            val token = intent.getStringExtra("token") ?: ""; require(token.matches(Regex("[A-Za-z0-9_-]{32,128}")))
-            require(prefs(this).getString("identity", null) == identity)
-            config = LocationConnection(endpoint, identity, token)
-            worker = Thread { monitor(config!!) }.apply { name = "bob-location"; start() }
-        } catch (_: Exception) { shutdown(); stopSelf() }
         return START_NOT_STICKY
     }
-    private fun enabled(config: LocationConnection) = running && prefs(this).getString("identity", null) == config.identity
-    private fun monitor(config: LocationConnection) {
+    /** Replacement cancels old blocking work, but never creates a competing worker. */
+    fun refresh(changed: Boolean) {
+        if (changed) { connection.getAndSet(null)?.disconnect(); worker?.interrupt() }
+        if (wake.availablePermits() == 0) wake.release()
+    }
+    private fun enabled(session: PhoneLocationSessions.Session) = running && locationSessions.isCurrent(session) && prefs(this).getString("identity", null) == session.config.identity
+    private fun revoke(session: PhoneLocationSessions.Session) {
+        locationSessions.ifCurrent(session) { prefs(this).edit().remove("identity").apply(); locationSessions.stop() }
+    }
+    private fun monitor() {
+        while (true) {
+            val session = synchronized(locationSessions) {
+                if (!running) return
+                locationSessions.current() ?: run { shutdown(); stopSelf(); return }
+            }
+            // A refresh interrupts capture/backoff; consume that interrupt before the new generation.
+            Thread.interrupted()
+            monitor(session)
+        }
+    }
+    private fun monitor(session: PhoneLocationSessions.Session) {
+        val config = session.config
         var registered = false; var backoff = 2000L
-        while (enabled(config)) try {
+        while (enabled(session)) try {
             if (!locationAllowed(this) || (Build.VERSION.SDK_INT >= 33 && !permitted(this, Manifest.permission.POST_NOTIFICATIONS))) throw SecurityException("Permission removed")
             val notifications = getSystemService(NotificationManager::class.java)
             if (!notifications.areNotificationsEnabled() || (Build.VERSION.SDK_INT >= 26 && notifications.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE)) throw SecurityException("Notification visibility removed")
-            if (!registered) { LocationHttp.call(config, "/availability", JSONObject().put("enabled", true), connection); registered = true }
-            val polled = LocationHttp.call(config, "/poll", connectionRef = connection)
-            if (!polled.optBoolean("enabled")) { prefs(this).edit().remove("identity").apply(); break }
+            if (!registered) {
+                if (!enabled(session)) break
+                LocationHttp.call(config, "/availability", JSONObject().put("enabled", true), connection, session); registered = true
+            }
+            if (!enabled(session)) break
+            val polled = LocationHttp.call(config, "/poll", connectionRef = connection, session = session)
+            if (!enabled(session)) break
+            if (!polled.optBoolean("enabled")) { revoke(session); break }
             val requests = polled.optJSONArray("requests") ?: continue
             if (requests.length() == 0) { backoff = 2000; continue }
-            if (!enabled(config)) break
+            if (!enabled(session)) break
             val result = PhoneFix.capture(this); val ready = SystemClock.elapsedRealtime()
             for (index in 0 until minOf(requests.length(), 4)) {
-                if (!enabled(config)) break
+                if (!enabled(session)) break
                 val request = requests.getJSONObject(index); val id = request.getString("id")
                 if (!id.matches(Regex("[a-f0-9]{64}")) || request.optLong("expiresAt") <= System.currentTimeMillis()) continue
                 val body = JSONObject().put("id", id)
@@ -206,14 +247,15 @@ class BobLocationService : Service() {
                     if (age > 30000) { body.put("status", "unavailable").put("reason", "timeout") }
                     else body.put("status", "ok").put("fix", fix.put("ageMs", age))
                 }
-                if (enabled(config)) LocationHttp.call(config, "/response", body, connection)
+                if (enabled(session)) LocationHttp.call(config, "/response", body, connection, session)
             }
             backoff = 2000
         } catch (_: InterruptedException) { break }
-          catch (_: SecurityException) { prefs(this).edit().remove("identity").apply(); break }
-          catch (_: Exception) { if (!enabled(config)) break; try { wake.tryAcquire(backoff, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) { break }; backoff = minOf(30000, backoff * 2) }
-        shutdown(); stopSelf()
+          catch (_: SecurityException) { revoke(session); break }
+          catch (_: Exception) { if (!enabled(session)) break; try { wake.tryAcquire(backoff, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) { break }; backoff = minOf(30000, backoff * 2) }
     }
-    fun shutdown() { running = false; connection.getAndSet(null)?.disconnect(); worker?.interrupt() }
+    fun shutdown() {
+        synchronized(locationSessions) { running = false; locationSessions.stop(); connection.getAndSet(null)?.disconnect(); worker?.interrupt() }
+    }
     override fun onDestroy() { shutdown(); if (active === this) active = null; super.onDestroy() }
 }

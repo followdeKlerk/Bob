@@ -12,3 +12,27 @@ internal object PhoneLocationPolicy {
     fun mayStart(previous: String?, identity: String, allowEnable: Boolean) = allowEnable || previous == identity
     fun fresh(fixNanos: Long, nowNanos: Long): Boolean = fixNanos > 0 && nowNanos >= fixNanos && nowNanos - fixNanos <= 30_000_000_000L
 }
+
+internal data class LocationConnection(val endpoint: String, val identity: String, val token: String)
+
+/** Process-local handoff only. Identical refreshes reuse ownership; stop invalidates queued intents.
+ * Callers use this same monitor when changing the opt-in or admitting service work. */
+internal class PhoneLocationSessions {
+    data class Session(val generation: Long, val config: LocationConnection)
+    private var generation = 0L
+    private var selected: Session? = null
+
+    @Synchronized fun current(): Session? = selected
+    @Synchronized fun refresh(config: LocationConnection): Session {
+        selected?.let { if (it.config == config) return it }
+        return Session(++generation, config).also { selected = it }
+    }
+    @Synchronized fun accepts(generation: Long) = selected?.generation == generation
+    @Synchronized fun isCurrent(session: Session) = selected === session
+    @Synchronized fun ifCurrent(session: Session, action: () -> Unit): Boolean {
+        if (!isCurrent(session)) return false
+        action()
+        return true
+    }
+    @Synchronized fun stop(): Session? = selected.also { selected = null }
+}
