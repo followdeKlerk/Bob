@@ -9,7 +9,7 @@ import {serve} from '../src/server.js';
 
 test('MCP CLI explicitly configures, protects credentials, disables and removes', {timeout:30000},()=>{
  const dir=mkdtempSync(join(process.env.TMPDIR!,'bob-mcp-cli-'));
- const run=(args:string[],input?:string)=>{const r=spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'mcp',...args],{encoding:'utf8',input});assert.equal(r.status,0,r.stderr);return r.stdout;};
+ const run=(args:string[],input?:string)=>{const r=spawnSync(process.execPath,['dist/cli.js','--state',dir,'mcp',...args],{encoding:'utf8',input});assert.equal(r.status,0,r.stderr);return r.stdout;};
  run(['configure','fixture','--endpoint','https://example.invalid/mcp','--tools','show,increment','--disabled']);
  assert.equal(JSON.parse(run(['list']))[0].enabled,false);
  const credential=randomBytes(32).toString('hex');run(['key','fixture'],credential);
@@ -18,7 +18,7 @@ test('MCP CLI explicitly configures, protects credentials, disables and removes'
  run(['disable','fixture']);assert.equal(JSON.parse(run(['list']))[0].enabled,false);
  run(['configure','fixture','--endpoint','https://other.invalid/mcp','--tools','show']);assert.equal(JSON.parse(run(['list']))[0].credentialPresent,false);
  run(['remove','fixture']);assert.deepEqual(JSON.parse(run(['list'])),[]);
- const bad=spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'mcp','configure','bad','--endpoint','http://public.example/mcp','--tools','show'],{encoding:'utf8'});assert.notEqual(bad.status,0);
+ const bad=spawnSync(process.execPath,['dist/cli.js','--state',dir,'mcp','configure','bad','--endpoint','http://public.example/mcp','--tools','show'],{encoding:'utf8'});assert.notEqual(bad.status,0);
 });
 
 test('authenticated MCP configuration readback, credential clearing, deletion and transport validation',async()=>{

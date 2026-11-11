@@ -13,7 +13,7 @@ for (const option of ['--cert', '--key']) test(`serve ${option} alone rejects be
  const state = join(dir, 'missing-state');
  try {
   // Public host makes even the old implementation exit instead of starting a plaintext listener.
-  const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', '--state', state,
+  const result = spawnSync(process.execPath, ['dist/cli.js', '--state', state,
    'serve', '--host', '0.0.0.0', '--port', '0', option, join(dir, 'unused.pem')],
    {encoding: 'utf8', timeout: 15000});
   assert.equal(result.error, undefined);
@@ -35,7 +35,7 @@ for (const encrypted of [false, true]) test(`serve reports actual ${encrypted ? 
     '-out', cert, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], {stdio: 'ignore'});
    assert.equal(result.status, 0);
   }
-  child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', '--state', join(dir, 'state'),
+  child = spawn(process.execPath, ['dist/cli.js', '--state', join(dir, 'state'),
    'serve', '--port', '0', ...(encrypted ? ['--cert', cert, '--key', key] : [])],
    {stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000, killSignal: 'SIGKILL'});
   exited = once(child, 'exit');

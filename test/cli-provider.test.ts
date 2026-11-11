@@ -9,7 +9,7 @@ import {acquireOwner} from '../src/ownership.js';
 
 test('CLI validates provider catalog and folder before changing configuration',async()=>{
  const directory=mkdtempSync(join(process.env.TMPDIR!,'bob-cli-provider-'));
- const run=(args:string[],input='')=>spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',directory,...args],{input,encoding:'utf8'});
+ const run=(args:string[],input='')=>spawnSync(process.execPath,['dist/cli.js','--state',directory,...args],{input,encoding:'utf8'});
  const initial=run(['setup','--cwd',directory]);assert.equal(initial.status,0,initial.stderr);
  const state=new State(directory);
  try{

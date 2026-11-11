@@ -29,10 +29,11 @@ From the repository root:
 ```sh
 npm ci
 npm ci --prefix apps/mobile
-npm run build
 npm test
 node tools/check-package.mjs
 ```
+
+`npm test` rebuilds the backend and workspaces before running the complete test suite. CLI integration tests launch the built production entry point (`dist/cli.js`); run `npm run build` first when invoking those test files directly.
 
 The root suite includes cross-component tests that import mobile JavaScript dependencies, so both dependency installs above are required; no Android SDK is needed for these checks.
 

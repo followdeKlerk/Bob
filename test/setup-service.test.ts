@@ -48,7 +48,7 @@ test('TLS material must match the hostname/key and keep the key private',()=>{
  const link=join(dir,'key-link');symlinkSync(key,link);assert.throws(()=>verifyCertificate({...connection,cert,key:link}),/regular files/);
 });
 test('guided setup rejects noninteractive invocation without initializing state; legacy setup stays scriptable',()=>{
- const dir=join(temp(),'state');const run=(args:string[])=>spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'setup',...args],{encoding:'utf8'});
+ const dir=join(temp(),'state');const run=(args:string[])=>spawnSync(process.execPath,['dist/cli.js','--state',dir,'setup',...args],{encoding:'utf8'});
  const denied=run(['--guided']);assert.notEqual(denied.status,0);assert.match(denied.stderr,/interactive local terminal|non-root/);assert.equal(existsSync(dir),false);
  const existing=temp(),legacy=run(['--cwd',existing]);assert.equal(legacy.status,0,legacy.stderr);assert.equal(JSON.parse(legacy.stdout).state,dir);
 });

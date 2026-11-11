@@ -54,7 +54,7 @@ test('AD picker survives reopen and never replaces an unrelated question',{timeo
 });
 
 test('AD CLI accepts noninteractive patches and secret stdin, preserves inactive lists and prints no key',{timeout:20000},()=>{
- const dir=mkdtempSync(join(tmpdir(),'bob-ad-cli-'));const run=(args:string[],input='')=>spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'delegation',...args],{input,encoding:'utf8'});
+ const dir=mkdtempSync(join(tmpdir(),'bob-ad-cli-'));const run=(args:string[],input='')=>spawnSync(process.execPath,['dist/cli.js','--state',dir,'delegation',...args],{input,encoding:'utf8'});
  try{
   const secret='fixture-only-DO-NOT-DISCLOSE';let result=run(['secret','local'],secret);assert.equal(result.status,0,result.stderr);assert.doesNotMatch(result.stdout+result.stderr,/DO-NOT-DISCLOSE/);
   const patch={mode:'model_map',modelMap:{options:[{name:'local',description:'Local declared model',provider:'local',model:'fixture-model',credential:{kind:'secret',name:'local'},endpoint:{baseUrl:'http://localhost:9876/v1',api:'openai-completions',contextWindow:4096,maxTokens:512,thinkingLevels:['off']}}]}};

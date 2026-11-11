@@ -61,10 +61,10 @@ test('authenticated module selection readback and CLI exclusive-owner guard',asy
   const response=await fetch(endpoint,{headers,method:'PUT',body:JSON.stringify({ids:['resources']})});
   assert.equal(response.status,200,await response.clone().text());
   const observed=await(await fetch(endpoint,{headers})).json();assert.deepEqual(observed.filter((m:any)=>m.selected).map((m:any)=>m.id),['resources']);
-  const blocked=spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'module','remove','web'],{encoding:'utf8'});
+  const blocked=spawnSync(process.execPath,['dist/cli.js','--state',dir,'module','remove','web'],{encoding:'utf8'});
   assert.notEqual(blocked.status,0);assert.match(blocked.stderr,/already owned/);
  }finally{await app.close();state.close();}
- const execute=(args:string[])=>spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',dir,'module',...args],{encoding:'utf8'});
+ const execute=(args:string[])=>spawnSync(process.execPath,['dist/cli.js','--state',dir,'module',...args],{encoding:'utf8'});
  for(const args of [['disable','web'],['remove','web'],['install','web'],['enable','web']]){const result=execute(args);assert.equal(result.status,0,result.stderr);}
  const listed=execute(['list']);assert.equal(listed.status,0);assert.equal(JSON.parse(listed.stdout).find((m:any)=>m.id==='web').defaultSelected,true);
  assert.notEqual(execute(['install','web','--version','999.0.0']).status,0);

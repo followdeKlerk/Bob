@@ -64,6 +64,6 @@ test('two genuine backends: private explicit trust, native remote admission/dedu
   assert.equal((await runtimeB.harness.inspect(ctx)).tasks.length,0);
   revokePeer(b,a.id,'inbound');await assert.rejects(()=>requestPeer(a,b.id,'history',{conversationId:chat.id}),/403/);
   revokePeer(a,b.id,'outbound');assert.equal(a.get(`peerKey:${b.id}`),undefined);await assert.rejects(()=>requestPeer(a,b.id,'history',{conversationId:chat.id}),/not explicitly/);
-  const listing=spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',a.dir,'peer','list'],{encoding:'utf8'});assert.equal(listing.status,0,listing.stderr);assert.equal(JSON.parse(listing.stdout).outbound[0].enabled,false);
+  const listing=spawnSync(process.execPath,['dist/cli.js','--state',a.dir,'peer','list'],{encoding:'utf8'});assert.equal(listing.status,0,listing.stderr);assert.equal(JSON.parse(listing.stdout).outbound[0].enabled,false);
  }finally{await serverA.close();await serverB.close();a.close();b.close();}
 });

@@ -18,7 +18,7 @@ function fixture(directory:string,version='0.1.0',step=1,stateVersion=1){
  writeFileSync(join(directory,'dist/helper.js'),`export const increment=value=>value+${step};`);
  writeFileSync(join(directory,'dist/index.js'),`import{defineExtension,defineTool,defineDoc}from'@earendil-works/pi-durable';import{increment}from'./helper.js';export const Counter=defineDoc({kind:'fixture.counter',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({count:0}),checkpointWhen:()=>true});export default defineExtension({name:'fixture.counter',tools:[defineTool({name:'fixture_counter',description:'Explicit test counter',parameters:{type:"object",properties:{},required:[]},execute:async(args,api,context)=>{const count=await api.commit(async tx=>{const doc=await tx.doc(Counter,api.conversationId);doc.count=increment(doc.count);return doc.count;},context);return{output:[{type:'text',text:String(count)}]};}})]});`);
 }
-const cli=(directory:string,args:string[])=>spawnSync(process.execPath,['--import','tsx','src/cli.ts','--state',directory,...args],{encoding:'utf8'});
+const cli=(directory:string,args:string[])=>spawnSync(process.execPath,['dist/cli.js','--state',directory,...args],{encoding:'utf8'});
 const codePath=(s:State)=>{const r=customRecords(s)[0];return join(s.dir,'custom-modules',r.id,`${r.manifest.version}-${r.hash}`,'dist/index.js');};
 
 test('staged native document schema migration preserves authority, supports old-code rollback and isolates failure',async()=>{
