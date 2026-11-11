@@ -193,12 +193,12 @@ for(const target of ['all','backend'] as const)test(target+' always runs backend
  }finally{f.close();}
 });
 
-test('full backend suite uses the standard bounded build allowance, not the shorter mobile allowance',async t=>{
+test('full backend suite retains its ten-minute performance budget',async t=>{
  const deadlines:number[]=[],original=globalThis.setTimeout;
  t.mock.method(globalThis,'setTimeout',((callback:Parameters<typeof setTimeout>[0],delay?:number,...args:unknown[])=>{deadlines.push(delay??0);return original(callback,delay,...args);}) as typeof setTimeout);
  const f=builderFixture();try{
   await f.build('backend');
-  assert.deepEqual(deadlines.slice(0,2),[1800000,1800000],'compile and complete backend suite both need the normal build-stage allowance');
+  assert.deepEqual(deadlines.slice(0,2),[1800000,600000],'backend checks retain their ten-minute budget; improve work rather than hiding a slowdown');
   assert.ok(f.operations().includes('backend-tests'));
  }finally{f.close();}
 });
