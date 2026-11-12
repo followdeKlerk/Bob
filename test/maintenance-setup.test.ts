@@ -28,6 +28,10 @@ test('real packaged fresh supervisor installs and serves the same identity witho
  const run=(args:string[])=>{if(args[0]==='enable'){const fd=openSync(join(base,'supervisor.log'),'a',0o600);child=spawn(process.execPath,[join(home,'maintenance-loader.js'),home],{stdio:['ignore',fd,fd],env:{...process.env}});closeSync(fd);}if(args[0]==='stop')stop();return '';};
  const result=await installUpdatesOnHost({stateDir,source:resolve('.'),currentCli:resolve('dist/cli.js'),home,unitDirectory:units,node:process.execPath,origin:`http://127.0.0.1:${port}`,host:'127.0.0.1',port},run);
  assert.equal(result.backendId,backendId);assert.equal(result.androidConfigured,false);assert.equal(result.supervised,true);
+ const receipt=JSON.parse(readFileSync(join(home,'installation.json'),'utf8')),root=resolve(receipt.prepared.release.cli,'../..');
+ assert.deepEqual(readFileSync(join(root,'package-lock.json')),readFileSync(resolve('package-lock.json')),'installed runtime retains the exact reviewed lock');
+ const lock=JSON.parse(readFileSync(resolve('package-lock.json'),'utf8'));
+ assert.equal(JSON.parse(readFileSync(join(root,'node_modules/@types/node/package.json'),'utf8')).version,lock.packages['node_modules/@types/node'].version,'new registry metadata cannot upgrade a locked transitive dependency');
  assert.match(readFileSync(join(units,setupUnitName(backendId)),'utf8'),/Restart=always/);
  const db=new DatabaseSync(join(stateDir,'control.sqlite'),{readOnly:true});try{assert.equal(JSON.parse(String(db.prepare("SELECT value FROM config WHERE key='identity'").get()!.value)),backendId);assert.equal(JSON.parse(String(db.prepare("SELECT value FROM config WHERE key='maintenanceHome'").get()!.value)),home);assert.equal(db.prepare('SELECT count(*) AS n FROM devices').get()!.n,0);}finally{db.close();}
  assert.equal(existsSync(join(stateDir,'durable.sqlite')),true);verified=true;

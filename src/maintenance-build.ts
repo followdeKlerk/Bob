@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {readFileSync,writeFileSync,mkdirSync,openSync,closeSync,copyFileSync,statSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,openSync,closeSync,copyFileSync,statSync,cpSync,lstatSync,existsSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {MaintenanceStore,sourceFingerprint,compatibilityFingerprint,type MaintenanceConfig,type UpdateJob,type Release} from './maintenance.js';
@@ -65,8 +65,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  const packageManifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
  await run('npm',['pack','--silent','--pack-destination',dir]);
  const archive=join(dir,'bob-local-cli-'+packageManifest.version+'.tgz'),installation=join(dir,'installation');
- await run('npm',['install','--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',installation,archive],root,180000);
- const packageRoot=join(installation,'node_modules/@bob-local/cli');const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
+ const packageRoot=await installLockedRuntime({sourceRoot:root,archive,installation,run});const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
  if(manifest.name!=='@bob-local/cli'||manifest.dependencies?.['@earendil-works/pi-durable']!==durableVersion)throw Error('Native Durable package identity mismatch');
  release.cli=join(packageRoot,'dist/cli.js');
  stage('Checking installed package in a disposable state');
@@ -87,4 +86,32 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  // package checks. Backend-only and fast builds cannot advance this authority.
  if(!fast&&android&&manifest)store.set(uiBaselineKey,createUiBaseline(root,release,manifest));
  return release;
+}
+
+/** Install the packed executable with the reviewed lock, never resolve a new
+ * dependency graph around a tarball. npm pack omits package-lock.json and bundles
+ * workspaces under node_modules; restore their declared layout before npm ci. */
+export async function installLockedRuntime({sourceRoot,archive,installation,run}:{sourceRoot:string;archive:string;installation:string;run:(command:string,args:string[],cwd:string,timeout:number)=>Promise<unknown>}):Promise<string>{
+ const root=join(installation,'node_modules/@bob-local/cli');mkdirSync(root,{recursive:true,mode:0o700});
+ await run('tar',['--extract','--gzip','--file',archive,'--strip-components=1','--directory',root],sourceRoot,60000);
+ if(existsSync(join(root,'npm-shrinkwrap.json')))throw Error('Packed shrinkwrap cannot override the reviewed lock');
+ const manifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
+ const bytes=readFileSync(join(sourceRoot,'package-lock.json')),lock=JSON.parse(bytes.toString());
+ if(manifest.name!=='@bob-local/cli'||lock.lockfileVersion!==3||!lock.packages?.['']||!Array.isArray(manifest.workspaces)||!manifest.workspaces.length)throw Error('Locked runtime requires the original v3 workspace lock');
+ const names:string[]=[];
+ for(const workspace of manifest.workspaces){
+  if(typeof workspace!=='string'||!/^packages\/[a-z][a-z0-9-]*$/.test(workspace))throw Error('Unsupported locked runtime workspace');
+  const expected=lock.packages[workspace],name=expected?.name;
+  if(typeof name!=='string'||!/^@bob-local\/[a-z][a-z0-9-]*$/.test(name)||names.includes(name))throw Error('Workspace identity is absent or duplicated in the reviewed lock');
+  names.push(name);const bundled=join(root,'node_modules',name);
+  if(!lstatSync(bundled).isDirectory()||lstatSync(bundled).isSymbolicLink())throw Error('Expected a bundled workspace directory');
+  const actual=JSON.parse(readFileSync(join(bundled,'package.json'),'utf8'));
+  if(actual.name!==name||actual.version!==expected.version)throw Error('Bundled workspace differs from the reviewed lock');
+  cpSync(bundled,join(root,workspace),{recursive:true});
+ }
+ if(!Array.isArray(manifest.bundleDependencies)||JSON.stringify([...manifest.bundleDependencies].sort())!==JSON.stringify([...names].sort()))throw Error('Runtime workspaces must match the bundled workspace inventory');
+ copyFileSync(join(sourceRoot,'package-lock.json'),join(root,'package-lock.json'));
+ await run('npm',['ci','--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',root],sourceRoot,180000);
+ if(!readFileSync(join(root,'package-lock.json')).equals(bytes))throw Error('Runtime installation changed the reviewed dependency lock');
+ return root;
 }

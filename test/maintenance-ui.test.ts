@@ -116,6 +116,8 @@ test('known generated outputs do not invalidate a source manifest, arbitrary bui
 
 function builderFixture(){
  const f=fixture(),home=join(f.dir,'maintenance'),bin=join(f.dir,'bin'),control=join(f.dir,'control.json'),commands=join(f.dir,'commands.jsonl');mkdirSync(bin);
+ const pkg=JSON.parse(readFileSync(join(f.root,'package.json'),'utf8'));pkg.workspaces=['packages/core'];pkg.bundleDependencies=['@bob-local/core'];f.put('package.json',JSON.stringify(pkg));
+ f.put('package-lock.json',JSON.stringify({lockfileVersion:3,packages:{'':pkg,'packages/core':{name:'@bob-local/core',version:'0.1.0'}}}));
  writeFileSync(control,'{}');
  const script=`#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path');
@@ -137,15 +139,20 @@ if(cmd==='aapt'){
  const gradle=fs.readFileSync(path.join(root,'apps/mobile/android/app/build.gradle'),'utf8');
  console.log("package: name='com.bobmobile' versionCode='"+gradle.match(/versionCode\\s+(\\d+)/)[1]+"' versionName='"+gradle.match(/versionName\\s+\"([^\"]+)\"/)[1]+"'");
 }
-if(cmd==='npm'&&args[0]==='install'){
- if(args.includes('--offline')||!['--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts'].every(flag=>args.includes(flag)))throw Error('Runtime packaging must allow bounded cache misses without lifecycle scripts');
- const pkg=path.join(args[args.indexOf('--prefix')+1],'node_modules/@bob-local/cli');fs.mkdirSync(path.join(pkg,'dist'),{recursive:true});
- fs.writeFileSync(path.join(pkg,'package.json'),JSON.stringify({name:'@bob-local/cli',dependencies:{'@earendil-works/pi-durable':'1.4.0'}}));
+if(cmd==='tar'){
+ const pkg=path.join(args[args.indexOf('--directory')+1]);fs.mkdirSync(path.join(pkg,'dist'),{recursive:true});
+ fs.writeFileSync(path.join(pkg,'package.json'),fs.readFileSync(path.join(root,'package.json')));
  fs.writeFileSync(path.join(pkg,'dist/cli.js'),'// installed fixture cli');
+ const workspace=path.join(pkg,'node_modules/@bob-local/core');fs.mkdirSync(workspace,{recursive:true});fs.writeFileSync(path.join(workspace,'package.json'),JSON.stringify({name:'@bob-local/core',version:'0.1.0'}));
+}
+if(cmd==='npm'&&args[0]==='ci'){
+ if(args.includes('--offline')||!['--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts'].every(flag=>args.includes(flag)))throw Error('Runtime packaging must allow bounded cache misses without lifecycle scripts');
+ const pkg=args[args.indexOf('--prefix')+1];
+ if(!fs.existsSync(path.join(pkg,'package-lock.json'))||!fs.existsSync(path.join(pkg,'packages/core/package.json')))throw Error('Expected reviewed lock and restored workspace before npm ci');
 }
 `;
  const executable=(path:string)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,script,{mode:0o700});};
- for(const name of ['node','npm'])executable(join(bin,name));
+ for(const name of ['node','npm','tar'])executable(join(bin,name));
  executable(join(f.root,'node_modules/.bin/tsc'));
  executable(join(f.root,'apps/mobile/android/gradlew'));
  for(const name of ['apksigner','aapt'])executable(join(f.dir,'android/build-tools/36.0.0',name));
@@ -168,12 +175,12 @@ test('first Android build validates fully; later UI fast build keeps all mobile/
   const first=await f.build(),baseline=f.store.get<UiBaseline>(uiBaselineKey)!;
   assert.equal(baseline.releaseId,first.release.id);assert.equal(f.store.job(first.job.id)?.validation?.lane,'full');
   assert.match(f.store.job(first.job.id)!.validation!.reason,/no fully validated/);
-  for(const op of ['build','backend-tests','build:interactive','tsc','mobile-jest','gradlew','apksigner','aapt','pack','install','node'])assert.ok(f.operations().includes(op),op);
+  for(const op of ['build','backend-tests','build:interactive','tsc','mobile-jest','gradlew','apksigner','aapt','pack','ci','node'])assert.ok(f.operations().includes(op),op);
   f.clear();f.put('apps/mobile/theme-tokens.ts','export const color="white";\n');
   f.put('packages/core/dist/contracts.js','// stale generated contracts from a different backend build');
   const fast=await f.build();assert.equal(f.store.job(fast.job.id)?.validation?.lane,'ui-fast');
   assert.equal(fast.release.cli,f.release.cli,'only android may reuse active CLI');
-  for(const op of ['build','backend-tests','pack','install','node'])assert.ok(!f.operations().includes(op),op+' must be skipped');
+  for(const op of ['build','backend-tests','pack','ci','node'])assert.ok(!f.operations().includes(op),op+' must be skipped');
   for(const op of ['core-build','build:interactive','tsc','mobile-jest','gradlew','apksigner','aapt'])assert.ok(f.operations().includes(op),op+' is mandatory');
   assert.ok(f.operations().indexOf('core-build')<f.operations().indexOf('tsc'));
   assert.equal(readFileSync(join(f.root,'packages/core/dist/contracts.js'),'utf8'),'// rebuilt shared contracts');
@@ -189,7 +196,7 @@ for(const target of ['all','backend'] as const)test(target+' always runs backend
   await f.build();f.clear();f.put('apps/mobile/theme-tokens.ts','// reviewed visual edit\n');
   const result=await f.build(target);
   assert.equal(f.store.job(result.job.id)?.validation?.lane,'full');assert.notEqual(result.release.cli,f.release.cli);
-  for(const op of ['build','backend-tests','pack','install','node'])assert.ok(f.operations().includes(op),op);
+  for(const op of ['build','backend-tests','pack','ci','node'])assert.ok(f.operations().includes(op),op);
   if(target==='backend')assert.ok(!f.operations().includes('mobile-jest'));
  }finally{f.close();}
 });
@@ -212,7 +219,7 @@ test('risky delta triggers full fallback and successful full checks replace the 
  }finally{f.close();}
 });
 
-for(const fail of ['build','backend-tests','build:interactive','tsc','mobile-jest','gradlew','apksigner','aapt','pack','install','node'])test('failed full check cannot advance baseline: '+fail,async()=>{
+for(const fail of ['build','backend-tests','build:interactive','tsc','mobile-jest','gradlew','apksigner','aapt','pack','ci','node'])test('failed full check cannot advance baseline: '+fail,async()=>{
  const f=builderFixture();try{
   await f.build();const before=f.store.get(uiBaselineKey);f.put('tools/build.sh','echo force full\n');f.settings({fail});
   await assert.rejects(f.build(),/failed/);assert.deepEqual(f.store.get(uiBaselineKey),before);

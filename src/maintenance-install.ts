@@ -1,3 +1,4 @@
+import {installLockedRuntime} from './maintenance-build.js';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
@@ -175,8 +176,8 @@ function assertCompiledProvenance(sourceRoot:string,compiled:string,installed?:s
 async function packageRuntime({runtimeRoot,directory,node}: {runtimeRoot:string;directory:string;node:string}){
  const manifest=json<{version:string}>(join(runtimeRoot,'package.json'));if(!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(manifest.version))throw Error('Invalid package version');
  await command('npm',['pack','--silent','--ignore-scripts','--pack-destination',directory],runtimeRoot,node,120000);
- await command('npm',['install','--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',join(directory,'installation'),join(directory,'bob-local-cli-'+manifest.version+'.tgz')],runtimeRoot,node,180000);
- return join(directory,'installation/node_modules/@bob-local/cli/dist/cli.js');
+ const root=await installLockedRuntime({sourceRoot:runtimeRoot,archive:join(directory,'bob-local-cli-'+manifest.version+'.tgz'),installation:join(directory,'installation'),run:(file,args,cwd,timeout)=>command(file,args,cwd,node,timeout)});
+ return join(root,'dist/cli.js');
 }
 async function verifyPackage({cli,node,directory}:{cli:string;node:string;directory:string}){
  const state=join(directory,'verification-state');
