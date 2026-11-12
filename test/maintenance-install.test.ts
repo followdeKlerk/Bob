@@ -209,3 +209,13 @@ test('reference APK fails closed without SDK, wrong package/signature/version, o
  }
  const h=fixture(),p=await prepareMaintenanceInstall(planMaintenanceInstall({...h.options,referenceApk:apk,androidHome:join(h.root,'sdk')}),{...h.actions,inspectReferenceApk:async()=>referenceEvidence});writeFileSync(p.release.apk!.path,'tampered');await assert.rejects(installMaintenanceSupervisor(p),/Reference APK changed/);assert.equal(managed(h.stateDir),undefined);
 });
+
+// Keep both production entry points aligned; the builder fixture additionally
+// checks the actual subprocess argv, and host fixtures exercise real npm packaging.
+test('runtime packaging allows bounded registry cache misses before handover without package scripts',()=>{
+ for(const file of ['maintenance-install.ts','maintenance-build.ts']){
+  const source=readFileSync(join(repository,'src',file),'utf8');
+  assert.match(source,/\['install','--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts'/,file);
+  assert.doesNotMatch(source,/\['install','--offline'/,file);
+ }
+});

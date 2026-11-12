@@ -65,7 +65,7 @@ export async function buildRelease(home:string,config:MaintenanceConfig,store:Ma
  const packageManifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
  await run('npm',['pack','--silent','--pack-destination',dir]);
  const archive=join(dir,'bob-local-cli-'+packageManifest.version+'.tgz'),installation=join(dir,'installation');
- await run('npm',['install','--offline','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',installation,archive],root,180000);
+ await run('npm',['install','--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts','--no-audit','--no-fund','--omit=dev','--prefix',installation,archive],root,180000);
  const packageRoot=join(installation,'node_modules/@bob-local/cli');const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
  if(manifest.name!=='@bob-local/cli'||manifest.dependencies?.['@earendil-works/pi-durable']!==durableVersion)throw Error('Native Durable package identity mismatch');
  release.cli=join(packageRoot,'dist/cli.js');

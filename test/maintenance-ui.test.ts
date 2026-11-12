@@ -138,6 +138,7 @@ if(cmd==='aapt'){
  console.log("package: name='com.bobmobile' versionCode='"+gradle.match(/versionCode\\s+(\\d+)/)[1]+"' versionName='"+gradle.match(/versionName\\s+\"([^\"]+)\"/)[1]+"'");
 }
 if(cmd==='npm'&&args[0]==='install'){
+ if(args.includes('--offline')||!['--prefer-offline','--fetch-retries=1','--fetch-timeout=30000','--ignore-scripts'].every(flag=>args.includes(flag)))throw Error('Runtime packaging must allow bounded cache misses without lifecycle scripts');
  const pkg=path.join(args[args.indexOf('--prefix')+1],'node_modules/@bob-local/cli');fs.mkdirSync(path.join(pkg,'dist'),{recursive:true});
  fs.writeFileSync(path.join(pkg,'package.json'),JSON.stringify({name:'@bob-local/cli',dependencies:{'@earendil-works/pi-durable':'1.4.0'}}));
  fs.writeFileSync(path.join(pkg,'dist/cli.js'),'// installed fixture cli');
