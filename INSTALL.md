@@ -27,7 +27,7 @@ bash bob-install.sh
 
 You can also use `bash install.sh` from an existing checkout. Repository and dependency downloads need network access; cloning Bob's public repository does not require GitHub authentication. Never paste access tokens into commands or chat.
 
-The installer checks prerequisites, asks before installing missing tools, and guides you through model authentication, Tailscale, HTTPS, a background user service and phone pairing. It can install a private compatible Node runtime without replacing system Node. Package installation support covers apt, dnf and pacman; other systems may need manual setup.
+The installer checks prerequisites, asks before installing missing tools, and guides you through model authentication, Tailscale, HTTPS, a supervised background/update service and phone pairing. It can install a private compatible Node runtime without replacing system Node. Package installation support covers apt, dnf and pacman; other systems may need manual setup.
 
 Choose the state directory and working folder carefully. Existing credentials and state are preserved. A running or supervisor-managed backend is not replaced or reconfigured. Do not start a second backend against live state.
 
@@ -40,11 +40,37 @@ To revisit guided setup or check an existing backend:
 ~/.local/bin/bob --state /absolute/path/to/state doctor
 ```
 
-The guided installer creates a standalone systemd user service, not the optional self-update supervisor. Use the generated `bob-<backend-id>.service` with `systemctl --user` to inspect or manage that standalone service. Keep an existing supervised deployment on its own update path.
+New guided installations include the supervisor used by `self_update` and **Build & install**. Backend updates work without Android tools. Building the Android app additionally requires Java, an accepted/licensed Android SDK, your existing private signing properties and a trusted reference APK. Setup can record paths to those existing files; it never generates a replacement signing identity or installs Android tools silently.
+
+Use `systemctl --user status bob-<backend-id>.service` to inspect the service. Keep existing supervised deployments on their own update path. Setup does not automatically stop a running standalone backend just to add updates.
+
+### Add updates to an existing standalone installation
+
+Older guided installations ran chat without an update supervisor. A working chat connection therefore does not prove that updates are configured. `bob updates install --help` provides the supported conversion command. Run it from an independent terminal or maintenance process, **not a tool inside the backend being replaced**.
+
+Use the existing state directory, listener/TLS or loopback-proxy arrangement and source checkout. Build and test that checkout first without discarding local changes. For example, for an existing loopback listener behind Tailscale Serve:
+
+```sh
+# Inspect the exact service and hash its unit file before approving replacement.
+systemctl --user cat bob-YOUR-BACKEND-ID.service
+sha256sum ~/.config/systemd/user/bob-YOUR-BACKEND-ID.service
+
+/path/to/node /path/to/Bob/dist/cli.js --state /existing/bob-state updates install \
+  --source /path/to/Bob --origin http://127.0.0.1:49158 \
+  --endpoint https://YOUR-MACHINE.YOUR-TAILNET.ts.net:9443 \
+  --host 127.0.0.1 --port 49158 \
+  --replace-standalone --expected-unit-sha256 EXACT-UNIT-FILE-SHA256
+```
+
+For a direct HTTPS listener, preserve its address/port and add `--cert` / `--key`; use that HTTPS origin instead. Android build paths can be supplied with `--java-home`, `--android-home`, `--signing-properties` and `--reference-apk`. Do not paste file contents or passwords into arguments or chat.
+
+The installer packages an isolated runtime, validates the existing compatibility floor, preserves backend identity and data, and requires exact consent before replacing a service. It refuses foreign units, unapproved drop-ins, incompatible state and absent migration evidence. Existing drop-ins are preserved byte-for-byte; approving their aggregate digest requires `--expected-dropins-sha256`. A failed startup attempts to restore the original service and installation metadata—never an older chat database. An existing supervisor is not silently converted or replaced. A service with migration-origin state may need its original retained deployment journal; do not invent migration metadata or use another backend's journal.
+
+After conversion, verify the supervisor is online in update status. A queued job, a verified APK and an Android-approved installation remain separate milestones.
 
 ### Certificate renewal
 
-Tailscale HTTPS certificates expire; the installer does not create a renewal timer. Renew them with Tailscale's certificate workflow, retain private-key ownership and permissions, then restart the standalone service to reload them. Do not use a manual restart to replace a supervised backend.
+Tailscale HTTPS certificates expire; the installer does not create a renewal timer. Renew them with Tailscale's certificate workflow and retain private-key ownership and permissions. Reload an older standalone service through its existing service procedure. For a supervised installation, use its controlled maintenance/update path; do not manually replace its running release.
 
 Never publish keys, disable certificate checks or uninstall the Android app as a setup workaround.
 
@@ -68,15 +94,16 @@ Configure your model using one supported authentication path and an exact model 
 - API key: `node dist/cli.js --state /absolute/path/to/new-bob-state provider --provider openai --model YOUR_MODEL_ID` (or `anthropic`). Enter the key privately through stdin, never command arguments or chat.
 - ChatGPT subscription: `node dist/cli.js --state /absolute/path/to/new-bob-state login --provider openai --model YOUR_MODEL_ID`. Complete Bob's browser login on that machine.
 
-Provision Tailscale and valid certificate/key files, then start the backend:
+Provision Tailscale and valid certificate/key files, then install the supervised backend/update service:
 
 ```sh
-node dist/cli.js --state /absolute/path/to/new-bob-state serve \
+node dist/cli.js --state /absolute/path/to/new-bob-state updates install \
+  --source "$PWD" --origin https://YOUR-MACHINE.YOUR-TAILNET.ts.net:49158 \
   --host YOUR_TAILSCALE_IP --port 49158 \
   --cert /absolute/path/to/cert.crt --key /absolute/path/to/private.key
 ```
 
-Leave it running. In another terminal, from the same checkout:
+The user service now keeps the supervised backend running. From the same checkout, pair your phone:
 
 ```sh
 node dist/cli.js --state /absolute/path/to/new-bob-state connect \

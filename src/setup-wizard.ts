@@ -14,12 +14,13 @@ export type SetupPort={
 };
 /** Effects are explicit ports: the wizard never treats a failed/partial step as readiness. */
 export async function guidedSetup(defaultState:string,port:SetupPort){
- port.say('Bob guided setup — Linux backend only. Android build tools are not required.\nAgents run with this OS account’s permissions; model providers receive prompts and may charge for use.\nExisting state, credentials and services are preserved. No live model request is sent by this wizard.');
+ port.say('Bob guided setup — Linux backend with supervised updates. Android build tools are optional and are not required for backend updates.\nAgents run with this OS account’s permissions; model providers receive prompts and may charge for use.\nExisting state, credentials and services are preserved. No live model request is sent by this wizard.');
  const state=resolve(await port.ask('Backend state directory',defaultState));
  let inspection=await port.inspect(state);
  port.say(inspection.exists?`Existing Bob backend: ${inspection.backendId}\nState: ${state}`:`New backend location: ${state}`);
  let endpoint:string|undefined;
  if(inspection.managed||inspection.owned){
+  if(!inspection.managed)port.say('This running backend has no update supervisor. Pairing will not add one. For an explicit conversion from an independent maintenance process, see bob updates install --help and INSTALL.md.');
   port.say('This backend is already running or supervisor-managed. Setup will not reconfigure it, install another service, or restart it. Only verified pairing is offered.');
   if(!await port.confirm('Check its existing HTTPS endpoint and optionally pair a phone?'))return {state,status:'unchanged' as const};
   endpoint=validateEndpoint(await port.ask('Existing Tailscale HTTPS endpoint',inspection.endpoint));

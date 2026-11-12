@@ -26,7 +26,7 @@ function fixture(t: TestContext, options: {node?: string | false; checkout?: boo
   }
   writeCommand('uname', 'if [[ "$1" == -s ]]; then echo "${FAKE_OS:-Linux}"; else echo "${FAKE_ARCH:-x86_64}"; fi');
   writeCommand('id', 'echo "${FAKE_UID:-1000}"');
-  const fakeNode = `if [[ "\${1:-}" == --version ]]; then echo "\${FAKE_NODE_VERSION:-v24.22.1}"; elif [[ "\${2:-}" == setup && "\${3:-}" == --help ]]; then if [[ "\${GUIDED_CAPABILITY:-yes}" == yes ]]; then echo '  --guided Guided setup'; else echo '  --cwd Path'; fi; else if [[ "\${REQUIRE_CLI_TTY:-}" == yes ]]; then [[ -t 0 ]] || exit 95; fi; { printf 'node'; printf ' <%s>' "$@"; printf '\\n'; } >> "$TRACE"; fi`;
+  const fakeNode = `if [[ "\${1:-}" == --version ]]; then echo "\${FAKE_NODE_VERSION:-v24.22.1}"; elif [[ "\${2:-}" == setup && "\${3:-}" == --help ]]; then if [[ "\${GUIDED_CAPABILITY:-yes}" == yes ]]; then echo '  --guided Guided setup'; else echo '  --cwd Path'; fi; elif [[ "\${2:-}" == updates && "\${3:-}" == install && "\${4:-}" == --help ]]; then if [[ "\${UPDATES_CAPABILITY:-yes}" == yes ]]; then echo "  --source <checkout> Supervised updates"; else exit 1; fi; else if [[ "\${REQUIRE_CLI_TTY:-}" == yes ]]; then [[ -t 0 ]] || exit 95; fi; { printf 'node'; printf ' <%s>' "$@"; printf '\\n'; } >> "$TRACE"; fi`;
   if (options.node !== false) writeCommand('node', fakeNode);
   const npmBody = `{ printf 'npm'; printf ' <%s>' "$@"; printf '\\n'; } >> "$TRACE"
 if [[ "\${1:-}" == run && "\${2:-}" == build ]]; then mkdir -p dist; printf '// built fixture\\n' > dist/cli.js; fi`;
@@ -286,4 +286,10 @@ test('old compiled CLIs fail capability detection without rebuild or launcher pu
  assert.notEqual(result.status,0,result.output);assert.match(result.output,/does not support setup --guided/);
  assert.equal(existsSync(f.launcher),false);assert.deepEqual(readFileSync(join(f.source,'dist/cli.js')),before);
  assert.doesNotMatch(f.logs(),/^(npm|curl|sudo) |<--guided>/m);
+});
+
+test('a stale compiled CLI without update installation cannot publish a misleading launcher', opts, t => {
+ const f=fixture(t);const result=f.run('y\n',[],{UPDATES_CAPABILITY:'no'});
+ assert.notEqual(result.status,0,result.output);assert.match(result.output,/does not support supervised updates installation/);
+ assert.equal(existsSync(f.launcher),false);assert.doesNotMatch(f.logs(),/setup> <--guided>/);
 });

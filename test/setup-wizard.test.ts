@@ -45,3 +45,8 @@ test('an incomplete credential step does not advance or silently retry',async()=
  const f=fixture();f.port.configure=async()=>({...f.ready,configurationReady:false});
  await assert.rejects(guidedSetup('/state',f.port),/incomplete/);assert.ok(!f.calls.includes('network'));
 });
+
+test('running standalone setup explicitly explains that pairing does not install updates',async()=>{
+ const f=fixture({exists:true,backendId:id,owned:true,endpoint},[false]);await guidedSetup('/state',f.port);
+ assert.match(f.messages.join('\n'),/no update supervisor/);assert.match(f.messages.join('\n'),/bob updates install --help/);
+});

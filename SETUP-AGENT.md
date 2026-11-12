@@ -12,6 +12,6 @@ Read INSTALL.md and inspect the installer before running it.
 4. Keep credentials, private keys and pairing invitations out of chat, logs and Git. Let me enter secrets locally and complete account/Android approvals myself.
 5. Use authenticated HTTPS over Tailscale. Do not disable certificate checks or expose a public unauthenticated listener. Explain that agents use my backend account's OS permissions and configured models may process data externally.
 6. Use a trusted signed APK or follow INSTALL.md to build with my own signing key. Keep the same key for future updates; never uninstall an existing app to fix a signing mismatch.
-7. Keep an existing supervised deployment on its own update path. The guided installer creates a standalone user service; certificate renewal remains my responsibility.
+7. Keep an existing supervised deployment on its own update path. New guided installs include supervised backend updates; Android builds require separately configured existing tools/signing files. Never silently replace a running standalone service: use the explicit tested updates install conversion with its exact unit hash from an independent maintenance process. Certificate renewal remains my responsibility.
 8. Verify a real model reply, a harmless read-only task and phone reconnection. Report how this installation starts/stops, the chosen paths, remaining manual steps and anything not verified.
 ```

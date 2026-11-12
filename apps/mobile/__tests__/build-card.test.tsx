@@ -122,3 +122,69 @@ test('late install completion after backend switch is ignored, and a status erro
  expect(text()).toContain('Update status unavailable');expect(await AsyncStorage.getItem('pending-install:backend-id')).toBeNull();
  expect(NativeModules.BobFiles.installUpdate).toHaveBeenCalledTimes(1);
 });
+
+test('uninstalled updates show a readable local setup hint even without focus and never queue an install',async()=>{
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true} as Response);
+ await mount({enabled:false,reason:'not_installed'});
+ expect(text()).toContain('Updates not configured on this backend');
+ expect(text()).toContain('bob updates install --help');expect(text()).toContain('on the computer running this backend');
+ expect(text()).toContain('Nothing has been installed by this card');
+ expect(fetch).not.toHaveBeenCalled();expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();
+ await act(async()=>button('Refresh build status').props.onPress());expect(refresh).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+ ['not installed',{enabled:false},undefined,'Updates not configured on this backend'],
+ ['supervisor offline',{enabled:true,supervisorOnline:false},undefined,'Update supervisor offline'],
+ ['transport failure',{enabled:true,supervisorOnline:true},'Network request failed','Cannot reach update status'],
+] as const)('%s disables both build and stale APK install actions, including handler guards',async(_name,status,error,title)=>{
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true} as Response);
+ await act(async()=>{tree=Renderer.create(<BuildCard backend={backend} state={{...ready,...status}} error={error} focus onRefresh={refresh} onDismiss={dismiss}/>);});
+ expect(text()).toContain(title);
+ act(()=>button('Build options').props.onPress());
+ for(const name of ['Build app','Build app and backend','Install 2.0']){
+  expect(button(name).props.disabled).toBe(true);
+  await act(async()=>button(name).props.onPress());
+ }
+ expect(fetch).not.toHaveBeenCalled();expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();
+ if(error){expect(text()).toContain('last known status may be stale');expect(text()).not.toContain('Update supervisor offline');}
+});
+
+test('backend update service without Android configuration disables app builds, not an already verified APK',async()=>{
+ await mount({...ready,supervisorOnline:true,androidBuild:{configured:false}},true);
+ expect(text()).toContain('App builds not configured');expect(text()).toContain('backend update service is configured separately from app builds');
+ act(()=>button('Build options').props.onPress());
+ expect(button('Build app').props.disabled).toBe(true);expect(button('Build app and backend').props.disabled).toBe(true);
+ expect(button('Install 2.0').props.disabled).toBe(false);
+});
+
+test('offline pending receipt stays unknown and is retried only by an explicit tap after recovery',async()=>{
+ const pending={id:'original-request',action:'update',target:'android'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true} as Response);
+ await mount({enabled:true,supervisorOnline:false,jobs:[]},true);
+ expect(text()).toContain('build result is not confirmed');expect(text()).not.toContain('Build queued');
+ act(()=>button('Build options').props.onPress());
+ expect(button('Retry same build request').props.disabled).toBe(true);
+ await act(async()=>button('Retry same build request').props.onPress());expect(fetch).not.toHaveBeenCalled();
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBe(JSON.stringify(pending));
+ await act(async()=>tree!.update(<BuildCard backend={backend} state={{enabled:true,supervisorOnline:true,jobs:[]}} focus onRefresh={refresh} onDismiss={dismiss}/>));
+ expect(fetch).not.toHaveBeenCalled();expect(button('Retry same build request').props.disabled).toBe(false);
+ await act(async()=>button('Retry same build request').props.onPress());
+ expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toEqual(pending);
+ await act(async()=>tree!.update(<BuildCard backend={backend} state={{enabled:true,supervisorOnline:true,jobs:[{...pending,status:'complete',stage:'Complete'}]}} focus onRefresh={refresh} onDismiss={dismiss}/>));
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();
+});
+
+test.each(['rollback','update'])('retained %s backend request is never resent from the app card',async(action)=>{
+ const pending={id:'backend-request',action,target:'backend'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true} as Response);
+ await mount({enabled:true,supervisorOnline:true,jobs:[]},true);
+ expect(text()).toContain('will not be resent from this card');
+ act(()=>button('Build options').props.onPress());
+ expect(button('Retry same build request').props.disabled).toBe(true);
+ await act(async()=>button('Retry same build request').props.onPress());
+ expect(fetch).not.toHaveBeenCalled();expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBe(JSON.stringify(pending));
+});

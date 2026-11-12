@@ -49,6 +49,32 @@ cli
     );
     s.close();
   });
+const updates=cli.command('updates').description('Install the supervised backend update service; Android signing is optional and separate');
+updates.command('install')
+ .description('Install updates for an offline backend, or explicitly hand over its standalone user service from an independent maintenance process')
+ .requiredOption('--source <directory>','Bob source checkout used for future builds')
+ .requiredOption('--origin <url>','Local backend health origin, preserving existing TLS/proxy arrangement')
+ .option('--endpoint <url>','Trusted reachable backend origin for readiness verification')
+ .option('--host <ip>','Preserved loopback or Tailscale listener','127.0.0.1')
+ .option('--port <port>','Preserved backend listener port','49158')
+ .option('--home <directory>','Backend-scoped supervisor installation home')
+ .option('--current-cli <file>','Compiled runtime to package (defaults to source/dist/cli.js)')
+ .option('--cert <file>','Preserved TLS certificate file')
+ .option('--key <file>','Preserved TLS private-key file')
+ .option('--java-home <directory>','Existing Java installation for Android builds')
+ .option('--android-home <directory>','Existing licensed Android SDK')
+ .option('--signing-properties <file>','Existing private Android signing properties; never regenerated')
+ .option('--reference-apk <file>','Trusted installed-app signing reference APK')
+ .option('--expected-dropins-sha256 <digest>','Explicit digest approving the exact preserved service drop-ins')
+ .option('--retained-journal-home <directory>','Existing valid migration evidence, if required by this state')
+ .option('--replace-standalone','Explicitly stop and replace this backend’s standalone user service',false)
+ .option('--expected-unit-sha256 <digest>','Required exact original service-file SHA-256 for replacement')
+ .action(async o=>{
+  const {installUpdatesOnHost}=await import('./maintenance-setup.js');
+  const result=await installUpdatesOnHost({...o,stateDir:resolve(cli.opts().state),port:Number(o.port)});
+  console.log(JSON.stringify(result));
+  console.log(result.androidConfigured?'Supervised backend is ready. Android builds retain signing verification; installation still requires your approval.':'Supervised backend is ready. Android builds need Java, the Android SDK, existing signing properties and a trusted reference APK; no signing key was generated.');
+ });
 cli
   .command("provider")
   .requiredOption("--model <id>")

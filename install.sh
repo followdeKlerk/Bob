@@ -242,6 +242,9 @@ confirm 'Create/reuse this launcher and enter guided setup?'
 if ! setup_help=$("$node" "$source_dir/dist/cli.js" setup --help </dev/null 2>/dev/null) || ! grep -Eq -- '(^|[[:space:]])--guided([[:space:]]|$)' <<< "$setup_help"; then
   die 'This compiled CLI does not support setup --guided. No launcher was created or changed. Upgrade this checkout using its existing maintenance procedure, or select a separate fresh checkout with --source-dir; never rebuild live artifacts blindly.'
 fi
+if ! updates_help=$("$node" "$source_dir/dist/cli.js" updates install --help </dev/null 2>/dev/null) || ! grep -Fq -- '--source' <<< "$updates_help"; then
+  die 'This compiled CLI does not support supervised updates installation. No launcher was created or changed. Select a current separate checkout with --source-dir; never rebuild a running deployment blindly.'
+fi
 if [[ -e "$launcher" || -L "$launcher" ]]; then
   [[ -f "$launcher" && ! -L "$launcher" && $(cat -- "$launcher") == "$(launcher_text)" ]] || die "Refusing to replace existing launcher: $launcher"
 else
