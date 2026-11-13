@@ -4,6 +4,8 @@ Bug reports and focused pull requests are welcome. For a substantial feature or 
 
 For setup and everyday use, start with [installation](INSTALL.md) and [features](FEATURES.md). Report vulnerabilities through [SECURITY.md](SECURITY.md), not public bug reports.
 
+For a cross-component change, read the [architecture guide](ARCHITECTURE.md) first: it maps execution flow, state ownership, recovery and trust boundaries to the relevant source and tests.
+
 ## Repository map
 
 | Path | Purpose |

@@ -10,7 +10,7 @@ I built Bob because I wanted to use my agents from my phone, not just from a ter
 
 I use it myself, and it keeps changing as I find things I need. A guided Linux installer can check your computer, install missing backend prerequisites with your permission, help configure your model and HTTPS connection, and offer a QR code to pair your phone. You still bring your own model account and Android app; there's no hosted Bob service.
 
-[Install](INSTALL.md) · [Features](FEATURES.md) · [Contribute & repository map](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Install](INSTALL.md) · [Features](FEATURES.md) · [Contribute & repository map](CONTRIBUTING.md) · [Architecture](ARCHITECTURE.md) · [Security](SECURITY.md)
 
 ## More than a remote terminal
 

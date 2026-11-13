@@ -4,7 +4,7 @@ import {existsSync, readFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 
 // Structural guards, not a claim that a model understands or obeys the manual.
-const guides = ['README.md', 'CONTRIBUTING.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
+const guides = ['README.md', 'ARCHITECTURE.md', 'CONTRIBUTING.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
   'apps/mobile/README.md', 'packages/memory/README.md', 'assets/learning/README.md',
   'assets/learning/memory-threats/README.md', 'apps/mobile/components/ui/README.md',
   'apps/mobile/android/app/src/main/assets/fonts/README.md',
@@ -54,6 +54,23 @@ test('feature guide retains the main user workflows', () => {
   }
   assert.doesNotMatch(read('FEATURES.md'), /\/home\/ndk\/|defineTool\(|source SHA-256|```(?:json|typescript|ts)\b/);
 });
+test('architecture guide retains ownership, lifecycle and privacy orientation', () => {
+  const text = read('ARCHITECTURE.md'), headings = anchors(text);
+  for (const section of ['system-shape', 'code-map', 'from-message-to-reply', 'state-ownership',
+    'execution-recovery-and-updates', 'delegation-and-connected-machines', 'knowledge-and-background-automation',
+    'device-and-interactive-boundaries', 'before-changing-a-subsystem', 'public-documentation-and-privacy']) {
+    assert.ok(headings.has(section), 'Missing architecture topic: ' + section);
+  }
+  for (const match of text.matchAll(/`((?:src|test|apps|packages)\/[^`\n]+)`/g)) {
+    assert.ok(existsSync(match[1]!), 'Missing architecture source reference: ' + match[1]);
+  }
+  assert.ok(JSON.parse(read('package.json')).files.includes('ARCHITECTURE.md'), 'Ship the linked architecture guide');
+  assert.match(read('README.md'), /\]\(ARCHITECTURE\.md\)/);
+  assert.match(read('CONTRIBUTING.md'), /\]\(ARCHITECTURE\.md\)/);
+  // Narrow tripwires, not a complete privacy audit. Keep examples generic.
+  assert.doesNotMatch(text, /\/(?:home|Users)\/[^\s/]+|[a-z0-9.-]+\.ts\.net\b|\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----/i);
+});
+
 test('documentation guards detect drift rather than silently passing', () => {
   assert.equal(linkErrors('README.md', '[bad](nonexistent-documentation-target.md)').length, 1);
   assert.equal(linkErrors('README.md', '<img src="nonexistent-showcase.png">').length, 1);

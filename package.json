@@ -34,6 +34,7 @@
   "files": [
     "dist/*.js",
     "README.md",
+    "ARCHITECTURE.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
     ".mise.toml",
