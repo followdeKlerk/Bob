@@ -5,7 +5,7 @@ import {Bell,Plus} from 'lucide-react-native';
 import {RoundAction,SectionHeading,SectionActions,SectionBody,SectionSegments,SettingsGroup,SettingsRow} from '../components/section-ui';
 import {Button} from '../components/ui/button';
 import {Tabs,TabsList,TabsTrigger} from '../components/ui/tabs';
-import {colors} from '../theme';
+import {colors,menuRadii} from '../theme';
 import {APP_UI_FONT_FAMILY} from '../typography';
 import {EdgeFade} from '../components/edge-fade';
 import {ThemeContext,tokens} from '../theme-context';
@@ -34,7 +34,7 @@ test('shared headings wrap text and icon actions keep accessible labels and 48-p
 test('only an active settings operation gets a miniature spinner and busy state',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<View><SettingsRow title="Fetching" icon={Bell} loading onPress={()=>{}}/><SettingsRow title="Static" icon={Bell} onPress={()=>{}}/></View>);});
- const rows=tree.root.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
+ const rows=tree.root.findAllByType(require('../components/touch-target').TouchTarget).filter(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
  expect(rows[0].props).toMatchObject({disabled:true,accessibilityState:{busy:true}});
  expect(rows[0].findAllByType(ActivityIndicator)).toHaveLength(1);
  expect(rows[0].findByType(ActivityIndicator).props.size).toBe('small');
@@ -53,7 +53,7 @@ test('legacy compact flag cannot introduce inconsistent header control geometry'
  await act(async()=>tree.unmount());
 });
 
-test('headers use the Reusables Button asset and keep return separate from right actions; settings groups stay unboxed',async()=>{
+test('headers use the Reusables Button asset and keep return separate from right actions; settings groups use a softly rounded panel',async()=>{
  const {menuChrome}=require('../theme');let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<View><SectionHeading title="Schedules" subtitle="This workstation"/><SectionActions onBack={()=>{}}><RoundAction label="Refresh" icon={Plus} onPress={()=>{}}/><RoundAction label="Create" icon={Plus} primary onPress={()=>{}}/></SectionActions><SettingsGroup title="Group"><Text>Information</Text></SettingsGroup></View>);});
  const actions=tree.root.findByProps({testID:'section-footer-actions'});
@@ -61,7 +61,7 @@ test('headers use the Reusables Button asset and keep return separate from right
  expect(actions.findAllByType(Button).map(node=>node.props.accessibilityLabel)).toEqual(['Refresh','Create']);
  expect(actions.findAllByProps({accessibilityLabel:'Back to previous menu'})).toHaveLength(0);
  const group=tree.root.findByType(SettingsGroup);
- expect(group.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===16&&!style?.borderWidth;})).toBe(true);
+ expect(group.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderRadius===menuRadii.card&&style.backgroundColor===colors.panel&&style.borderWidth===1&&style.borderColor===colors.subtle;})).toBe(true);
  const refresh=actions.findAll(node=>node.props.accessibilityRole==='button'&&typeof node.props.onPress==='function')[0];
  expect(actions.findAllByType(Button).map(node=>node.props.variant)).toEqual(['outline','outline']);
  expect(StyleSheet.flatten(refresh.props.style)).toMatchObject({width:48,height:48,borderRadius:24});
@@ -208,4 +208,40 @@ test.each(['dark','light'] as const)('%s settings place long values beneath the 
    expect(StyleSheet.flatten(text.props.style).maxWidth).toBeUndefined();expect(text.props.numberOfLines).toBeUndefined();expect(text.props.allowFontScaling).not.toBe(false);
   }
  }finally{await act(async()=>tree.unmount());}
+});
+
+
+test.each(['dark','light'] as const)('%s grouped rows retain mounted controls through theme/value updates and conditional siblings',async scheme=>{
+ let mounts=0,unmounts=0;const press=jest.fn();
+ function StableIcon(){React.useEffect(()=>{mounts++;return()=>{unmounts++;};},[]);return null;}
+ const render=(extra:boolean,value:string,mode:'dark'|'light')=><ThemeContext.Provider value={tokens[mode]}><SettingsGroup title="Preferences">
+  {extra&&<SettingsRow key="extra" title="Voice" icon={Bell} onPress={press}/>}
+  <SettingsRow key="stable" title="Appearance" value={value} valuePlacement="trailing" icon={StableIcon as unknown as typeof Bell} onPress={press}/>
+  <SettingsRow key="permissions" title="Permissions" value="Android permission warnings must remain fully readable even at large text sizes" icon={Bell} onPress={press}/>
+ </SettingsGroup></ThemeContext.Provider>;
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(render(false,'System',scheme));});
+ try{
+  const row=tree.root.findAllByType(SettingsRow).find(node=>node.props.title==='Appearance')!,target=row.findByType(require('../components/touch-target').TouchTarget);
+  for(const [extra,value,mode] of [[true,'Dark','dark'],[false,'Light','light'],[true,'System',scheme]] as const){
+   await act(async()=>tree.update(render(extra,value,mode)));
+   expect(tree.root.findAllByType(SettingsRow).find(node=>node.props.title==='Appearance')).toBe(row);
+   expect(row.findByType(require('../components/touch-target').TouchTarget)).toBe(target);
+   expect(mounts).toBe(1);expect(unmounts).toBe(0);
+   expect(target.props.accessibilityValue).toEqual({text:value});
+   const panel=tree.root.findByProps({testID:'settings-group-body'});
+   expect(StyleSheet.flatten(panel.props.style)).toMatchObject({backgroundColor:tokens[mode].colors.panel,borderRadius:menuRadii.card,borderWidth:1,borderColor:tokens[mode].colors.subtle});
+   const separators=tree.root.findAllByType(View).filter(node=>node.props.testID==='settings-row-separator');
+   expect(separators).toHaveLength(extra?2:1);
+   for(const divider of separators)expect(StyleSheet.flatten(divider.props.style)).toMatchObject({position:'absolute',left:44,right:0,height:StyleSheet.hairlineWidth,backgroundColor:tokens[mode].colors.subtle});
+   for(const text of tree.root.findAllByType(Text)){
+    expect(text.props.allowFontScaling).not.toBe(false);expect(text.props.numberOfLines).toBeUndefined();expect(text.props.maxFontSizeMultiplier).toBeUndefined();expect(text.props.adjustsFontSizeToFit).not.toBe(true);
+   }
+   const shape=StyleSheet.flatten(target.props.style);
+   expect(shape.minHeight).toBeGreaterThanOrEqual(48);expect(shape.height).toBeUndefined();expect(shape.maxHeight).toBeUndefined();
+   act(()=>target.props.onPress());
+  }
+  expect(press).toHaveBeenCalledTimes(3);
+ }finally{await act(async()=>tree.unmount());}
+ expect(unmounts).toBe(1);
 });

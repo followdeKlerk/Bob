@@ -4,7 +4,7 @@ import {existsSync, readFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 
 // Structural guards, not a claim that a model understands or obeys the manual.
-const guides = ['README.md', 'ARCHITECTURE.md', 'CONTRIBUTING.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
+const guides = ['README.md', 'ARCHITECTURE.md', 'EXTENSIONS.md', 'CONTRIBUTING.md', 'INSTALL.md', 'SETUP-AGENT.md', 'FEATURES.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
   'apps/mobile/README.md', 'packages/memory/README.md', 'assets/learning/README.md',
   'assets/learning/memory-threats/README.md', 'apps/mobile/components/ui/README.md',
   'apps/mobile/android/app/src/main/assets/fonts/README.md',
@@ -47,7 +47,7 @@ test('maintained documentation links and headings resolve locally', () => {
 test('feature guide retains the main user workflows', () => {
   const headings = anchors(read('FEATURES.md'));
   for (const section of ['app-navigation', 'conversation-controls', 'models-and-conversation-settings',
-    'files-and-web', 'notes', 'skills-and-automatic-learning', 'memory', 'history-and-connected-agents',
+    'tools-and-integrations', 'files-and-web', 'notes', 'skills-and-automatic-learning', 'memory', 'history-and-connected-agents',
     'subagents', 'phone-tools', 'phone-location', 'keep-connected', 'interactive-views', 'read-aloud',
     'notifications', 'scheduling', 'app-diagnostics', 'updates']) {
     assert.ok(headings.has(section), 'Missing user workflow: ' + section);
@@ -97,4 +97,16 @@ test('outdated showcase media stay out of the repository guides', () => {
     assert.equal(existsSync('assets/showcase/' + name), false, 'Outdated capture: ' + name);
   }
   for (const guide of guides) assert.ok(!read(guide).includes('assets/showcase/'), guide + ' links to the retired showcase');
+});
+
+
+test('extension guide is shipped and keeps executable authority and lifecycle claims explicit',()=>{
+ const text=read('EXTENSIONS.md');
+ assert.ok(JSON.parse(read('package.json')).files.includes('EXTENSIONS.md'));
+ assert.match(read('CONTRIBUTING.md'),/\]\(EXTENSIONS\.md\)/);
+ assert.match(text,/not a sandbox/);assert.match(text,/not proof/);
+ assert.match(text,/--trust-backend-code/);assert.match(text,/--backup/);
+ assert.match(text,/stateVersion/);assert.match(text,/protected stdin/);
+ for(const match of text.matchAll(/`((?:src|test|apps|packages)\/[^`\n]+)`/g))assert.ok(existsSync(match[1]!),`Missing extension source reference: ${match[1]}`);
+ assert.doesNotMatch(text,/\/(?:home|Users)\/[^\s/]+|[a-z0-9.-]+\.ts\.net\b|-----BEGIN [A-Z ]*PRIVATE KEY-----/i);
 });

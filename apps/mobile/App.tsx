@@ -1,6 +1,11 @@
+import {MenuTheme,useMenuTheme} from './menu-theme';
+import {useSessionShell,type SessionShell,type SessionDestination} from './use-session-shell';
+import {sessionKey,type SessionTarget} from './retained-sessions';
+import {requestBackend,type Backend} from './use-mobile-runtime';
 import {TerminalScreen} from './components/terminal-screen';
+import {BtwSheet} from './components/btw-sheet';
+import {btwCommand} from './btw';
 import {menuButtonChrome} from './menu-button-style';
-import {recoverBackgroundOutbox,notificationReplyBarriers} from './recover-background-outbox';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert} from './components/schedules-screen';
 import {Text,TextInput} from './components/app-text';
 import {FileAttachment} from './components/file-attachment';
@@ -10,8 +15,7 @@ import {emptyConversationMessage} from './empty-conversation';
 import {readOnlyProfile,conversationProfileRecord,conversationReadOnlyMessage,useConversationProfile,type ChatProfile} from './retired-chat-profile';
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
-import {noteLoadedEntries} from './stream-diagnostics';
-import {stopSpeech,openSpeechSettings} from './speech';
+import {openSpeechSettings} from './speech';
 import 'react-native-get-random-values';
 import './global.css';
 import Animated from 'react-native-reanimated';
@@ -19,47 +23,48 @@ import {Button as KitButton} from './components/ui/button';
 import {Text as KitText} from './components/ui/text';
 import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, X} from 'lucide-react-native';
 import {menuRadii,themed,useTheme,useThemedValue} from './theme';
-import {ConversationSettingsDrafts} from './conversation-settings-draft';
 import {surfaceAnchors} from './surface-placement';
-import {replyOutputPlacement,replyOutputRows,withLiveResponse,type ReplyEntry} from './chat-replies';
+import {replyOutputPlacement,replyOutputRows,type ReplyEntry} from './chat-replies';
 import {ChatMotionProvider} from './chat-motion';
+import {useTranscriptLayout,TranscriptGaps,TranscriptSeparator} from './transcript-layout';
+import {AppMotionProvider} from './app-motion';
+import {PebblePresence} from './components/pebble-presence';
+import {composerActivity} from './composer-activity';
+import {MotionSurface,PersistentMotionSurface} from './components/motion-surface';
 import {InlineSurface} from './components/inline-surface';
 import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {ThemeProvider} from './theme-provider';
 import {AppearanceSettings} from './components/appearance-settings';
+import {CacheSettings} from './components/cache-settings';
+import {ToolsScreen} from './components/tools-screen';
+import {LibraryCard,SkillLibraryList} from './components/library-sections';
+import {cacheGeneration,readChatListCache,writeChatListCache} from './download-cache';
 import {SettingsHome,SETTINGS_PAGES} from './components/settings-home';
 import {SettingsGroup,SettingsRow,SectionHeading,SectionActions,SectionBody,RoundAction} from './components/section-ui';
-import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Blocks,Users,Settings as SettingsIcon} from 'lucide-react-native';
+import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Users,BookOpen,FileText,Library,Settings as SettingsIcon} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {type BottomDestination} from './components/bottom-tabs';
 import {ChatNavigation} from './components/chat-navigation';
 import {menuDestination} from './menu-navigation';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
+import {workstationLabel,cleanWorkstationAlias} from './workstation-label';
+import {WorkstationAliasEditor} from './components/workstation-alias-editor';
 import {useAgentOverview,type AgentSession,type OverviewAgent,type SessionFilter} from './use-agent-overview';
 import {BuildCard} from './components/build-card';
 import {LiveStatus} from './components/live-status';
 import {HindsightActivity,AgentReportActivity,LearningActivity} from './components/passive-activity';
 import {useBuildStatus} from './use-build-status';
-import {MessageOutbox,visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
-import {OutboxDelivery,requireDeliveryDevice} from './outbox-delivery';
-import {BackgroundOutbox,type BackgroundPort} from './background-outbox';
-import {responseData} from './network-policy';
+import {visibleOutgoing,mergeOutgoing,outgoingAnchor,outgoingLabel,transcriptKey,type OutgoingMessage} from './message-outbox';
 import {QuestionCard,type Question} from './components/question-card';
 import {NotesScreen} from './components/notes-screen';
 import {DraftInput,composerTransition} from './components/draft-input';
 import {SkillPicker} from './components/skill-picker';
 import {skillQuery,pickerRequest} from './skill-picker';
-import {ComposerStatus} from './components/composer-status';
-import {composerActivity} from './composer-activity';
 import {useBackNavigation} from './use-back-navigation';
-import {usePhoneTools} from './phone-tools';
 import {PhoneToolsSettings} from './components/phone-tools-settings';
-import {useKeepConnected} from './keep-connected';
 import {KeepConnectedSettings} from './components/keep-connected-settings';
-import {useAppDiagnostics,copyAppDiagnostics} from './app-diagnostics';
-import {useUpdateNotifications} from './use-update-notifications';
-import {usePhoneLocation} from './use-phone-location';
+import {copyAppDiagnostics} from './app-diagnostics';
 import {ModelContent} from './components/model-content';
 import {ChatBubble} from './components/chat-bubble';
 import {PeerAdmission} from './components/peer-admission';
@@ -72,10 +77,10 @@ import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults} from './tool-results';
 import {useTranscriptLiveTools} from './transcript-live-tools';
-import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry,chatEntryGap} from './chat-presentation';
+import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -98,7 +103,6 @@ import {
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
-import {syncConnectedNetwork} from './connected-network';
 import {reuseSnapshotEntries} from './snapshot-cache';
 import {snapshotStream,type SnapshotStream,type SnapshotLifecycle} from './snapshot-stream';
 import {useStoredHistory} from './stored-history';
@@ -106,8 +110,7 @@ import {readHistoryCache} from './history-cache';
 import {snapshotPersistence} from './snapshot-persistence';
 import {useKeyboardInset} from './keyboard-inset';
 import { v4 as uuid } from 'uuid';
-import { PairingInvitation, Message, Attachment, TransferLimits, InteractiveSummary, McpConnection, NativeWork, ModuleInfo } from '../../src/contracts';
-type Backend = { backendId: string; endpoint: string; name: string };
+import { PairingInvitation, Message, Attachment, TransferLimits, InteractiveSummary, NativeWork } from '../../src/contracts';
 type Entry = ImageAttachmentRow;
 type Chat = { id: number; meta?: { title: string; pinned?:boolean;archived?:boolean;trashed?:boolean;profile?:ChatProfile }; owner?: {conversationId?:number;taskId?:number} };
 // A list/metadata refresh may omit a historical immutable profile. Keep that
@@ -158,11 +161,21 @@ function textOf(value: unknown): string {
       .join('\n');
   return JSON.stringify(value);
 }
-function Main() {
+function SessionMain({target,active,command,destination,shell}:{target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell}) {
+  const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
+  const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
+  const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
+  const activeVisit=useRef({active});if(activeVisit.current.active!==active)activeVisit.current={active};
+  const visit=activeVisit.current;
+  const mounted=useRef(true);
+  useLayoutEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  const isVisible=()=>mounted.current&&activeVisit.current===visit&&visit.active;
+  const setChat=(id:number|undefined)=>{if(backend&&isVisible())shell.selectSession({backendId:backend.backendId,chat:id});};
+
  const {colors,scheme,shadows}=useTheme();
  const styles=useThemedValue(stylesTheme);
+ const menuTheme=useMenuTheme(),menuStyles=stylesTheme(menuTheme),menuColors=menuTheme.colors;
 
-  useAppDiagnostics();
   const insets = useSafeAreaInsets();
   const windowSize = useWindowDimensions();
   const [visualWidth,setVisualWidth] = useState(0);
@@ -173,13 +186,13 @@ function Main() {
   const [actionsMore,setActionsMore]=useState(false);
   const [attachmentPicker,setAttachmentPicker]=useState<{scope:string;tab:'gallery'|'files';limit:number}>();
   const [drawingEditor,setDrawingEditor]=useState(false);
-  const keyboardInset = useKeyboardInset();
+  const observedKeyboardInset = useKeyboardInset();
+  const retainedKeyboard=useRef(observedKeyboardInset);if(active)retainedKeyboard.current=observedKeyboardInset;
+  const keyboardInset=active?observedKeyboardInset:retainedKeyboard.current;
   const [composerHeight,setComposerHeight]=useState(84);
   const [composerRowHeight,setComposerRowHeight]=useState(50);
-  const [backends, setBackends] = useState<Backend[]>([]),
-    [backend, setBackend] = useState<Backend>(),
-    [chat, setChat] = useState<number>(),
-    [chats, setChats] = useState<Chat[]>([]),
+  const [aliasTarget,setAliasTarget]=useState<Backend>();
+  const [chats, setChats] = useState<Chat[]>([]),
     [chatCursor,setChatCursor]=useState<string>(),
 
     [draft, setDraft] = useState(''),
@@ -202,6 +215,7 @@ function Main() {
     [skillText, setSkillText] = useState(''),
     [skillDescription, setSkillDescription] = useState(''),
     [skillEnabled, setSkillEnabled] = useState(true),
+    [skillEditing,setSkillEditing] = useState(false),
     [templateName, setTemplateName] = useState(''),
     [templateText, setTemplateText] = useState(''),
     [chatInstructions, setChatInstructions] = useState(''),
@@ -210,64 +224,26 @@ function Main() {
     [todoText, setTodoText] = useState(''),
     [surfaces, setSurfaces] = useState<{backendId:string; value:ReturnType<typeof InteractiveSummary.parse>}[]>([]),
     [surfaceError, setSurfaceError] = useState(''),
-    [mcpConnections, setMcpConnections] = useState<ReturnType<typeof McpConnection.parse>[]>([]),
-    [moduleList,setModuleList]=useState<ReturnType<typeof ModuleInfo.parse>[]>([]),
-    [networkErrors,setNetworkErrors]=useState<string[]>([]),
-    [mcpId,setMcpId]=useState(''),[mcpEndpoint,setMcpEndpoint]=useState(''),[mcpTools,setMcpTools]=useState(''),[mcpEnabled,setMcpEnabled]=useState(false),
     [models, setModels] = useState<any[]>([]),
     [apiKey, setApiKey] = useState(''),
     [modelId, setModelId] = useState(''),
     [providerName,setProviderName]=useState('openai'),
-    [notifyEnabled, setNotifyEnabled] = useState(true),
     [pending, setPending] = useState<string>();
-  const [settingsDrafts]=useState(()=>new ConversationSettingsDrafts());
+  const [btwOpen,setBtwOpen]=useState(false),[btwIntent,setBtwIntent]=useState<{scope:string;id:string;text:string}>();
   const sectionTrail=useRef<string[]>([]);
-  const [outbox]=useState(()=>new MessageOutbox());
-  const [backgroundOutbox]=useState(()=>NativeModules.BobOutbox?new BackgroundOutbox(NativeModules.BobOutbox as BackgroundPort,async id=>{const value=await Keychain.getGenericPassword({service:`bob.${id}`});return value?value.password:undefined;}):undefined);
-  const [outgoing,setOutgoing]=useState(outbox.items),[outboxError,setOutboxError]=useState<string>();
-  const [backgroundReady,setBackgroundReady]=useState<string[]>([]);
-  useEffect(()=>{if(!backgroundOutbox)return;let current=true;setBackgroundReady([]);for(const b of backends)void backgroundOutbox.prepare(b.backendId).then(()=>{if(!current)return;if(backgroundOutbox.ready(b.backendId))setBackgroundReady(ids=>[...ids,b.backendId]);else if(selectedBackend.current===b.backendId)setStatus('Pair again: device credential missing');}).catch(()=>{if(current&&selectedBackend.current===b.backendId)setStatus('Pair again: device credential unavailable');});return()=>{current=false;};},[backgroundOutbox,backends]);
+  // Late library actions must never replace a newer editor draft or visit.
+  const skillEditorEpoch=useRef(0);
+  const sectionScroll=useRef<React.ComponentRef<typeof ScrollView>>(null);
+  // Keep the host mounted, but never inherit another destination's offset.
+  useLayoutEffect(()=>{sectionScroll.current?.scrollTo({y:0,animated:false});},[screen]);
   const sendReady=!backgroundOutbox||backgroundReady.includes(backend?.backendId??'');
-  useEffect(()=>{
-    if(!backgroundOutbox)return;let current=true,running=false,again=false;
-    const recover=async()=>{if(!current)return;if(running){again=true;return;}running=true;
-      try{do{again=false;await recoverBackgroundOutbox(outbox,backgroundOutbox,()=>current);}while(current&&again);}
-      catch{if(current)setOutboxError('Unable to recover background message queue');}
-      finally{running=false;}
-    };
-    void recover();
-    const state=AppState.addEventListener('change',value=>{if(value==='active')void recover();});
-    const focus=Platform.OS==='android'?AppState.addEventListener('focus',()=>{void recover();}):undefined;
-    const changes=DeviceEventEmitter.addListener('BobOutboxChanged',()=>{void recover();});
-    return()=>{current=false;state.remove();focus?.remove();changes.remove();};
-  },[backgroundOutbox,outbox]);
-  useEffect(()=>{const sync=()=>{setOutgoing(outbox.items);setOutboxError(outbox.storageError);};sync();return outbox.subscribe(sync);},[outbox]);
-  useEffect(()=>{
-    const native=NativeModules.BobOutbox;if(!native?.setNotificationReplyBarriers)return;
-    let current=true;
-    const sync=()=>{if(!current||!outbox.isReady)return;for(const value of backends){
-      // Invoke in the outbox publication callback, before its asynchronous JS persistence.
-      void native.setNotificationReplyBarriers(value.backendId,notificationReplyBarriers(outbox.items,value.backendId))
-        .catch(()=>{if(current)setOutboxError('Notification replies are waiting for foreground queue recovery');});
-    }};
-    const unsubscribe=outbox.subscribe(sync);
-    void outbox.whenReady().then(sync).catch(()=>{});
-    return()=>{current=false;unsubscribe();};
-  },[outbox,backends]);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
   const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-composerHeight-16));
-  const [draftAttachments,setDraftAttachments]=useState<Record<string,DraftAttachment[]>>({});
-  useUpdateNotifications(backends,async backendId=>{
-    await outbox.whenReady();
-    if(NativeModules.BobOutbox?.setNotificationReplyBarriers)await NativeModules.BobOutbox.setNotificationReplyBarriers(backendId,notificationReplyBarriers(outbox.items,backendId));
-  });
-  const build=useBuildStatus(backend);
-  const phoneLocation=usePhoneLocation(backend);
-  const keepConnected=useKeepConnected(backend,chat,screen==='Connection');
+  const build=useBuildStatus(active?backend:undefined);
   const selectedBackend = useRef('');
-  selectedBackend.current = backend?.backendId ?? '';
+  selectedBackend.current = active?backend?.backendId??'':'';
   const identity = useRef(''),
     stream = useRef<SnapshotStream | null>(null),
     draftReady = useRef(false);
@@ -277,10 +253,9 @@ function Main() {
   const [draftLoadedVisit,setDraftLoadedVisit]=useState<object>(),[pendingLoadedVisit,setPendingLoadedVisit]=useState<object>();
   const [draftError,setDraftError]=useScopedSnapshot<'load'|'save'>(scope);
   const [draftLoadAttempt,setDraftLoadAttempt]=useState(0);
-  const draftWrites=useRef<Promise<void>>(Promise.resolve()),draftWriteVersion=useRef(0);
+  const draftWriteVersion=useRef(0);
   const renderedDraftWriteVersion=draftWriteVersion.current;
   const composerReady=!!scope&&draftLoadedVisit===currentDraftVisit&&pendingLoadedVisit===currentDraftVisit;
-  useEffect(()=>{void stopSpeech();return()=>{void stopSpeech();};},[scope,child,screen]);
   identity.current = scope;
   const [view,setView]=useScopedSnapshot<Snapshot>(scope),[childView,setChildView]=useScopedSnapshot<Snapshot>(`${scope}:child:${child}`);
   const listedChat=chatListBackend===backend?.backendId?chats.find(item=>item.id===chat):undefined;
@@ -293,9 +268,15 @@ function Main() {
   const readOnly=readOnlyProfile(conversationProfile.profile);
   const ordinaryChat=conversationProfile.known&&!readOnly;
   const readOnlyMessage=conversationReadOnlyMessage(conversationProfile.profile);
-  const writableConversation=useRef({scope,ordinaryChat});writableConversation.current={scope,ordinaryChat};
-  const canWriteConversation=(current=scope)=>writableConversation.current.scope===current&&writableConversation.current.ordinaryChat;
-  const phoneTools=usePhoneTools({backend,chat:ordinaryChat?chat:undefined,requests:ordinaryChat?view?.docs['bob.phone-tools']?.requests:undefined,request});
+  const writableConversation=useRef({scope,ordinaryChat});writableConversation.current={scope,ordinaryChat:ordinaryChat&&active};
+  const canWriteConversation=(current=scope)=>isVisible()&&writableConversation.current.scope===current&&writableConversation.current.ordinaryChat;
+  useEffect(()=>{
+    if(!active)return;
+    setNavigationOpen(false);setActions(false);setDrawer(false);
+    if(destination==='Chat'||destination==='Updates'){showChat();if(destination==='Updates')setUpdatesTarget(backend);return;}
+    if(destination==='Notes'||destination==='Settings'||destination==='Tools'){run(()=>openSection(destination,false));return;}
+    setScreen(destination==='Sessions'?'Agents':destination);
+  },[active,command]);
   const attachments=draftAttachments[scope]??[];
   const hasDraft=!!draft.trim()||attachments.length>0;
   const latestDraft=useRef(draft);latestDraft.current=draft;
@@ -305,16 +286,15 @@ function Main() {
   useEffect(()=>{if(!ordinaryChat){setModelPickerTarget(undefined);setDrawingEditor(false);setAttachmentPicker(undefined);setActions(false);}},[ordinaryChat]);
   useEffect(()=>{if(!actions)setActionsMore(false);},[actions]);
   useEffect(()=>setNavigationOpen(false),[scope,screen]);
-  useEffect(()=>{if(updatesTarget){if(selectedBackend.current!==updatesTarget.backendId)setChat(undefined);setBackend(updatesTarget);showChat();setDrawer(false);}},[updatesTarget]);
-  useEffect(()=>{NativeModules.BobNotifications.setReplyNotifications?.(notifyEnabled);},[notifyEnabled]);
-  useEffect(()=>{NativeModules.BobNotifications.setAppContext?.(backend?.backendId??'',screen==='Chat'&&!drawer?chat??0:0);},[backend?.backendId,chat,screen,drawer]);
+  useEffect(()=>{if(updatesTarget&&active){showChat();setDrawer(false);}},[updatesTarget]);
   const pendingOperations=useRef(new Map<string,string>());
-  const parentFollow=useChatFollow<Entry>(scope,true),childFollow=useChatFollow<Entry>(`${scope}:child:${child}`,true);
+  const parentFollow=useChatFollow<Entry>(scope,true,active),childFollow=useChatFollow<Entry>(`${scope}:child:${child}`,true,active);
   const parentList=parentFollow.list,childList=childFollow.list;
   const parentHistory=useStoredHistory(backend?.backendId,chat,(path,signal)=>request(path,'GET',undefined,backend,signal));
   const historyLatest=useRef(parentHistory);historyLatest.current=parentHistory;
   const childHistory=useStoredHistory(backend?.backendId,child,(path,signal)=>request(path,'GET',undefined,backend,signal));
   useEffect(()=>{if(updatesTarget)parentFollow.resume();},[updatesTarget]);
+  useEffect(()=>{skillEditorEpoch.current++;},[scope,screen]);
   useBackNavigation(()=>{
     if(navigationOpen){setNavigationOpen(false);return true;}
     if(actions){setActions(false);return true;}
@@ -323,48 +303,19 @@ function Main() {
     if(Keyboard.isVisible())return false;
     if(screen!=='Chat'){backSection();return true;}
     return false;
-  });
+  },active&&screen!=='Notes');
   async function sessionAction(id:string,action:SessionAction,title?:string){
     const b=backend;if(!b)throw Error('Select a workspace');
+    if(!isVisible())return;
+    const cacheEpoch=cacheGeneration();
     const patch=action==='rename'?{title}:action==='pin'?{pinned:true}:action==='unpin'?{pinned:false}:action==='archive'?{archived:true}:action==='unarchive'?{archived:false}:{trashed:false,archived:false};
     const result=await request(`chats/${id}${action==='delete'?'':'/metadata'}`,action==='delete'?'DELETE':'PUT',action==='delete'?undefined:patch,b);
-    if(selectedBackend.current!==b.backendId)return;
-    setChats(previous=>{const items=previous.map(item=>item.id===Number(id)?preserveReadOnlyProfile(item,{...item,meta:result.meta}):item);void AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items)).catch(()=>{});return items;});
-    if(action==='delete'&&chat===Number(id)){const next=chats.find(item=>item.id!==Number(id)&&!item.meta?.trashed&&!item.meta?.archived);setChat(next?.id);await AsyncStorage.setItem('selection',JSON.stringify({backendId:b.backendId,chat:next?.id}));}
+    if(!isVisible()||selectedBackend.current!==b.backendId)return;
+    setChats(previous=>{const items=previous.map(item=>item.id===Number(id)?preserveReadOnlyProfile(item,{...item,meta:result.meta}):item);void writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);return items;});
+    if(action==='delete'&&chat===Number(id)){const next=chats.find(item=>item.id!==Number(id)&&!item.meta?.trashed&&!item.meta?.archived);setChat(next?.id);}
   }
-  async function request(
-    path: string,
-    method = 'GET',
-    body?: unknown,
-    b = backend,
-    signal?:AbortSignal,
-    deliveryDeviceId?:string,
-  ) {
-    if (!b) throw Error('Select a backend');
-    const credential = await Keychain.getGenericPassword({
-      service: `bob.${b.backendId}`,
-    });
-    if(deliveryDeviceId!==undefined)requireDeliveryDevice(deliveryDeviceId,credential?credential.username:undefined);
-    if (!credential) throw Object.assign(Error('Pair again: device credential missing'),{httpStatus:401});
-    const deadline=signal?undefined:new AbortController();
-    const timeout=deadline?setTimeout(()=>deadline.abort(),20000):undefined;
-    try {
-    const r = await fetch(b.endpoint + '/v1/' + path, {
-      method,
-      headers: {
-        Authorization: 'Bearer ' + credential.password,
-        'x-bob-backend': b.backendId,
-        'content-type': 'application/json',
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal:signal??deadline?.signal,
-    });
-    return await responseData(r);
-    }finally{if(timeout)clearTimeout(timeout);}
-  }
-  const run = (f: () => Promise<void>) => {
-    void f().catch(e => Alert.alert('Bob', String(e.message ?? e)));
-  };
+  const request=(path:string,method='GET',body?:unknown,b=backend,signal?:AbortSignal)=>requestBackend(path,method,body,b,signal);
+  const run=(f:()=>Promise<void>)=>{if(isVisible())void f().catch(e=>{if(isVisible())Alert.alert('Bob',String(e.message??e));});};
   async function reconcilePending(b=backend,id=chat,current=scope) {
     if(!b||!id)return;
     const op=await AsyncStorage.getItem(`pending:${current}`);if(!op)return;
@@ -376,76 +327,15 @@ function Main() {
     if(identity.current!==current)return;
     setPending(undefined);if(original!==null&&latestDraft.current===original)setDraft('');setStatus('Admission confirmed');
   }
-  useEffect(()=>{
-    if(backends.length<2){setNetworkErrors([]);return;}
-    const lifetime=new AbortController();let busy=false;
-    const sync=async()=>{
-      if(busy||lifetime.signal.aborted)return;busy=true;
-      try{
-        const result=await syncConnectedNetwork(backends,async(path,method,value,b,signal)=>{
-          const requestAbort=new AbortController();
-          const abort=()=>requestAbort.abort();signal?.addEventListener('abort',abort);
-          if(signal?.aborted)requestAbort.abort();
-          const deadline=setTimeout(abort,20000);
-          try{return await request(path,method,value,b,requestAbort.signal);}
-          finally{clearTimeout(deadline);signal?.removeEventListener('abort',abort);}
-        },lifetime.signal);
-        if(!lifetime.signal.aborted)setNetworkErrors(result.errors);
-      }finally{busy=false;}
-    };
-    void sync();
-    const interval=setInterval(()=>{if(AppState.currentState==='active')void sync();},60000);
-    const listener=AppState.addEventListener('change',state=>{if(state==='active')void sync();});
-    return()=>{lifetime.abort();clearInterval(interval);listener.remove();};
-  },[backends]);
-  useEffect(() => {
-    void (async () => {
-      const list = JSON.parse(
-        (await AsyncStorage.getItem('backends')) ?? '[]',
-      ) as Backend[];
-      try{await NativeModules.BobNotifications.syncPushBackends?.(list.map(b=>b.backendId));}catch{/* A push scheduling failure must never block app hydration. */}
-      setBackends(list);
-      setNotifyEnabled((await AsyncStorage.getItem('notification-opt-in')) !== 'false');
-      const last = JSON.parse(
-        (await AsyncStorage.getItem('selection')) ?? 'null',
-      );
-      const notice=await NativeModules.BobPlatform.takeNotificationTarget();
-      const notificationBackend=notice?.screen==='updates'||(Number.isSafeInteger(notice?.conversationId)&&notice.conversationId>0)?list.find(b=>b.backendId===notice.backendId):undefined;
-      const selected =
-        notificationBackend??list.find(b => b.backendId === last?.backendId) ?? list[0];
-      if (selected) {
-        setBackend(selected);
-        if(notificationBackend&&notice.screen==='updates')setUpdatesTarget(notificationBackend);
-        if(notificationBackend&&notice.screen!=='updates')setChat(notice.conversationId);else if (last?.backendId === selected.backendId) setChat(last.chat);
-      }
-    })();
-    return () => stream.current?.close();
-  }, []);
-  useEffect(()=>{
-    const listener=DeviceEventEmitter.addListener('BobNotificationOpen',()=>{
-      void(async()=>{
-        const notice=await NativeModules.BobPlatform.takeNotificationTarget();
-        if(!notice)return;
-        if(notice.screen!=='updates'&&(!Number.isSafeInteger(notice.conversationId)||notice.conversationId<=0))return;
-        const paired=JSON.parse(await AsyncStorage.getItem('backends')??'[]') as Backend[];
-        const b=paired.find(item=>item.backendId===notice.backendId);if(!b)return;
-        Keyboard.dismiss();
-        if(notice.screen==='updates'){setUpdatesTarget(b);return;}
-        setBackend(b);setChat(notice.conversationId);showChat();setDrawer(false);
-      })().catch(()=>setStatus('Notification destination unavailable; open its conversation manually'));
-    });
-    return()=>listener.remove();
-  },[]);
   useEffect(() => {
     if (!backend) return;
     setLibrary(undefined); setModels([]); setScreen(previous=>previous==='Workstations'||previous==='Agents'?previous:'Chat'); setSkillName(''); setSkillText(''); setApiKey(''); setModelId('');
-    setMcpConnections([]); setMcpId(''); setMcpEndpoint(''); setMcpTools(''); setMcpEnabled(false);
     setStatus('Connecting');
-    const b=backend;let cancelled=false;setChats([]);setChatListBackend(b.backendId);setChatCursor(undefined);
+    const b=backend,cacheEpoch=cacheGeneration();let cancelled=false;setChats([]);setChatListBackend(b.backendId);setChatCursor(undefined);
     void (async()=>{
       let cached:Chat[]=[];
       try{
-        const parsed:unknown=JSON.parse(await AsyncStorage.getItem(`chats:${b.backendId}`)??'[]');
+        const parsed:unknown=JSON.parse(await readChatListCache(`chats:${b.backendId}`)??'[]');
         if(Array.isArray(parsed)&&parsed.every(row=>{
           if(!row||typeof row!=='object'||!Number.isSafeInteger(row.id)||row.id<=0)return false;
           const {meta,owner}=row;
@@ -461,25 +351,26 @@ function Main() {
           return validMeta&&validOwner;
         }))cached=parsed;
       }catch{/* The chat list cache is optional; always try the authoritative load. */}
-      if(cancelled||selectedBackend.current!==b.backendId)return;
+      if(cancelled)return;
       setChats(cached);
       try {
         const result=await request('chats','GET',undefined,b);
-        if(cancelled||selectedBackend.current!==b.backendId)return;
+        if(cancelled)return;
         const items=mergeChatRows(cached,result.items);
         setChats(items);setChatCursor(result.next);if(!identity.current)setStatus('Ready · select a conversation');
-        void AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items)).catch(()=>{});
-      }catch{if(!cancelled&&selectedBackend.current===b.backendId)setStatus('Offline • cached history');}
+        void writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);
+      }catch{if(!cancelled)setStatus('Offline • cached history');}
     })();
     return()=>{cancelled=true;};
   }, [backend?.backendId]);
   useEffect(() => {
     let cancelled=false,events:SnapshotStream|undefined,lastRaw:string|undefined;
     stream.current?.close();
-    setView(undefined);
     setPending(undefined);setPendingLoadedVisit(undefined);
     setChild(undefined);setChildView(undefined);
-    if (!backend || !chat) return;
+    if (!backend || !chat) {
+      return;
+    }
     setStatus('Connecting…');
     const current = scope,
       b = backend;
@@ -492,15 +383,11 @@ function Main() {
       ]);
       if (cancelled||identity.current !== current) return;
       if (cached) {
-        try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(snapshot);setStatus('Cached • reconnecting');}}catch{}
+        try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(previous=>previous??snapshot);setStatus('Cached • reconnecting');}}catch{}
       }
       setPending(op ?? undefined);
       if(op)pendingOperations.current.set(current,op);else pendingOperations.current.delete(current);
       setPendingLoadedVisit(currentDraftVisit);
-      await AsyncStorage.setItem(
-        'selection',
-        JSON.stringify({ backendId: b.backendId, chat }),
-      ).catch(()=>{});
       try {
         const credential = await Keychain.getGenericPassword({
           service: `bob.${b.backendId}`,
@@ -529,7 +416,7 @@ function Main() {
       }
     })();
     return () => {cancelled=true;events?.close();cacheLifecycle.remove();void cache.close();};
-  }, [scope]);
+  }, [scope,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']]);
   useEffect(()=>{
     if(screen!=='Agents'||!child||!backend)return;
     setChildStatus('Connecting agent');
@@ -556,7 +443,7 @@ function Main() {
       }catch{if(!cancelled&&identity.current===current)setChildStatus('Child offline • last cached state');}
     })();
     return()=>{cancelled=true;events?.close();cacheLifecycle.remove();void cache.close();};
-  },[scope,child,screen]);
+  },[scope,child,screen,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']]);
   // Draft storage is not an optional transcript cache: a failed read must not
   // expose a writable blank draft that can overwrite text we never recovered.
   useEffect(()=>{
@@ -564,9 +451,9 @@ function Main() {
     draftReady.current=false;setDraftLoadedVisit(undefined);setDraftError(undefined);setDraft('');
     if(!scope)return;
     const current=scope;
-    void draftWrites.current.then(()=>AsyncStorage.getItem(`draft:${current}`)).then(saved=>{
+    void drafts.read(current).then(saved=>{
       if(cancelled||identity.current!==current)return;
-      setDraft(saved??'');draftReady.current=true;setDraftLoadedVisit(currentDraftVisit);
+      setDraft(saved.value);if(!saved.saved)setDraftError('save');draftReady.current=true;setDraftLoadedVisit(currentDraftVisit);
     }).catch(()=>{if(!cancelled&&identity.current===current)setDraftError('load');});
     return()=>{cancelled=true;};
   },[scope,draftLoadAttempt]);
@@ -575,16 +462,21 @@ function Main() {
     // captured text after newer edits or a return to the same scope (A→B→A).
     if(draftVisit.current!==currentDraftVisit||identity.current!==current||!draftReady.current||latestDraft.current!==value||(expectedVersion!==undefined&&expectedVersion!==draftWriteVersion.current))return Promise.resolve();
     const version=++draftWriteVersion.current;
-    draftWrites.current=draftWrites.current.then(()=>AsyncStorage.setItem(`draft:${current}`,value)).then(()=>{
+    return drafts.write(current,value).then(()=>{
       if(draftVisit.current===currentDraftVisit&&draftWriteVersion.current===version)setDraftError(undefined);
     }).catch(()=>{
       if(draftVisit.current===currentDraftVisit&&draftWriteVersion.current===version)setDraftError('save');
     });
-    return draftWrites.current;
   }
   useEffect(() => {
     if (scope && draftReady.current)void persistDraft(scope,draft);
   }, [draft, scope]);
+  async function saveWorkstationAlias(id:string,value:string){
+    const alias=cleanWorkstationAlias(value),list=backends.map(item=>item.backendId===id?{...item,alias:alias||undefined}:item);
+    if(!list.some(item=>item.backendId===id))throw Error('This workstation is no longer paired.');
+    await AsyncStorage.setItem('backends',JSON.stringify(list));
+    setBackends(list);
+  }
   async function pair(invitation = pairing) {
     const p = PairingInvitation.parse(JSON.parse(invitation));
     if (
@@ -623,33 +515,43 @@ function Main() {
       backendId: p.backendId,
       endpoint: p.endpoint,
       name: u.hostname,
+      alias:backends.find(item=>item.backendId===p.backendId)?.alias,
     };
     const list = [...backends.filter(x => x.backendId !== b.backendId), b];
     await AsyncStorage.setItem('backends', JSON.stringify(list));
-    setBackends(list);
-    setBackend(b);
-    setChat(undefined);
+    setBackends(list);shell.refreshBackend(b.backendId);
+    shell.selectSession({backendId:b.backendId});
     setPairing('');
     setDrawer(false);
   }
   const pendingCreates=useRef(new Set<string>()),[creatingIds,setCreatingIds]=useState<ReadonlySet<string>>(new Set());
   async function newChat() {
     const b=backend;if(!b)throw Error('Select a backend');
+    if(!isVisible())return;
     if(pendingCreates.current.has(b.backendId))return;
     pendingCreates.current.add(b.backendId);setCreatingIds(new Set(pendingCreates.current));
     try{
     const r = await request('chats', 'POST', { title: 'New conversation' },b);
-    if(selectedBackend.current!==b.backendId)return;
+    if(!isVisible()||selectedBackend.current!==b.backendId)return;
     setChat(r.id);
     showChat();
     setDrawer(false);
+    const cacheEpoch=cacheGeneration();
     const result=await request('chats','GET',undefined,b);
-    if(selectedBackend.current!==b.backendId)return;
+    if(!isVisible()||selectedBackend.current!==b.backendId)return;
     const items=mergeChatRows(chats,result.items);
-    setChats(items);setChatCursor(result.next);await AsyncStorage.setItem(`chats:${b.backendId}`,JSON.stringify(items));
+    setChats(items);setChatCursor(result.next);await writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);
     }finally{pendingCreates.current.delete(b.backendId);setCreatingIds(new Set(pendingCreates.current));}
   }
   async function submit(mode: 'steer' | 'followUp',answer?:{questionId:string;text:string}) {
+    const side=answer?null:btwCommand(draft);
+    if(side!==null){
+      if(!composerReady||!canWriteConversation()||!backend||!chat)return;
+      if(attachments.length)throw Error('/btw is text-only. Remove attachments before opening a side question.');
+      if(side.length>4000)throw Error('Keep side questions under 4,000 characters.');
+      Keyboard.dismiss();setActions(false);setNavigationOpen(false);setSlashDismissed(true);
+      setBtwIntent({scope,id:uuid(),text:side});setBtwOpen(true);setDraft('');return;
+    }
     if (!composerReady || !sendReady || !canWriteConversation() || !backend || !chat || (!answer&&!hasDraft) || pending || pendingOperations.current.has(scope)) return;
     if(answer&&(view?.docs['bob.questions']?.pending?.id!==answer.questionId||outbox.items.some(item=>item.scope===scope&&item.message.questionId===answer.questionId&&(!item.rejected||item.admitted))))return;
     parentFollow.resume();
@@ -668,45 +570,6 @@ function Main() {
     try {await saved;void drainOutbox();}
     catch{/* Keep the local bubble and retry saving before any network send. */}
   }
-  const transport=useRef({request,backends});transport.current={request,backends};
-  const [delivery]=useState(()=>new OutboxDelivery(outbox,{
-    ...(backgroundOutbox?{background:(item:OutgoingMessage)=>{
-      const preceding=outbox.items.slice(0,outbox.items.findIndex(value=>value.id===item.id));
-      if(!item.notificationReply&&preceding.some(value=>value.scope===item.scope&&!value.rejected&&!value.admitted&&(value.files.length>0||value.foregroundOnly)))return Promise.resolve({state:'pending' as const});
-      // Foreground ownership survives remounts and the later availability of native delivery.
-      if(item.foregroundUnsent||item.foregroundDeviceId)return Promise.resolve(undefined);
-      return backgroundOutbox.deliver(item);
-    }}:{}),
-    backends:()=>transport.current.backends,
-    deviceId:async b=>{const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});return credential?credential.username:undefined;},
-    request:(path,method,body,b,deviceId)=>transport.current.request(path,method,body,b,undefined,deviceId),
-    async upload(item,b){
-      const limits=TransferLimits.parse(await transport.current.request('transfer-limits','GET',undefined,b,undefined,item.foregroundDeviceId!));
-      for(const file of item.files){
-        await NativeModules.BobFiles.restoreAttachment(file.id,file.uri,file.name,file.mime);
-        const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
-        requireDeliveryDevice(item.foregroundDeviceId!,credential?credential.username:undefined);
-        if(!credential)throw Error('Device credential unavailable');
-        await NativeModules.BobFiles.uploadAttachment(file.id,`${b.endpoint}/v1/chats/${item.chat}/artifacts?uploadId=${file.id}`,credential.password,b.backendId,limits.uploadLimit);
-      }
-    },
-    async cleanup(item){for(const file of item.files)await NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});},
-    async watch(item,b){
-      const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
-      if(credential)await NativeModules.BobNotifications.watch(b.endpoint,b.backendId,credential.password,item.chat,item.id);
-    },
-  }));
-  async function drainOutbox(force=false,forceBackendId?:string){
-    if(AppState.currentState==='background'||AppState.currentState==='inactive')return;
-    await delivery.drain({force:force&&!forceBackendId,forceBackendId,scope:identity.current}).catch(()=>{});
-  }
-  const drainLatest=useRef(drainOutbox);drainLatest.current=drainOutbox;
-  useEffect(()=>{
-    void drainLatest.current(true);
-    const timer=setInterval(()=>{if(AppState.currentState==='active')void drainLatest.current();},1000);
-    const listener=AppState.addEventListener('change',state=>{if(state==='active')void drainLatest.current(true);});
-    return()=>{clearInterval(timer);listener.remove();};
-  },[backends]);
   async function addDrawing(dataUri:string){
     const current=scope,b=backend;if(!current||!b||!canWriteConversation())throw Error('Open a writable conversation before adding a drawing.');
     const transfer=TransferLimits.parse(await request('transfer-limits','GET',undefined,b));
@@ -736,6 +599,7 @@ function Main() {
     const credential = await Keychain.getGenericPassword({ service: `bob.${b.backendId}` });
     if (!credential) throw Error('Pair again: device credential missing');
     const limits = TransferLimits.parse(await request('transfer-limits', 'GET', undefined, b));
+    if(!isVisible())return;
     const url = `${b.endpoint}/v1/chats/${destination}/artifacts${artifact ? '/' + artifact.id : ''}`;
     if (action === 'upload') {
       const current=`${b.backendId}:${chat}`;
@@ -765,6 +629,7 @@ function Main() {
     if (!b || b.backendId !== item.backendId) throw Error('Interactive surface belongs to another backend');
     const credential = await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
     if (!credential) throw Error('Pair again');
+    if(!canWriteConversation())return;
     await NativeModules.BobInteractive.open(b.endpoint, b.backendId, credential.password, item.value.conversationId, item.value.id);
   }
   async function stop(tree: boolean) {
@@ -798,35 +663,27 @@ function Main() {
     setNavigationOpen(false);
     if(screen===tab)return;
     Keyboard.dismiss();setActions(false);setDrawer(false);sectionTrail.current=[];
-    if(tab==='Settings'||tab==='Notes'){run(()=>openSection(tab,false));return;}
+    if(tab==='Settings'||tab==='Notes'||tab==='Tools'){run(()=>openSection(tab,false));return;}
     sectionRequest.current++;setSectionLoading(false);setScreen(tab);
   }
-  const agentOverview=useAgentOverview(backend,screen==='Agents',(path,signal)=>request(path,'GET',undefined,backend,signal),sessionFilter);
+  const agentOverview=useAgentOverview(backend,active&&screen==='Agents',(path,signal)=>request(path,'GET',undefined,backend,signal),sessionFilter);
   function backSection(){
     Keyboard.dismiss();
-    const parent=sectionTrail.current.pop()??(screen==='Modules'?'Settings':'Chat');
+    if(screen==='Skills'&&skillEditing){skillEditorEpoch.current++;setSkillEditing(false);return;}
+    const parent=sectionTrail.current.pop()??'Chat';
+    if(parent==='Chat'){showChat();return;}
     run(()=>openSection(parent,false));
   }
   async function openSection(name: string,remember=true) {
     if(remember&&name!==screen)sectionTrail.current.push(screen);
     const selected = backend?.backendId;
     const current = scope;
-    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name!=='Settings'&&name!=='Notes'&&name!=='Schedules'&&!SETTINGS_PAGES.includes(name));
-    setScreen(name);setDrawer(false);
+    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name==='Skills'||name==='Prompts'||(name!=='Settings'&&name!=='Notes'&&name!=='Tools'&&name!=='Schedules'&&!SETTINGS_PAGES.includes(name)));
+    setScreen(name);setDrawer(false);if(name==='Skills')setSkillEditing(false);
     try{
-    if(name==='Modules') {
-      if(!canWriteConversation())throw Error('Modules are unavailable in this conversation.');
-      if(!chat)throw Error('Select a conversation first');
-      const entries=ModuleInfo.array().parse(await request(`chats/${chat}/modules`));
-      if(identity.current!==current)return;setModuleList(entries);
-    }
-    if (name === 'MCP Apps') {
-      const entries=McpConnection.array().parse(await request('mcp-connections'));
-      if(selectedBackend.current!==selected)return;setMcpConnections(entries);
-    }
     if (name === 'Prompts' || name === 'Skills') {
       const l = await request('library');
-      if (selectedBackend.current !== selected) return;
+      if (selectedBackend.current !== selected||sectionRequest.current!==ticket) return;
       setLibrary(l);
       setInstructions(l.instructions);
     }
@@ -860,33 +717,35 @@ function Main() {
     if('cwd' in change)setWorkingDirectory(draft.cwd);
     return {instructions:observed.instructions??null,cwd:observed.cwd??''};
   }
-  async function changeMcp(method:'PUT'|'DELETE',value:unknown) {
-    const b=backend;if(!b)throw Error('Select a backend');
-    await request('mcp-connections',method,value,b);
-    const entries=McpConnection.array().parse(await request('mcp-connections','GET',undefined,b));
-    if(selectedBackend.current===b.backendId)setMcpConnections(entries);
-  }
-  const agents = Object.entries(ordinaryChat?view?.docs['app.subagents']?.agents??{}:{}) as [
+  const agentRegistry=view?.docs['app.subagents']?.agents;
+  const agents = useMemo(()=>Object.entries(ordinaryChat?agentRegistry??{}:{}) as [
     string,
     { conversationId: number; status?:string },
-  ][];
+  ][],[ordinaryChat,agentRegistry]);
   const activeAgents=agents.filter(([,agent])=>isActiveSubagent(agent.status));
+  useEffect(()=>{if(active)shell.reportVisible({scope:target?sessionKey(target):'',screen,drawer,ordinaryChat,child,activeAgentCount:activeAgents.length,requests:view?.docs['bob.phone-tools']?.requests});},[active,command,scope,screen,drawer,ordinaryChat,child,activeAgents.length,view?.docs['bob.phone-tools']?.requests]);
   // Only the overview establishes parent/child membership. A live registry may
   // supply newer statuses, but must not reintroduce missing or wrong-parent IDs.
-  const agentSessions:AgentSession[]=agentOverview.sessions.map(session=>{
+  // Draft/keyboard updates must not rebuild and re-sort the session tree.
+  const agentSessions=useMemo<AgentSession[]>(()=>agentOverview.sessions.map(session=>{
     if(session.conversationId!==chat||!ordinaryChat||status!=='Connected')return session;
     return {...session,agents:session.agents.map(agent=>{
       const live=agents.find(([name,item])=>name===agent.name&&item.conversationId===agent.conversationId)?.[1];
       return live&&(live.status==='working'||live.status==='stopping'||live.status==='idle')?{...agent,status:live.status}:agent;
     })};
-  });
+  }),[agentOverview.sessions,chat,ordinaryChat,status,agents]);
+  useEffect(()=>{
+    if(!backend)return;
+    const rows=new Map([...(chatListBackend===backend.backendId?chats:[]).map(item=>[item.id,{id:item.id,title:item.meta?.title??''}] as const),...agentSessions.map(item=>[item.conversationId,{id:item.conversationId,title:item.title}] as const)]);
+    void NativeModules.BobNotifications?.setSessionLabels?.(backend.backendId,[...rows.values()].slice(-128))?.catch(()=>{});
+  },[backend?.backendId,chatListBackend,chats,agentSessions]);
   const displayedChild=agentTarget&&child===agentTarget.agent.conversationId?child:undefined;
   useEffect(()=>{setChild(undefined);setAgentTarget(undefined);setAgentHistory(false);},[scope]);
   useEffect(()=>{if(screen!=='Agents'){setChild(undefined);setAgentTarget(undefined);setAgentHistory(false);}},[screen]);
   const busy = !!view?.docs['pi.live']?.run || !!view?.work?.some(t=>t.kind==='bob.mcp-ui-action'&&!t.background);
   const showStop=busy&&!hasDraft;
   const waitingForAnswer=!!view?.docs['bob.questions']?.pending&&!outgoing.some(item=>item.scope===scope&&item.message.questionId===view.docs['bob.questions'].pending.id&&(!item.rejected||item.admitted));
-  const activity=composerActivity({connection:status,hasConversation:!!chat,storageError:!!outboxError,sending:outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted),waitingForAnswer,live:view?.docs['pi.live'],work:view?.work});
+  const pebbleActivity=composerActivity({connection:status,hasConversation:!!chat,storageError:!!outboxError,sending:outgoing.some(item=>item.scope===scope&&!item.rejected&&!item.admitted),waitingForAnswer,live:view?.docs['pi.live'],work:view?.work});
   const parentLiveTools=useTranscriptLiveTools(view?.docs['pi.live']),childLiveTools=useTranscriptLiveTools(childView?.docs['pi.live']);
   const linkedTranscript=(snapshot:Snapshot|undefined,page:typeof parentHistory.page,liveTools:ReturnType<typeof useTranscriptLiveTools>)=>{
     const entries=page?Array.from(new Map([...(page.items as Entry[]),...(snapshot?.entries??[])].map(entry=>[entry.id,entry])).values()).sort((a,b)=>a.id-b.id):snapshot?.entries??[];
@@ -907,7 +766,7 @@ function Main() {
     }
   },[outgoing,scope,view?.entries,parentHistory.page,outbox]);
   const childLinked=useMemo(()=>linkedTranscript(childView,childHistory.page,childLiveTools),[childView?.entries,childLiveTools,childHistory.page]);
-  useEffect(()=>noteLoadedEntries(parentLinked.rawEntries.length+childLinked.rawEntries.length),[parentLinked.rawEntries.length,childLinked.rawEntries.length]);
+  useEffect(()=>{reportLoaded(scope,parentLinked.rawEntries.length+childLinked.rawEntries.length);return()=>reportLoaded(scope);},[scope,parentLinked.rawEntries.length,childLinked.rawEntries.length,reportLoaded]);
   const positionedSurfaces=useMemo(()=>{
     const grouped=new Map<number,typeof surfaces>();
     for(const item of surfaces){
@@ -927,23 +786,15 @@ function Main() {
   // Legacy/unloaded anchors stay reachable without becoming a permanent row
   // beneath every new reply in the inverted chat list.
   const unlinkedSurfaces=surfaces.filter(item=>item.backendId===backend?.backendId&&item.value.conversationId===chat&&!parentLinked.surfaceAnchors.has(item.value.id.toLowerCase()));
+  const parentDisplay=useTranscriptLayout(parentOutputEntries,parentLinked.rawEntries,view?.docs['pi.live']);
+  const childDisplay=useTranscriptLayout(childOutputEntries,childLinked.rawEntries,childView?.docs['pi.live']);
   function transcript(v?: Snapshot,isChild=false,footerClearance=0) {
     const history=!isChild?parentHistory:childHistory,stored=history.page;
     const follow=!isChild?parentFollow:childFollow;
-    const recorded=isChild?childLinked:parentLinked,output=isChild?childOutputEntries:parentOutputEntries;
-    // Attach the changing generation after stable history/output/image work.
-    // Native generation identity and legacy fallback still use the full live doc.
-    const live=withLiveResponse([...output].reverse(),recorded.rawEntries,v?.docs['pi.live']);
-    const linked={...recorded,entries:live.entries.reverse() as ImageAttachmentRow[],legacyLive:live.legacyLive};
-    // Native separators know only their leading item. Resolve the adjacent pair
-    // from the actual inverted display order, without regrouping recorded rows.
-    const entryGaps=new Map(linked.entries.map((entry,index)=>{
-      const next=linked.entries[index+1];
-      const surfaceBoundary=!!entry.inlineSurfaceId||!!next?.inlineSurfaceId;
-      return [entry.id,surfaceBoundary?CHAT_CONTENT_GAP:chatEntryGap(entry,next)];
-    }));
+    const recorded=isChild?childLinked:parentLinked,display=isChild?childDisplay:parentDisplay;
+    const linked={...recorded,entries:display.entries,legacyLive:display.legacyLive};
     return (
-      <ChatMotionProvider active={isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor}>
+      <ChatMotionProvider active={active&&(isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor)}>
       <View style={{flex:1}}>
       {isChild&&<View style={{paddingHorizontal:24}}><Disclosure label="Conversation history">
         <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
@@ -952,6 +803,7 @@ function Main() {
         </View>
         {stored&&<Text style={styles.caption}>{stored.items.length} stored entries loaded · {stored.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
       </Disclosure></View>}
+      <TranscriptGaps value={display.gaps}>
       <FlatList
         testID={isChild?'child-history-list':'chat-history-list'}
         showsVerticalScrollIndicator={false}
@@ -971,7 +823,7 @@ function Main() {
         maintainVisibleContentPosition={follow.following?undefined:{minIndexForVisible:0}}
         keyExtractor={item=>item.displayKey??transcriptKey(item)}
         contentContainerStyle={[styles.messages,{gap:0},!isChild?{paddingTop:16,paddingBottom:16}:{paddingTop:footerClearance+16}]}
-        ItemSeparatorComponent={({leadingItem}:{leadingItem?:Entry})=><View testID="chat-entry-separator" style={{height:leadingItem?entryGaps.get(leadingItem.id)??CHAT_CONTENT_GAP:CHAT_CONTENT_GAP}}/>}
+        ItemSeparatorComponent={TranscriptSeparator}
         ListHeaderComponentStyle={{paddingBottom:CHAT_CONTENT_GAP}}
         ListFooterComponentStyle={{paddingTop:CHAT_CONTENT_GAP}}
         ListFooterComponent={<View style={{gap:12}}>
@@ -985,6 +837,7 @@ function Main() {
 
         ListHeaderComponent={<View style={{gap:CHAT_CONTENT_GAP}} onLayout={event=>{if(!isChild)setVisualWidth(event.nativeEvent.layout.width);}}>
           {!isChild && !!surfaceError && <Text style={styles.caption}>{surfaceError}</Text>}
+          {!isChild&&!!outboxError&&<Text testID="outbox-storage-error" accessibilityLiveRegion="polite" style={styles.caption}>Device storage issue • keep Bob open. Pending messages may not be saved.</Text>}
           <LiveStatus live={v?.docs['pi.live']} showProgress={isChild}/>
           {/* Native generation rows retain their list identity when committed.
               Older servers without a task identity keep the bounded legacy slot. */}
@@ -1007,7 +860,7 @@ function Main() {
           const originalText=item.kind==='bob.user'&&item.data&&typeof item.data==='object'&&'text' in item.data&&typeof item.data.text==='string'?item.data.text:undefined;
           const scheduleReceipt=item.kind==='bob.schedule-receipt',scheduleAlert=item.kind==='bob.schedule-alert';
           const scheduleId=scheduleReceipt?(item.data as {id?:string}|undefined)?.id:undefined;
-          const body=scheduleReceipt?<ScheduleReceipt job={scheduleId?v?.docs['bob.schedules']?.[scheduleId]:undefined} onOpen={()=>run(()=>openSection('Schedules'))}/>:scheduleAlert?<ScheduleAlert data={item.data} onOpen={()=>run(()=>openSection('Schedules'))}/>:originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:imageGroup&&backend?<ImageAttachments backend={backend} artifacts={imageGroup} active={isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor} fromBob={item.kind==='bob.file'} onOpen={image=>run(()=>attachmentAction('preview',image))} onSave={image=>run(()=>attachmentAction('save',image))}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} active={isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:isCompactActivityEntry(item)?0:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent bubbleText={m.role==='assistant'} speakable={m.role==='assistant'&&!item.liveResponse} streaming={!!item.liveResponse} showTools={!item.liveResponse} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
+          const body=scheduleReceipt?<ScheduleReceipt job={scheduleId?v?.docs['bob.schedules']?.[scheduleId]:undefined} onOpen={()=>run(()=>openSection('Schedules'))}/>:scheduleAlert?<ScheduleAlert data={item.data} onOpen={()=>run(()=>openSection('Schedules'))}/>:originalText!==undefined?<Text selectable style={styles.message}>{originalText}</Text>:peerAdmission?<PeerAdmission data={item.data} peerName={backends.find(b=>b.backendId===(item.data as {peerId?:string}|undefined)?.peerId)?.name}/>:imageGroup&&backend?<ImageAttachments backend={backend} artifacts={imageGroup} active={active&&(isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor)} fromBob={item.kind==='bob.file'} onOpen={image=>run(()=>attachmentAction('preview',image))} onSave={image=>run(()=>attachmentAction('save',image))}/>:artifact&&backend?<FileAttachment backend={backend} artifact={Attachment.parse(item.data)} active={active&&(isChild?screen==='Agents':screen==='Chat'&&!navigationOpen&&!actions)} fromBob={item.kind==='bob.file'} onOpen={()=>run(()=>attachmentAction('preview',item.data))} onSave={()=>run(()=>attachmentAction('save',item.data))}/>:item.model?.length?<View style={{gap:isCompactActivityEntry(item)?0:CHAT_CONTENT_GAP}}>{item.model.map((m,i)=>m.role==='toolResult'?<ToolContent quiet key={m.toolCallId??i} name={m.toolName??'Result'} content="Arguments are outside the loaded history." result={(m.toolCallId?linked.results.get(m.toolCallId):undefined)??{content:m.content,status:m.isError?'failed':'done',isError:m.isError}}/>:<ModelContent bubbleText={m.role==='assistant'} speakable={m.role==='assistant'&&!item.liveResponse} streaming={!!item.liveResponse} showTools={!item.liveResponse} quietTools key={i} value={m.content} results={linked.results}/>)}</View>:<Text selectable style={styles.message}>{fallback()}</Text>;
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
@@ -1015,13 +868,14 @@ function Main() {
           </View>;
         }}
       />
+      </TranscriptGaps>
       {isChild&&follow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest child message" onPress={follow.resume} style={{position:'absolute',bottom:footerClearance+16,right:20,width:48,height:48,borderRadius:24,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderColor:colors.border,borderWidth:1}}><ArrowDown size={22} color={colors.foreground}/></Pressable>}
       </View>
       </ChatMotionProvider>
     );
   }
   // Root sections keep navigation in the same heading slot as Chat.
-  const sectionMenu=screen!=='Chat'?<ChatNavigation framedTrigger selected={menuDestination(screen,sectionTrail.current)} open={navigationOpen} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>:undefined;
+  const sectionMenu=active&&screen!=='Chat'?<ChatNavigation framedTrigger selected={menuDestination(screen,sectionTrail.current)} open={navigationOpen} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>:undefined;
   if (backends.length === 0) return (
     <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle={colors.background==='#000000'?'light-content':'dark-content'} />}
@@ -1051,7 +905,7 @@ function Main() {
       {/* Keep the same native list and viewport alive under section overlays.
           Unmounting here recreates FlatList at its initial offset on every return. */}
       <>
-          <View testID="chat-viewport" pointerEvents={screen==='Chat'?'auto':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} style={{flex:1,opacity:screen==='Chat'?1:0}}>
+          <PersistentMotionSurface active={screen==='Chat'} testID="chat-viewport" pointerEvents={screen==='Chat'?'auto':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} style={{flex:1,opacity:screen==='Chat'?1:0}}>
             {chat ? (
               transcript(view)
             ) : (
@@ -1071,13 +925,11 @@ function Main() {
             )}
             {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,...shadows.floating}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
 
-          </View>
+          </PersistentMotionSurface>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
             <View testID="composer-heading" style={styles.composerHeading}>
-              <View style={{flex:1,minWidth:0}}>{!composerReady&&chat&&!draftError?<View testID="chat-opening" accessible accessibilityRole="progressbar" accessibilityLabel="Opening conversation" accessibilityState={{busy:true}} style={{minHeight:34,paddingBottom:11,alignItems:'center',justifyContent:'center'}}><ActivityIndicator size="small" color={colors.muted}/></View>:(((activity.phase!=='idle'&&activity.phase!=='connecting')||parentLinked.rawEntries.length>0)&&(
-            <ComposerStatus animate={activity.animate&&screen==='Chat'} text={activity.text}/>
-            ))}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
-              <ChatNavigation showTrigger={screen==='Chat'} open={navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
+              <View style={{flex:1,minWidth:0}}>{ordinaryChat&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
+              <ChatNavigation showTrigger={active&&screen==='Chat'} open={active&&navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
             </View>
             <View testID="composer-row" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerRowHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={styles.composerRow}>
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
@@ -1088,7 +940,7 @@ function Main() {
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
               </ScrollView>}
-              <DraftInput scope={scope} editable={composerReady&&ordinaryChat} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
+              <DraftInput scope={scope} editable={active&&composerReady&&ordinaryChat} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
                 maxHeight={Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
                 trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
@@ -1098,44 +950,41 @@ function Main() {
             </View>
           </Animated.View>
       </>
-      <DrawingEditor visible={drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={addDrawing}/>
-      {backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen&&<SkillPicker key={scope} scope={scope} query={slashQuery}
+      {backend&&chat&&ordinaryChat&&<BtwSheet key={'btw:'+scope} visible={btwOpen&&btwIntent?.scope===scope&&screen==='Chat'} active={active} conversationId={chat} initial={btwIntent?.scope===scope?btwIntent:undefined} request={(path,method,body)=>request(path,method,body,backend)} onClose={()=>setBtwOpen(false)}/>}
+      <DrawingEditor visible={active&&drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={addDrawing}/>
+      {active&&backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen&&<SkillPicker key={scope} scope={scope} query={slashQuery}
         loadLibrary={()=>request('library','GET',undefined,backend)}
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
         maxHeight={skillPopupHeight}
         onDismiss={()=>setSlashDismissed(true)}
         onSelect={entry=>{setDraft(pickerRequest(entry));setSlashDismissed(true);}}
       />}
-      {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} key={'agents:'+String(backend?.backendId)} visible={screen==='Agents'&&!!backend} bottomInset={Math.max(0,keyboardInset-insets.bottom)} workstation={backend?.name} sessions={agentSessions} currentSessionId={chat} selected={agentTarget} onSelect={(parentId,id)=>{const session=agentSessions.find(item=>item.conversationId===parentId),agent=session?.agents.find(item=>item.conversationId===id);if(session&&agent){Keyboard.dismiss();setAgentTarget({parentId,agent,title:session.title});setChild(id);}}} onOpenSession={id=>{Keyboard.dismiss();setChat(id);showChat();}} onBack={()=>{setChild(undefined);setAgentTarget(undefined);}} history={agentHistory} onHistoryChange={setAgentHistory} onNew={()=>run(newChat)} newBusy={!!backend&&creatingIds.has(backend.backendId)} filter={sessionFilter} onFilterChange={setSessionFilter} onSessionAction={async(id,action,title)=>{await sessionAction(id,action,title);agentOverview.retry();}} onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}} status={childStatus} loading={agentOverview.loading} error={agentOverview.error} onRetry={agentOverview.retry} hasMore={!!agentOverview.next} onLoadMore={agentOverview.loadMore}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
-      <TerminalScreen menuOpen={navigationOpen} menu={screen==='Terminal'?sectionMenu:undefined} key={'terminal:'+scope} visible={screen==='Terminal'} bottomInset={Math.max(0,keyboardInset-insets.bottom)} target={backend&&chat?{backendId:backend.backendId,conversationId:chat,title:listedChat?.meta?.title??'Current conversation'}:undefined} workstation={backend?.name} allowed={ordinaryChat&&!listedChat?.meta?.trashed&&!listedChat?.owner} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)}/>
-      {backend&&<NotesScreen menu={screen==='Notes'?sectionMenu:undefined} key={backend.backendId} backendId={backend.backendId} request={(path,method,body)=>request(path,method,body,backend)} visible={screen==='Notes'} topInset={0}/>}
-      {backend&&<SchedulesScreen menu={screen==='Schedules'?sectionMenu:undefined} key={'schedules:'+backend.backendId} visible={screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
+      {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} key={'agents:'+String(backend?.backendId)} visible={active&&screen==='Agents'&&!!backend} bottomInset={Math.max(0,keyboardInset-insets.bottom)} workstation={backend?workstationLabel(backend,backends):undefined} sessions={agentSessions} currentSessionId={chat} selected={agentTarget} onSelect={(parentId,id)=>{const session=agentSessions.find(item=>item.conversationId===parentId),agent=session?.agents.find(item=>item.conversationId===id);if(session&&agent){Keyboard.dismiss();setAgentTarget({parentId,agent,title:session.title});setChild(id);}}} onOpenSession={id=>{Keyboard.dismiss();setChat(id);showChat();}} onBack={()=>{setChild(undefined);setAgentTarget(undefined);}} history={agentHistory} onHistoryChange={setAgentHistory} onNew={()=>run(newChat)} newBusy={!!backend&&creatingIds.has(backend.backendId)} filter={sessionFilter} onFilterChange={setSessionFilter} onSessionAction={async(id,action,title)=>{await sessionAction(id,action,title);agentOverview.retry();}} onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}} status={childStatus} loading={agentOverview.loading} error={agentOverview.error} onRetry={agentOverview.retry} hasMore={!!agentOverview.next} onLoadMore={agentOverview.loadMore}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
+      <TerminalScreen menuOpen={navigationOpen} menu={screen==='Terminal'?sectionMenu:undefined} key={'terminal:'+scope} visible={active&&screen==='Terminal'} bottomInset={Math.max(0,keyboardInset-insets.bottom)} target={backend&&chat?{backendId:backend.backendId,conversationId:chat,title:listedChat?.meta?.title??'Current conversation'}:undefined} workstation={backend?workstationLabel(backend,backends):undefined} allowed={ordinaryChat&&!listedChat?.meta?.trashed&&!listedChat?.owner} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)}/>
+      {backend&&<SchedulesScreen menu={screen==='Schedules'?sectionMenu:undefined} key={'schedules:'+backend.backendId} visible={active&&screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
       {screen!=='Terminal'&&screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Workstations'&&screen!=='Agents'&&(
-        <View testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>
-          <SectionHeading title={screen}/>
+        <MenuTheme><MotionSurface transitionKey={screen} testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:menuColors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>
+          <SectionHeading title={screen==='Storage & cache'?'Caching':screen==='Prompts'?'Instructions & templates':screen}/>
           <SectionBody footer={<SectionActions overlay menu={sectionMenu} onBack={screen!=='Settings'||sectionTrail.current.length>0?backSection:undefined}/>}>{clearance=>
-          <ScrollView testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.messages,{paddingTop:16,paddingHorizontal:16,paddingBottom:clearance+24,gap:16}]}>
+          <ScrollView ref={sectionScroll} testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[menuStyles.messages,{paddingTop:16,paddingHorizontal:16,paddingBottom:clearance+24,gap:16}]}>
 
-          {sectionLoading?<View testID="section-loading-overlay" style={{minHeight:160,alignItems:'center',justifyContent:'center',gap:12}}><ActivityIndicator color={colors.accent}/><Text typography="ui" style={styles.caption}>Loading {screen.toLowerCase()}…</Text></View>:<>
-          {!!sectionError&&<View style={{gap:8}}><Text typography="ui" style={styles.caption}>{sectionError}</Text><Button menu label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
+          {sectionLoading?<View testID="section-loading-overlay" style={{minHeight:160,alignItems:'center',justifyContent:'center',gap:12}}><ActivityIndicator color={menuColors.accent}/><Text typography="ui" style={menuStyles.caption}>Loading {screen.toLowerCase()}…</Text></View>:<>
+          {!!sectionError&&<View style={{gap:8}}><Text typography="ui" style={menuStyles.caption}>{sectionError}</Text><Button menu label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
           {screen === 'Todos' && <View>
             {(view?.docs['bob.todos']?.items ?? []).map((item: any, index: number) => <View key={index}>
               <Button menu label={`${item.done ? '✓' : '○'} ${item.text}`} onPress={() => run(async () => { const items = [...view!.docs['bob.todos'].items]; items[index] = { ...item, done: !item.done }; await request(`chats/${chat}/todos`, 'PUT', { items }); })} />
               <Button menu label={`Remove task ${index + 1}`} onPress={() => run(async () => { const items = view!.docs['bob.todos'].items.filter((_: unknown, i: number) => i !== index); await request(`chats/${chat}/todos`, 'PUT', { items }); })} />
             </View>)}
-            <TextInput typography="ui" accessibilityLabel="New todo" style={styles.input} value={todoText} onChangeText={setTodoText} placeholder="Next task" placeholderTextColor={colors.muted} />
+            <TextInput typography="ui" accessibilityLabel="New todo" style={menuStyles.input} value={todoText} onChangeText={setTodoText} placeholder="Next task" placeholderTextColor={menuColors.muted} />
             <Button menu label="Add todo" disabled={!chat || !todoText.trim()} onPress={() => run(async () => { await request(`chats/${chat}/todos`, 'PUT', { items: [...(view?.docs['bob.todos']?.items ?? []), { text: todoText, done: false }] }); setTodoText(''); })} />
           </View>}
-          {screen === 'Prompts' && (
+          {screen === 'Prompts' && !sectionError && (
             <>
-              <Text typography="ui" style={styles.caption}>
-                Backend default instructions (conversation overrides remain
-                separate)
-              </Text>
+              <LibraryCard title="Default instructions" icon={FileText} description="Defaults for this workstation. Conversation overrides stay separate.">
               <TextInput
                 typography="ui"
                 multiline
-                style={styles.input}
+                style={menuStyles.input}
                 accessibilityLabel="Backend default instructions"
                 value={instructions}
                 onChangeText={setInstructions}
@@ -1152,85 +1001,67 @@ function Main() {
                   })
                 }
               />
-              <Text typography="ui" style={styles.title}>Message templates</Text>
-              <TextInput typography="ui" accessibilityLabel="Template name" style={styles.input} value={templateName} onChangeText={setTemplateName} placeholder="Template name" placeholderTextColor={colors.muted} />
-              <TextInput typography="ui" accessibilityLabel="Template message" style={styles.input} multiline value={templateText} onChangeText={setTemplateText} placeholder="Reusable message; separate from system instructions" placeholderTextColor={colors.muted} />
+              </LibraryCard>
+              <LibraryCard title="Message templates" icon={Library} description="Reusable messages you can edit before sending.">
+              <TextInput typography="ui" accessibilityLabel="Template name" style={menuStyles.input} value={templateName} onChangeText={setTemplateName} placeholder="Template name" placeholderTextColor={menuColors.muted} />
+              <TextInput typography="ui" accessibilityLabel="Template message" style={menuStyles.input} multiline value={templateText} onChangeText={setTemplateText} placeholder="Reusable message; separate from system instructions" placeholderTextColor={menuColors.muted} />
               <Button menu label="Save message template" onPress={() => run(async () => {
                 if (!templateName.trim()) throw Error('Name the template');
                 await request('library', 'PUT', { instructions: library.instructions, templates: { ...library.templates, [templateName]: templateText } });
                 setLibrary(await request('library'));
               })} />
               {Object.entries(library?.templates ?? {}).map(([name, text]) => (
-                <View key={name}>
+                <View key={name} style={menuStyles.templateRow}>
                   <Button menu label={`Use template ${name}`} onPress={() => { setDraft(String(text)); showChat(); }} />
                   <Button menu label={`Edit template ${name}`} onPress={() => { setTemplateName(name); setTemplateText(String(text)); }} />
                   <Button menu label={`Delete template ${name}`} onPress={() => run(async () => { const templates = { ...library.templates }; delete templates[name]; await request('library', 'PUT', { instructions: library.instructions, templates }); setLibrary(await request('library')); })} />
                 </View>
               ))}
+              </LibraryCard>
             </>
           )}
-          {screen === 'Modules' && <>
-            <Text typography="ui" style={styles.caption}>Native Durable capability selection for this conversation only. These trusted backend packages execute with the backend account's permissions; selection is not a sandbox. Stop and settle work before changing selection. Installation/removal and host defaults use bob module on the backend.</Text>
-            {moduleList.map(module=><SettingsRow key={module.id} icon={Blocks} title={module.id} checked={module.selected??false} value={`${module.packageName} ${module.version} · Durable ${module.durable} · ${module.installed?'Installed':'Not installed'} · ${module.registered?'Registered':'Not registered'} · default ${module.defaultSelected?'on':'off'}`} label={`${module.selected?'Disable':'Enable'} module ${module.id}`} disabled={!module.installed||!module.registered} onPress={()=>run(async()=>{
-                const b=backend,id=chat,current=scope;if(!b||!id)return;
-                const ids=moduleList.filter(m=>m.id===module.id?!m.selected:m.selected).map(m=>m.id);
-                await request(`chats/${id}/modules`,'PUT',{ids},b);
-                const observed=ModuleInfo.array().parse(await request(`chats/${id}/modules`,'GET',undefined,b));
-                if(identity.current===current)setModuleList(observed);
-              })} />)}
-          </>}
-          {screen === 'MCP Apps' && <>
-            <Text typography="ui" style={styles.caption}>Explicit backend connections and tool grants. This is separate from phone pairing. MCP credentials are configured on the backend with bob mcp key; they never enter a surface.</Text>
-            {mcpConnections.map(c=><View key={c.id}>
-              <Button menu label={`${c.enabled?'Enabled':'Disabled'} MCP ${c.id}`} onPress={()=>{setMcpId(c.id);setMcpEndpoint(c.endpoint);setMcpTools(c.allowedTools.join(','));setMcpEnabled(c.enabled);}} />
-              <Button menu label={`Remove MCP ${c.id}`} onPress={()=>Alert.alert('Remove connection?',`Remove ${c.id} and its stored backend credential? Existing app capabilities will no longer work.`,[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>run(()=>changeMcp('DELETE',{id:c.id}))}])} />
-            </View>)}
-            <TextInput typography="ui" accessibilityLabel="MCP connection ID" style={styles.input} value={mcpId} onChangeText={setMcpId} placeholder="server-id" placeholderTextColor={colors.muted} />
-            <TextInput typography="ui" accessibilityLabel="MCP endpoint" style={styles.input} value={mcpEndpoint} onChangeText={setMcpEndpoint} placeholder="https://server.example/mcp" placeholderTextColor={colors.muted} autoCapitalize="none" />
-            <TextInput typography="ui" accessibilityLabel="Allowed MCP tools" style={styles.input} value={mcpTools} onChangeText={setMcpTools} placeholder="exact-tool-name,another-tool" placeholderTextColor={colors.muted} autoCapitalize="none" />
-            <Button menu label={mcpEnabled?'Connection enabled — disable':'Connection disabled — enable'} onPress={()=>setMcpEnabled(!mcpEnabled)} />
-            <Button menu label={mcpEnabled?'Grant listed MCP tools and save':'Save disabled MCP connection'} onPress={()=>run(()=>changeMcp('PUT',McpConnection.parse({id:mcpId,endpoint:mcpEndpoint,allowedTools:mcpTools.split(',').map(t=>t.trim()),enabled:mcpEnabled})))} />
-            <Text typography="ui" style={styles.caption}>Visuals reopen with their saved HTML and latest saved data; MCP Apps show the original result snapshot. Reopening never reruns the original tool. Local inputs are transient; saved data and authorized tool results remain in conversation history.</Text>
-          </>}
-          {screen === 'Skills' && (
+          {screen === 'Tools' && backend && <ToolsScreen
+            backendId={backend.backendId}
+            workstationName={workstationLabel(backend,backends)}
+            conversationId={chat}
+            conversationTitle={chat?(chats.find(item=>item.id===chat)?.meta?.title??`Conversation ${chat}`):undefined}
+            scopeKey={JSON.stringify([backend.backendId,backend.endpoint,chat??null,shell.connectionRevisions[backend.backendId]??0])}
+            active={active}
+            readOnly={!!chat&&!ordinaryChat}
+            request={(path,method,body,signal)=>request(path,method,body,backend,signal)}
+            onAskBob={chat&&ordinaryChat?()=>{
+              if(!canWriteConversation(scope))return;
+              const prompt='Help me add a Bob tool or integration. Use the bob-tool-extension-development skill if available. Check existing tools and MCP options first, and explain the access needed before installation.';
+              setDraft(previous=>previous?`${previous}\n\n${prompt}`:prompt);showChat();
+            }:undefined}
+          />}
+          {screen === 'Skills' && !sectionError && (
             <>
-              <Text typography="ui" style={styles.caption}>
-                Backend Markdown resources, not a regular-Pi loader.
-              </Text>
-              {Object.entries(library?.skills ?? {}).map(
-                ([name, value]: [string, any]) => (
-                  <Button menu
-                    key={name}
-                    label={`${value.enabled ? '✓' : '○'} ${name}`}
-                    onPress={() => {
-                      setSkillName(name);
-                      setSkillText(value.markdown);
-                      setSkillDescription(value.description);
-                      setSkillEnabled(value.enabled);
-                    }}
-                  />
-                ),
-              )}
+              <View testID="skill-library-list" style={skillEditing?{display:'none'}:undefined}><SkillLibraryList skills={library?.skills??{}} selected={skillName} onSelect={(name,value)=>{skillEditorEpoch.current++;setSkillName(name);setSkillText(value.markdown);setSkillDescription(value.description??'');setSkillEnabled(value.enabled);setSkillEditing(true);}} onNew={()=>{skillEditorEpoch.current++;setSkillName('');setSkillText('');setSkillDescription('');setSkillEnabled(true);setSkillEditing(true);}}/></View>
+              {skillEditing&&<>
+              <LibraryCard title={skillName?'Edit skill':'New skill'} icon={BookOpen} description="Reusable instructions for Bob. Changes apply after saving.">
+              <Text typography="ui" style={menuStyles.fieldLabel}>Name</Text>
               <TextInput
                 typography="ui"
-                style={styles.input}
+                style={menuStyles.input}
                 accessibilityLabel="Skill name"
                 value={skillName}
                 onChangeText={setSkillName}
                 placeholder="skill-name"
-                placeholderTextColor={colors.muted}
+                placeholderTextColor={menuColors.muted}
               />
               <TextInput
                 typography="ui"
-                style={styles.input}
+                style={menuStyles.input}
                 accessibilityLabel="Skill Markdown"
+                textAlignVertical="top"
                 value={skillText}
                 onChangeText={setSkillText}
                 multiline
                 placeholder="Markdown"
-                placeholderTextColor={colors.muted}
+                placeholderTextColor={menuColors.muted}
               />
-              <TextInput typography="ui" accessibilityLabel="Skill description" style={styles.input} value={skillDescription} onChangeText={setSkillDescription} placeholder="Skill description" placeholderTextColor={colors.muted} />
+              <TextInput typography="ui" accessibilityLabel="Skill description" style={menuStyles.input} value={skillDescription} onChangeText={setSkillDescription} placeholder="Skill description" placeholderTextColor={menuColors.muted} />
               <Button menu label={skillEnabled ? 'Skill enabled ✓' : 'Skill disabled'} onPress={() => setSkillEnabled(!skillEnabled)} />
               <Button menu
                 label="Save skill"
@@ -1246,13 +1077,15 @@ function Main() {
                   })
                 }
               />
-              <Button menu label="Import Markdown skill (review before saving)" onPress={() => run(async () => setSkillText(await NativeModules.BobFiles.importMarkdown()))} />
-              <Button menu label="Delete selected skill" disabled={!skillName} onPress={() => run(async () => { await request(`skills/${encodeURIComponent(skillName)}`, 'DELETE'); setLibrary(await request('library')); setSkillName(''); setSkillText(''); })} />
+              <Button menu label="Import Markdown skill (review before saving)" onPress={() => {const editor=skillEditorEpoch.current;run(async()=>{const markdown=await NativeModules.BobFiles.importMarkdown();if(skillEditorEpoch.current===editor)setSkillText(markdown);});}} />
+              <Button menu label="Archive selected skill" disabled={!skillName} onPress={() => {const editor=skillEditorEpoch.current,name=skillName;Alert.alert('Archive this skill?', 'It will no longer appear in the active skill library. Bob can restore archived skills later.', [{text:'Cancel',style:'cancel'},{text:'Archive skill',style:'destructive',onPress:()=>run(async () => { await request(`skills/${encodeURIComponent(name)}`, 'DELETE'); const updated=await request('library');setLibrary(updated);if(skillEditorEpoch.current!==editor)return;skillEditorEpoch.current++;setSkillName('');setSkillText('');setSkillDescription('');setSkillEditing(false); })}]);}} />
+              </LibraryCard>
+              </>}
             </>
           )}
           {screen === 'Settings' && <>
-            {networkErrors.map((error,index)=><Text typography="ui" key={index} accessibilityLiveRegion="polite" style={styles.caption}>{error}</Text>)}
-            {readOnly&&<Text typography="ui" style={styles.caption}>{readOnlyMessage}</Text>}
+            {networkErrors.map((error,index)=><Text typography="ui" key={index} accessibilityLiveRegion="polite" style={menuStyles.caption}>{error}</Text>)}
+            {readOnly&&<Text typography="ui" style={menuStyles.caption}>{readOnlyMessage}</Text>}
             <SettingsHome readOnly={readOnly} onOpen={name=>run(()=>openSection(name))}/>
           </>}
           {screen === 'Appearance' && <>
@@ -1260,11 +1093,11 @@ function Main() {
           </>}
           {screen === 'Conversation settings' && <>
 <SettingsGroup title="This conversation">
-                <Text typography="ui" style={[styles.caption,{paddingVertical:8}]}>{chats.find(item=>item.id===chat)?.meta?.title??'No conversation selected'} · {backend?.name??'No workstation'}</Text>
-                {readOnly&&<Text typography="ui" style={styles.caption}>{readOnlyMessage}</Text>}
-                {!!chat&&!conversationProfile.known&&<Text typography="ui" style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}
+                <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>{chats.find(item=>item.id===chat)?.meta?.title??'No conversation selected'} · {backend?workstationLabel(backend,backends):'No workstation'}</Text>
+                {readOnly&&<Text typography="ui" style={menuStyles.caption}>{readOnlyMessage}</Text>}
+                {!!chat&&!conversationProfile.known&&<Text typography="ui" style={menuStyles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}
                 {chat&&ordinaryChat&&<ConversationSettings standalone key={scope} instructions={chatInstructions} folder={workingDirectory} inherited={usesDefaultInstructions} onInstructionsChange={value=>{settingsDrafts.edit(scope,'instructions',value);setChatInstructions(value);}} onFolderChange={value=>{settingsDrafts.edit(scope,'cwd',value);setWorkingDirectory(value);}} onLoad={loadConversationSettings} onSave={saveConversationSettings}/>}
-                {!chat&&<Text typography="ui" style={[styles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
+                {!chat&&<Text typography="ui" style={[menuStyles.caption,{paddingVertical:14}]}>Select a session to edit its settings.</Text>}
               </SettingsGroup>
           </>}
           {screen === 'Notifications' && <>
@@ -1274,22 +1107,22 @@ function Main() {
                   const enabled=!notifyEnabled;NativeModules.BobNotifications.setReplyNotifications?.(enabled);await AsyncStorage.setItem('notification-opt-in',String(enabled));setNotifyEnabled(enabled);
                 })}/>
                 <SettingsRow title="Notification settings" label="Android notification settings" icon={Bell} onPress={()=>run(()=>NativeModules.BobNotifications.openSettings())}/>
-                <Disclosure menu label="About notifications"><Text typography="ui" style={styles.caption}>Replies, questions and schedule alerts, plus updates, share one generic attention alert without message previews or Reply actions. Tap it to open Bob. Existing reply input and delivery feedback stay separate until resolved. Android schedules background checks and may delay delivery; push delivery can also be delayed, and force-stop pauses both. Automatic location has its own visible service notification. Keep connected has a separate opt-in service notification.</Text></Disclosure>
+                <Disclosure menu label="About notifications"><Text typography="ui" style={menuStyles.caption}>Replies, questions and schedule alerts, plus updates, identify the workstation and session without message previews or Reply actions. Set a short local alias in Workstations. Tap a session alert to open that conversation; older workstations may provide only a workstation-level alert. Existing reply input and delivery feedback stay separate until resolved. Android schedules background checks and may delay delivery; push delivery can also be delayed, and force-stop pauses both. Automatic location has its own visible service notification. Keep connected has a separate opt-in service notification.</Text></Disclosure>
               </SettingsGroup>
           </>}
           {screen === 'Voice' && <>
 <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
-                <Disclosure menu label="About read aloud"><Text typography="ui" style={styles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>
+                <Disclosure menu label="About read aloud"><Text typography="ui" style={menuStyles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>
               </SettingsGroup>
           </>}
           {screen === 'Phone & location' && <>
 {!readOnly&&<PhoneToolsSettings state={phoneTools}/>}
               {!readOnly&&<SettingsGroup title="Location">
                 <SettingsRow title="Automatic location" label={phoneLocation.busy?'Updating location…':phoneLocation.enabled?'Disable automatic location':'Enable automatic location'} checked={phoneLocation.enabled} loading={phoneLocation.busy} icon={MapPin} disabled={!backend||!phoneLocation.supported||phoneLocation.busy} onPress={()=>run(phoneLocation.toggle)}/>
-                {!!phoneLocation.error&&<Text typography="ui" accessibilityLiveRegion="polite" style={styles.caption}>{phoneLocation.error}</Text>}
+                {!!phoneLocation.error&&<Text typography="ui" accessibilityLiveRegion="polite" style={menuStyles.caption}>{phoneLocation.error}</Text>}
                 <Disclosure menu label="Location privacy & permissions">
-                  <Text typography="ui" style={styles.caption}>Fresh fixes for location questions, not continuous tracking. Coordinates go to your backend and model and stay in chat history. Background or locked-phone fixes need the visible Android service. Precise location and unrestricted battery use improve availability; reopen Bob if Android stops the service.</Text>
+                  <Text typography="ui" style={menuStyles.caption}>Fresh fixes for location questions, not continuous tracking. Coordinates go to your backend and model and stay in chat history. Background or locked-phone fixes need the visible Android service. Precise location and unrestricted battery use improve availability; reopen Bob if Android stops the service.</Text>
                   <SettingsRow title="Location permissions" label="Android location settings" icon={MapPin} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('location');})}/>
                   <SettingsRow title="App & battery" label="Android app and battery settings" icon={SlidersHorizontal} onPress={()=>run(async()=>{await NativeModules.BobLocation?.openSettings('app');})}/>
                 </Disclosure>
@@ -1298,43 +1131,43 @@ function Main() {
           {screen === 'Connection' && <>
 <KeepConnectedSettings state={keepConnected}/>
           </>}
+          {screen === 'Storage & cache' && <CacheSettings active={active}/>}
           {screen === 'App & updates' && <>
 <SettingsGroup title="App">
                 <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setUpdatesTarget(backend);navigate('Chat');}}/>
                 <SettingsRow title="Copy app diagnostics" icon={Stethoscope} onPress={()=>run(async()=>{await copyAppDiagnostics();Alert.alert('Diagnostics copied','Paste the report into this chat. It contains sanitized lifecycle, exit and workload metadata, not chat text, credentials, URLs or location.');})}/>
-                <Disclosure menu label="About diagnostics"><Text typography="ui" style={styles.caption}>If Bob closes unexpectedly, reopen it and copy this report. It includes bounded crash types and code positions, not exception messages or chat content. Workload samples are recorded about every 10 seconds while open. Reports stay on this phone until you share them.</Text></Disclosure>
+                <Disclosure menu label="About diagnostics"><Text typography="ui" style={menuStyles.caption}>If Bob closes unexpectedly, reopen it and copy this report. It includes bounded crash types and code positions, not exception messages or chat content. Workload samples are recorded about every 10 seconds while open. Reports stay on this phone until you share them.</Text></Disclosure>
               </SettingsGroup>
           </>}
           {screen === 'Advanced' && <>
 {!readOnly&&<SettingsGroup title="Advanced">
-              <Text typography="ui" style={[styles.caption,{paddingVertical:8}]}>Workstation: {backend?.name??'Not connected'}. Modules apply only to this conversation; provider connections apply to this workstation.</Text>
-                <SettingsRow title="Advanced modules" icon={Blocks} disabled={!chat||!ordinaryChat} onPress={()=>run(()=>openSection('Modules'))}/>
+              <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>Workstation: {backend?workstationLabel(backend,backends):'Not connected'}. Provider credentials apply to this workstation.</Text>
               <Disclosure menu label="Provider connection">
-              <Text typography="ui" style={styles.caption}>
+              <Text typography="ui" style={menuStyles.caption}>
                 Credentials are sent only to the selected paired backend, never
                 as chat messages.
               </Text>
-              <View style={styles.row}>{['openai','anthropic'].map(p=><Button menu key={p} label={p===providerName?`${p} ✓`:p} onPress={()=>setProviderName(p)}/>)}</View>
-              <Text typography="ui" style={styles.fieldLabel}>API key</Text>
+              <View style={menuStyles.row}>{['openai','anthropic'].map(p=><Button menu key={p} label={p===providerName?`${p} ✓`:p} onPress={()=>setProviderName(p)}/>)}</View>
+              <Text typography="ui" style={menuStyles.fieldLabel}>API key</Text>
               <TextInput
                 typography="ui"
                 secureTextEntry
-                style={styles.input}
+                style={menuStyles.input}
                 accessibilityLabel="Provider API key"
                 value={apiKey}
                 onChangeText={setApiKey}
                 placeholder={`${providerName} API key`}
-                placeholderTextColor={colors.muted}
+                placeholderTextColor={menuColors.muted}
               />
-              <Text typography="ui" style={styles.fieldLabel}>Model ID</Text>
+              <Text typography="ui" style={menuStyles.fieldLabel}>Model ID</Text>
               <TextInput
                 typography="ui"
-                style={styles.input}
+                style={menuStyles.input}
                 accessibilityLabel="Model ID"
                 value={modelId}
                 onChangeText={setModelId}
                 placeholder="Model ID"
-                placeholderTextColor={colors.muted}
+                placeholderTextColor={menuColors.muted}
               />
               <Button menu
                 label="Configure backend provider"
@@ -1355,21 +1188,22 @@ function Main() {
           </>}
           </ScrollView>
           }</SectionBody>
-        </View>
+        </MotionSurface></MenuTheme>
       )}
       {actions&&!actionsMore&&ordinaryChat&&screen==='Chat'&&<View testID="chat-actions-overlay" accessibilityViewIsModal style={[StyleSheet.absoluteFill,{zIndex:40}]}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
           <PlusMenu bottom={Math.max(0,keyboardInset-insets.bottom)+12+composerRowHeight+6} maxHeight={Math.max(48,windowSize.height-Math.max(0,keyboardInset-insets.bottom)-12-composerRowHeight-6-insets.top-insets.bottom-12)} disabled={!chat||!ordinaryChat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>
         </View>}
-      <Modal visible={actions&&actionsMore&&ordinaryChat} transparent animationType="none" onRequestClose={()=>setActions(false)}>
-        <View style={styles.actionOverlay}>
+      <MenuTheme><Modal visible={active&&actions&&actionsMore&&ordinaryChat} transparent animationType="none" onRequestClose={()=>setActions(false)}>
+        <View style={menuStyles.actionOverlay}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss more chat actions" onPress={()=>setActions(false)}/>
-          <SafeAreaView edges={['bottom']} style={styles.actionSheet}>
+          <SafeAreaView edges={['bottom']} style={menuStyles.actionSheet}><MotionSurface style={{flexShrink:1}}>
             <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"/></View>
             <SectionBody style={{flex:undefined,flexShrink:1,marginHorizontal:-20,marginBottom:-20}} footer={<SectionActions overlay leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/>}>{clearance=>
             <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:16,paddingTop:16,paddingBottom:clearance+24}}>
-              <Text typography="ui" accessibilityLiveRegion="polite" style={[styles.caption,{marginBottom:12}]}>{backend?.name??'Workstation'} · {busy?'Working':status}</Text>
+              <Text typography="ui" accessibilityLiveRegion="polite" style={[menuStyles.caption,{marginBottom:12}]}>{backend?workstationLabel(backend,backends):'Workstation'} · {busy?'Working':status}</Text>
               <SettingsGroup title="Messages">
+                <Button label="BTW · side chat" disabled={!chat||!ordinaryChat} onPress={()=>{Keyboard.dismiss();setActions(false);setBtwIntent({scope,id:uuid(),text:''});setBtwOpen(true);}}/>
                 {busy&&<Button label="Send now to steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
                 <Button label="Send after this reply" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
               </SettingsGroup>
@@ -1378,11 +1212,11 @@ function Main() {
                 <Disclosure label="Conversation history">
                   <Button label={parentHistory.page?.next?'Load earlier messages':'Load / refresh stored history'} disabled={!chat||!parentHistory.ready||parentHistory.loading} onPress={()=>{setActions(false);run(parentHistory.load);}}/>
                   <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
-                  {parentHistory.page&&<Text typography="ui" style={styles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
+                  {parentHistory.page&&<Text typography="ui" style={menuStyles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
                 </Disclosure>
                 {ordinaryChat&&agents.length>0&&<SettingsRow title="Agent history" icon={Users} onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
                 {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
-                  <Text typography="ui" style={styles.caption}>Older surfaces without a link in the loaded history.</Text>
+                  <Text typography="ui" style={menuStyles.caption}>Older surfaces without a link in the loaded history.</Text>
                   {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
                 </Disclosure>}
               </SettingsGroup>
@@ -1390,36 +1224,38 @@ function Main() {
                 <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
               </SettingsGroup>
               {(busy||activeAgents.length>0)&&<SettingsGroup title="Stop running work">
-                <Text typography="ui" style={[styles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
+                <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
                 {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
                 <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
               </SettingsGroup>}
             </ScrollView>
             }</SectionBody>
-          </SafeAreaView>
+          </MotionSurface></SafeAreaView>
         </View>
-      </Modal>
-      {attachmentPicker&&attachmentPicker.scope===scope&&<AttachmentPicker key={attachmentPicker.scope} initialTab={attachmentPicker.tab} limit={attachmentPicker.limit} onClose={()=>setAttachmentPicker(undefined)} onAdd={files=>{
+      </Modal></MenuTheme>
+      {active&&attachmentPicker&&attachmentPicker.scope===scope&&<AttachmentPicker key={attachmentPicker.scope} initialTab={attachmentPicker.tab} limit={attachmentPicker.limit} onClose={()=>setAttachmentPicker(undefined)} onAdd={files=>{
         const current=attachmentPicker.scope;
         setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),...files]}));setAttachmentPicker(undefined);
       }}/>}
-            <ModelPicker loading={modelLoading} visible={ordinaryChat&&!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>setModelPickerTarget(undefined)} onApply={applyModelChoice}/>
-      {screen==='Workstations'&&<SideDrawer menu={sectionMenu} key={screen+':'+(backend?.backendId??'')} embedded mode="workstations" workspaceLabel={backend?.name} visible onClose={()=>showChat()} disabled={!backend}
+            <ModelPicker loading={modelLoading} visible={active&&ordinaryChat&&!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>setModelPickerTarget(undefined)} onApply={applyModelChoice}/>
+      {active&&aliasTarget&&<WorkstationAliasEditor key={'alias:'+aliasTarget.backendId} workstation={aliasTarget} onClose={()=>setAliasTarget(undefined)} onSave={value=>saveWorkstationAlias(aliasTarget.backendId,value)}/>}
+      {screen==='Workstations'&&<SideDrawer menu={sectionMenu} key={screen+':'+(backend?.backendId??'')} embedded mode="workstations" workspaceLabel={backend?workstationLabel(backend,backends):undefined} visible onClose={()=>showChat()} disabled={!backend}
         onNew={()=>run(newChat)}
         onSettings={()=>run(()=>openSection('Settings'))}
         onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}}
         navigation={[]}
-        workspaces={backends.map(b=>({id:b.backendId,label:backends.filter(item=>item.name===b.name).length>1?`${b.name} · ${b.backendId.slice(0,8)}`:b.name,selected:b.backendId===backend?.backendId,onPress:()=>{
-          if(b.backendId!==backend?.backendId){setChats([]);setChatCursor(undefined);setBackend(b);setChat(undefined);}
-          navigate('Agents');setDrawer(false);
+        workspaces={backends.map(b=>({id:b.backendId,label:workstationLabel(b,backends),onAlias:()=>setAliasTarget(b),selected:b.backendId===backend?.backendId,onPress:()=>{
+          Keyboard.dismiss();
+          if(b.backendId!==backend?.backendId)shell.selectBackend(b);
+          else navigate('Agents');setDrawer(false);
         }}))}
         onSessionAction={sessionAction}
         conversations={[]}
         pairing={<>
-          <Text typography="ui" style={styles.caption}>Run bob connect on your computer, then scan the QR code or paste its invitation.</Text>
+          <Text typography="ui" style={menuStyles.caption}>Run bob connect on your computer, then scan the QR code or paste its invitation.</Text>
           <Button menu label="Scan pairing QR" onPress={()=>run(async()=>{setPairing(await NativeModules.BobPlatform.scanPairing());})}/>
-          <Text typography="ui" style={styles.fieldLabel}>Pairing invitation</Text>
-          <TextInput typography="ui" style={styles.input} multiline value={pairing} onChangeText={setPairing} accessibilityLabel="Pairing invitation" placeholder="Paste invitation" placeholderTextColor={colors.muted}/>
+          <Text typography="ui" style={menuStyles.fieldLabel}>Pairing invitation</Text>
+          <TextInput typography="ui" style={menuStyles.input} multiline value={pairing} onChangeText={setPairing} accessibilityLabel="Pairing invitation" placeholder="Paste invitation" placeholderTextColor={menuColors.muted}/>
           <Button menu label="Pair this backend" onPress={()=>run(pair)}/>
         </>}
       />}
@@ -1428,10 +1264,36 @@ function Main() {
     </SafeAreaView>
   );
 }
+function WorkstationNotes({backend,shell,active}:{backend:Backend;shell:SessionShell;active:boolean}){
+  const styles=useThemedValue(stylesTheme),menuTheme=useMenuTheme();
+  const [menuOpen,setMenuOpen]=useState(false);
+  const visible=useRef(active);visible.current=active;
+  const target=shell.current;
+  useEffect(()=>{if(!active)setMenuOpen(false);},[active]);
+  const navigate=(destination:BottomDestination)=>{if(visible.current&&target){Keyboard.dismiss();setMenuOpen(false);shell.selectSession(target,destination);}};
+  useBackNavigation(()=>{if(menuOpen){setMenuOpen(false);return true;}if(Keyboard.isVisible())return false;navigate('Chat');return true;},active);
+  return <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} testID={`workspace-notes:${backend.backendId}`} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?2:0}]}>
+    <MenuTheme><View style={[styles.content,{backgroundColor:menuTheme.colors.background}]}><NotesScreen backendId={backend.backendId} request={(path,method,body)=>requestBackend(path,method,body,backend)} visible={active} topInset={0}
+      menu={<ChatNavigation framedTrigger selected="Notes" open={active&&menuOpen} onOpen={()=>{Keyboard.dismiss();setMenuOpen(true);}} onClose={()=>setMenuOpen(false)} onSelect={navigate} activeAgentCount={shell.context?.activeAgentCount??0} readOnly={!!target?.chat&&!shell.context?.ordinaryChat}/>}/></View></MenuTheme>
+  </SafeAreaView>;
+}
+function RetainedSessionApp(){
+  const shell=useSessionShell(),{selection}=shell;
+  if(!shell.ready)return <View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator accessibilityLabel="Opening Bob"/></View>;
+  if(!shell.backends.length)return <SessionMain active command={0} destination="Chat" shell={shell}/>;
+  return <View style={{flex:1}}>{selection.deck.targets.map(target=>{
+    const key=sessionKey(target),active=key===selection.deck.active;
+    // Keep identical native viewport geometry while hidden. Visibility belongs
+    // to a non-animated host, never to a native-driver opacity animation.
+    return <View key={key} testID={`session-host:${key}`} collapsable={false} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?1:0}]}>
+      <AppMotionProvider active={active}><SessionMain target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell}/></AppMotionProvider>
+    </View>;
+  })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}</View>;
+}
 export default function App() {
   return (
     <DiagnosticBoundary><SafeAreaProvider><ThemeProvider>
-      <Main />
+      <AppMotionProvider active><RetainedSessionApp /></AppMotionProvider>
     </ThemeProvider></SafeAreaProvider></DiagnosticBoundary>
   );
 }
@@ -1449,7 +1311,7 @@ const stylesTheme = themed(({colors,menuChrome,shadows})=>StyleSheet.create({
   readingColumn:{width:'100%',maxWidth:760,alignSelf:'center',gap:10},
   title:{color:colors.foreground,fontSize:22,fontWeight:'600'},
   chatTitle:{color:colors.muted,fontSize:13,paddingHorizontal:24,paddingTop:18,paddingBottom:4},
-  caption:{color:colors.muted,fontSize:12,lineHeight:20},
+  caption:{color:colors.muted,fontSize:13,lineHeight:21},
   fieldLabel:{color:colors.foreground,fontSize:14,lineHeight:22,fontWeight:'600',marginTop:10},
   memoryStatus:{color:colors.muted,fontSize:13,lineHeight:21,paddingVertical:2},
   status:{color:colors.muted,paddingHorizontal:24,paddingVertical:8,fontSize:13,lineHeight:21},
@@ -1470,6 +1332,7 @@ const stylesTheme = themed(({colors,menuChrome,shadows})=>StyleSheet.create({
   composerCapsuleCompact:{padding:0,gap:0},
   input:{...menuChrome.input,color:colors.foreground,fontSize:15,padding:14,minHeight:50,maxHeight:180,borderRadius:14,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface,marginVertical:6},
   row:{flexDirection:'row',gap:8,flexWrap:'wrap'},
+  templateRow:{paddingTop:12,gap:4,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:colors.subtle},
   overlay:{flex:1,backgroundColor:'#00000088',padding:18,justifyContent:'center'},
   sheet:{height:'80%',width:'100%',maxWidth:760,alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderRadius:menuRadii.card,padding:20},
   actionOverlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},

@@ -1,9 +1,12 @@
+import {withMenuTheme} from '../menu-theme';
+import {MotionSurface} from './motion-surface';
 import {menuButtonChrome} from '../menu-button-style';
 import React,{useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Alert,AppState,FlatList,Pressable,StyleSheet,View} from 'react-native';
 import {Clock3,RefreshCw} from 'lucide-react-native';
 import {v4 as uuid} from 'uuid';
 import {Text} from './app-text';
+import {EmptyState} from './empty-state';
 import {RoundAction,SectionHeading,SectionActions,SectionBody,SectionSegments,SectionAction} from './section-ui';
 import {themed,useTheme,useThemedValue} from '../theme';
 
@@ -30,7 +33,7 @@ export function ScheduleAlert({data,onOpen}:{data:unknown;onOpen:()=>void}){
  return <View style={s.receipt}><Text style={s.caption}>Scheduled result</Text><Text style={s.title}>{typeof value.title==='string'?value.title:'Schedule'}</Text><Text selectable style={s.body}>{typeof value.text==='string'?value.text:'Open schedules to inspect this result.'}</Text><Action label="View schedules" onPress={onOpen}/></View>;
 }
 type Request=(path:string,method?:string,body?:unknown,signal?:AbortSignal)=>Promise<any>;
-export function SchedulesScreen({menu,visible,request,onCompose,onOpenChat,onBack}:{menu?:React.ReactNode;visible:boolean;request:Request;onCompose:(text:string)=>void;onOpenChat:(id:number)=>void;onBack?:()=>void}){
+function SchedulesScreenContent({menu,visible,request,onCompose,onOpenChat,onBack}:{menu?:React.ReactNode;visible:boolean;request:Request;onCompose:(text:string)=>void;onOpenChat:(id:number)=>void;onBack?:()=>void}){
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
@@ -58,11 +61,11 @@ export function SchedulesScreen({menu,visible,request,onCompose,onOpenChat,onBac
  }
  if(!visible)return null;
  const filtered=jobs.filter(j=>tab==='finished'?j.state==='finished'||j.state==='cancelled':j.state===tab);
- return <View style={s.screen} testID="schedules-screen"><SectionHeading title="Schedules"/>
+ return <MotionSurface active={visible} style={s.screen} testID="schedules-screen"><SectionHeading title="Schedules"/>
   <SectionBody footer={<SectionActions overlay menu={menu} onBack={onBack}><RoundAction icon={RefreshCw} label="Refresh schedules" disabled={!!busy} onPress={()=>void refresh()}/><SectionAction text="Create" label="Create a schedule in chat" primary onPress={()=>onCompose('Create a schedule: ')}/></SectionActions>}>{clearance=><View style={s.bodyRegion}>
   <SectionSegments label="Schedule filters" options={[{value:'active',label:'Active'},{value:'paused',label:'Paused'},{value:'finished',label:'Finished'}]} value={tab} onChange={setTab} style={s.tabs}/>
   {!!error&&<View style={s.notice}><Text typography="ui" accessibilityLiveRegion="polite" style={s.body}>{error}</Text><Action label="Refresh saved state" onPress={()=>void refresh()}/></View>}
-  {loading?<ActivityIndicator accessibilityLabel="Loading schedules" style={{padding:24}} color={colors.foreground}/>:<FlatList style={s.bodyRegion} data={filtered} keyExtractor={j=>j.id} contentContainerStyle={[s.list,{paddingBottom:clearance+32}]} showsVerticalScrollIndicator={false} extraData={`${expanded}:${busy}`} ListEmptyComponent={<View style={s.notice}><Text typography="ui" style={s.title}>{tab==='active'?'No active schedules':tab==='paused'?'No paused schedules':'No finished schedules'}</Text><Text typography="ui" style={s.body}>Ask Bob in chat for a reminder or a bounded recurring check. A saved schedule will show its next run here.</Text><Action label="Create in chat" onPress={()=>onCompose('Create a schedule: ')}/></View>} renderItem={({item:job})=>{
+  {loading?<ActivityIndicator accessibilityLabel="Loading schedules" style={{padding:24}} color={colors.foreground}/>:<FlatList style={s.bodyRegion} data={filtered} keyExtractor={j=>j.id} contentContainerStyle={[s.list,{paddingBottom:clearance+32}]} showsVerticalScrollIndicator={false} extraData={`${expanded}:${busy}`} ListEmptyComponent={<EmptyState icon={Clock3} title={tab==='active'?'Nothing scheduled':tab==='paused'?'No paused schedules':'No finished schedules'} description="Ask Bob for a reminder or a recurring check. Saved schedules and their next run appear here."><Action label="Create in chat" onPress={()=>onCompose('Create a schedule: ')}/></EmptyState>} renderItem={({item:job})=>{
    const last=job.history.at(-1),open=expanded===job.id;
    return <View style={s.card}><Pressable accessibilityRole="button" accessibilityLabel={`${job.title}, ${job.state}. ${open?'Hide':'Show'} details`} accessibilityState={{expanded:open}} onPress={()=>setExpanded(open?'':job.id)} style={s.summary}><Text typography="ui" style={s.title}>{job.title}</Text><Text typography="ui" style={s.caption}>{job.health==='needs_attention'?'Needs attention':job.state} · {job.kind==='check'?'Read-only check':'Reminder'}</Text>{job.history.at(-1)?.outcome==='running'?<Text typography="ui" style={s.body}>Running since {scheduleTime(job.history.at(-1)!.startedAt,job.timezone)}</Text>:job.nextRunAt!==undefined&&<Text typography="ui" style={s.body}>Next: {scheduleTime(job.nextRunAt,job.timezone)}</Text>}</Pressable>
     <View style={s.actions}>{job.state==='active'&&<Action label={busy===job.id?'Saving…':'Pause'} disabled={!!busy} onPress={()=>void change(job,'pause')}/ >}{job.state==='paused'&&<Action label={busy===job.id?'Saving…':'Resume'} disabled={!!busy} onPress={()=>void change(job,'resume')}/ >}{(job.state==='active'||job.state==='paused')&&<Action label="Cancel" disabled={!!busy} onPress={()=>Alert.alert('Cancel schedule?',`Stop future runs of “${job.title}”. In-flight checks will be asked to stop. Saved history is kept.`,[{text:'Keep schedule',style:'cancel'},{text:'Cancel schedule',style:'destructive',onPress:()=>void change(job,'cancel')}])}/>}</View>
@@ -71,6 +74,8 @@ export function SchedulesScreen({menu,visible,request,onCompose,onOpenChat,onBac
   }}/ >}
   </View>
   }</SectionBody>
- </View>;
+ </MotionSurface>;
 }
-const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({bodyRegion:{flex:1,minHeight:0},screen:{position:'absolute',top:0,bottom:0,left:0,right:0,zIndex:25,backgroundColor:colors.background},tabs:{marginHorizontal:16},list:{padding:16,gap:8,paddingBottom:32},notice:{padding:20,gap:12},card:{borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:colors.subtle},receipt:{...menuChrome.card,padding:16,gap:8},summary:{paddingHorizontal:8,paddingTop:12,paddingBottom:8,gap:4},title:{fontSize:17,lineHeight:25,fontWeight:'600',color:colors.foreground},body:{fontSize:15,lineHeight:23,color:colors.body},caption:{fontSize:13,lineHeight:21,color:colors.muted},actions:{flexDirection:'row',flexWrap:'wrap',gap:8,paddingHorizontal:12,paddingBottom:8},action:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,paddingHorizontal:12,justifyContent:'center'},actionText:{...menuButtonChrome({colors,shadows}).label,fontSize:15,lineHeight:23,fontWeight:'500',color:colors.foreground},details:{paddingHorizontal:8,paddingTop:8,paddingBottom:16,gap:16},run:{paddingTop:8,gap:4}}));
+const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({bodyRegion:{flex:1,minHeight:0},screen:{position:'absolute',top:0,bottom:0,left:0,right:0,zIndex:25,backgroundColor:colors.background},tabs:{marginHorizontal:16},list:{padding:16,gap:12,paddingBottom:32},notice:{padding:20,gap:12},card:{...menuChrome.card,padding:8},receipt:{...menuChrome.card,padding:16,gap:8},summary:{paddingHorizontal:8,paddingTop:12,paddingBottom:8,gap:4},title:{fontSize:17,lineHeight:25,fontWeight:'600',color:colors.foreground},body:{fontSize:15,lineHeight:23,color:colors.body},caption:{fontSize:13,lineHeight:21,color:colors.muted},actions:{flexDirection:'row',flexWrap:'wrap',gap:8,paddingHorizontal:12,paddingBottom:8},action:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,paddingHorizontal:12,justifyContent:'center'},actionText:{...menuButtonChrome({colors,shadows}).label,fontSize:15,lineHeight:23,fontWeight:'500',color:colors.foreground},details:{borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:colors.subtle,paddingHorizontal:8,paddingTop:16,paddingBottom:16,gap:16},run:{paddingTop:8,gap:4}}));
+
+export const SchedulesScreen=withMenuTheme(SchedulesScreenContent);

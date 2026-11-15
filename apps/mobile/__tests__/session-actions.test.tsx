@@ -13,7 +13,7 @@ afterEach(async()=>{if(tree)await act(async()=>tree.unmount());jest.restoreAllMo
 async function mount(onAction=jest.fn(async()=>{}),value=session){
  const onClose=jest.fn();await act(async()=>{tree=Renderer.create(<SessionActions session={value} onClose={onClose} onAction={onAction}/>);});return {onAction,onClose};
 }
-test('session controls are plain 48dp rows above a measured, soft-boundary Cancel footer',async()=>{
+test('session controls are plain 56dp icon rows above a measured, soft-boundary Cancel footer',async()=>{
  await mount();
  const scroll=tree.root.findByType(ScrollView),footer=tree.root.findByType(SectionActions);
  expect(StyleSheet.flatten(tree.root.findByProps({testID:'session-action-sheet'}).props.style)).toMatchObject({maxHeight:'100%',flexShrink:1});
@@ -21,8 +21,9 @@ test('session controls are plain 48dp rows above a measured, soft-boundary Cance
  expect(scroll.findAllByProps({accessibilityLabel:'Close session controls'})).toHaveLength(0);
  expect(footer.findAllByProps({accessibilityLabel:'Close session controls'}).length).toBeGreaterThan(0);
  for(const label of ['Rename','Pin to top','Archive','Delete']){
-  expect(StyleSheet.flatten(button(tree,label).props.style)).toMatchObject({minHeight:48,minWidth:48});
-  expect(StyleSheet.flatten(button(tree,label).props.style).borderWidth).toBe(1);
+  expect(StyleSheet.flatten(button(tree,label).props.style)).toMatchObject({minHeight:56,minWidth:48});
+  expect(StyleSheet.flatten(button(tree,label).props.style).borderWidth).toBeUndefined();
+  expect(StyleSheet.flatten(button(tree,label).props.style).backgroundColor).toBeUndefined();
  }
  expect(tree.root.findAllByType(Text).every(node=>node.props.typography==='ui')).toBe(true);
  const title=tree.root.findByType(ScrollView).findAllByType(Text)[0];

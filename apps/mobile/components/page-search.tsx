@@ -11,6 +11,6 @@ export function PageSearch({label,hint,placeholder,value,onChangeText,editable=t
  return <View testID="page-search" style={s.frame}><Search size={20} color={colors.muted}/><TextInput typography="ui" accessibilityLabel={label} accessibilityHint={hint} placeholder={placeholder} placeholderTextColor={colors.muted} value={value} onChangeText={onChangeText} editable={editable} autoCapitalize="none" autoCorrect={false} returnKeyType="search" style={s.input}/></View>;
 }
 const sTheme=themed(({colors})=>StyleSheet.create({
- frame:{flexDirection:'row',alignItems:'center',gap:8,paddingHorizontal:12,borderRadius:12,backgroundColor:colors.surface},
- input:{flex:1,minWidth:0,minHeight:48,paddingVertical:12,color:colors.foreground,fontSize:15,lineHeight:22,textAlignVertical:'center',includeFontPadding:false},
+ frame:{flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:16,borderRadius:999,backgroundColor:colors.surface},
+ input:{flex:1,minWidth:0,minHeight:52,paddingVertical:14,color:colors.foreground,fontSize:16,lineHeight:24,textAlignVertical:'center',includeFontPadding:false},
 }));

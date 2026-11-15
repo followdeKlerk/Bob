@@ -70,3 +70,12 @@ test('permission granted after pre-dialog deregistration schedules registration 
  expect(mutations).toEqual(['DELETE','POST']);
  expect(NativeModules.BobNotifications.watchUpdates).toHaveBeenCalled();
 });
+
+test('local aliases and collision-safe compact labels reach native notifications without replacing pairing identity',async()=>{
+ NativeModules.BobNotifications.setWorkstationLabels=jest.fn(async()=>true);
+ const other={...backend,backendId:'second-backend',endpoint:'https://second.ts.net',alias:'Desk'},one={...backend,alias:'Desk'};
+ await enableUpdateNotifications([one,other]);
+ expect(NativeModules.BobNotifications.setWorkstationLabels).toHaveBeenCalledWith([{id:one.backendId,label:'Desk · pair'},{id:other.backendId,label:'Desk · seco'}]);
+ expect(NativeModules.BobNotifications.watchUpdates).toHaveBeenCalledWith(one.endpoint,one.backendId,'device-token','Desk · pair');
+ expect(NativeModules.BobNotifications.activatePush).toHaveBeenCalledWith(other.endpoint,other.backendId,'device-token');
+});

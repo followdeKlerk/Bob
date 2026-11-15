@@ -1,16 +1,11 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {Appearance,NativeModules,Platform,View,useColorScheme} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {vars} from 'nativewind';
-import {type ThemeColors} from './theme-tokens';
+import {nativewindVariables} from './theme-variables';
 
 import {APPEARANCE_KEY,tokens,ThemeContext,PreferenceContext,type ThemePreference} from './theme-context';
 export {type ThemePreference} from './theme-context';
-export function nativewindVariables(colors:ThemeColors){const rgb=(hex:string)=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(' ');return vars({
- '--color-background':rgb(colors.background),'--color-foreground':rgb(colors.foreground),'--color-primary':rgb(colors.accent),'--color-primary-foreground':rgb(colors.onAccent),
- '--color-secondary':rgb(colors.surface),'--color-secondary-foreground':rgb(colors.foreground),'--color-muted':rgb(colors.surface),'--color-muted-foreground':rgb(colors.muted),
- '--color-accent':rgb(colors.selectedSurface),'--color-accent-foreground':rgb(colors.foreground),'--color-destructive':rgb(colors.destructive),'--color-border':rgb(colors.border),'--color-input':rgb(colors.border),'--color-ring':rgb(colors.accent),
-});}
+export {nativewindVariables} from './theme-variables';
 export function ThemeProvider({children}:{children:React.ReactNode}){
  const system=useColorScheme(),[preference,setSavedPreference]=useState<ThemePreference>('system'),[ready,setReady]=useState(false),[storageError,setStorageError]=useState('');
  const changed=useRef(false),writes=useRef<Promise<void>>(Promise.resolve());

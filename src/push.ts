@@ -13,15 +13,15 @@ const TTL=300_000, LIMIT=256, RECENT_LIMIT=512, MAX_ATTEMPTS=4;
 const retryDelay=(attempt:number)=>[1000,5000,30_000,60_000][attempt-1];
 const QUEUE='firebasePush.queue', deviceKey=(id:string)=>`firebasePush.device:${id}`;
 const digest=(key:string)=>createHash('sha256').update(key).digest('hex');
-type Registration={token:string;generation:string};
+type Registration={token:string;generation:string;contextVersion?:1};
 export type PushSource='reply'|'question'|'schedule'|'update';
 const SOURCES:PushSource[]=['reply','question','schedule','update'];
-type Pending={id:string;deviceId:string;generation:string;expiresAt:number;nextAt:number;attempts:number;sources?:PushSource[]};
+type Pending={id:string;deviceId:string;generation:string;expiresAt:number;nextAt:number;attempts:number;sources?:PushSource[];targets?:string[]};
 type Queue={pending:Pending[];recent:{key:string;expiresAt:number}[]};
 type Timer=(callback:()=>void,ms:number)=>()=>void;
 /** Optional transport/clock seams for deterministic tests; production uses Node's HTTPS fetch. */
 export type PushOptions={fetch?:typeof fetch;now?:()=>number;setTimer?:Timer;requestTimeoutMs?:number};
-export type Push={enabled:boolean;register(deviceId:string,token:string):{registered:true;enabled:boolean};unregister(deviceId:string):void;attention(key:string,source?:PushSource):void;status():{enabled:boolean;closed:boolean;pending:number};flush():Promise<void>;close():Promise<void>};
+export type Push={enabled:boolean;register(deviceId:string,token:string,contextVersion?:1):{registered:true;enabled:boolean};unregister(deviceId:string):void;attention(key:string,source?:PushSource,conversationId?:number):void;status():{enabled:boolean;closed:boolean;pending:number};flush():Promise<void>;close():Promise<void>};
 
 /** No symlink following, non-regular files, shared permissions, or unbounded credential reads. */
 function privateJson(path:string):any{
@@ -126,7 +126,7 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
     // OAuth may take seconds. Rotation, expiry, unregister and revocation fence the actual send.
     if(!current(pending)){remove(pending);save();continue;}
     const token=registration(pending.deviceId)!.token;
-    const result=await post(`https://fcm.googleapis.com/v1/projects/${config!.projectId}/messages:send`,{'content-type':'application/json',authorization:`Bearer ${bearer}`},JSON.stringify({message:{token,android:{priority:'high',ttl:'300s',collapse_key:'bob-attention'},data:{type:'bob_attention',backendId:state.id,sources:(pending.sources??['question']).join(',')}}}));
+    const result=await post(`https://fcm.googleapis.com/v1/projects/${config!.projectId}/messages:send`,{'content-type':'application/json',authorization:`Bearer ${bearer}`},JSON.stringify({message:{token,android:{priority:'high',ttl:'300s',collapse_key:registration(pending.deviceId)?.contextVersion===1?`bob-attention:${state.id}`:'bob-attention'},data:{type:'bob_attention',backendId:state.id,sources:(pending.sources??['question']).join(','),...(registration(pending.deviceId)?.contextVersion===1?{context:(pending.targets??(pending.sources??['question']).map(source=>`${source}:0`)).join(',')}:{})}}}));
     if(closed)return;
     // Only FCM's explicit registration errors invalidate a token; generic 400 is not proof.
     const invalid=(result.status===404||result.status===400)&&Array.isArray(result.data?.error?.details)&&result.data.error.details.some((d:any)=>d?.['@type']==='type.googleapis.com/google.firebase.fcm.v1.FcmError'&&['UNREGISTERED','INVALID_ARGUMENT'].includes(d.errorCode));
@@ -147,7 +147,8 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
    trim();save();
   }
  }
- function attention(key:string,source:PushSource='question'){
+ function attention(key:string,source:PushSource='question',conversationId=0){
+  if(!Number.isSafeInteger(conversationId)||conversationId<0||source==='update'&&conversationId!==0)throw new HttpError(400,'Invalid attention session');
   if(!SOURCES.includes(source))throw new HttpError(400,'Invalid attention source');
   if(closed)throw new HttpError(503,'Firebase push is closed');
   if(!config)throw new HttpError(503,'Firebase push is not configured');
@@ -162,8 +163,12 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
     const prior=queue.pending.find(p=>p.deviceId===deviceId&&p.generation===r.generation);
     // A newer reply must not hide a coalesced question when reply alerts are muted.
     const sources=SOURCES.filter(s=>s===source||prior?.sources?.includes(s));
+    const all=[...new Set([...(prior?.targets??prior?.sources?.map(s=>`${s}:0`)??[]),`${source}:${conversationId}`])];
+    // Bound metadata without silently losing overflow: retain a workstation-level
+    // hint for each category whose exact session aged out of this batch.
+    const targets=all.length<=32?all:[...new Set([...all.slice(0,-28).map(t=>t.split(':')[0]+':0'),...all.slice(-28)])];
     queue.pending=queue.pending.filter(p=>p.deviceId!==deviceId);
-    queue.pending.push({id:randomUUID(),deviceId,generation:r.generation,expiresAt:now()+TTL,nextAt:now(),attempts:0,sources});
+    queue.pending.push({id:randomUUID(),deviceId,generation:r.generation,expiresAt:now()+TTL,nextAt:now(),attempts:0,sources,targets});
    }
    trim();save();
   }catch{queue=previous;throw new HttpError(503,'Firebase push queue unavailable');}
@@ -193,7 +198,7 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
     }else if(event.kind==='question'){
      if((await harness.snapshot(Questions,id,ctx))?.pending?.id!==event.id)continue;
     }
-    if(!closed)attention(key,event.kind==='submission'?(event.value.status==='done'?'reply':'question'):event.kind==='schedule'?'schedule':'question');
+    if(!closed)attention(key,event.kind==='submission'?(event.value.status==='done'?'reply':'question'):event.kind==='schedule'?'schedule':'question',Number(id));
    }catch{/* A notification observer must never break Durable or expose content in errors. */}
   }
  }
@@ -221,14 +226,14 @@ export async function createPush(state:State,harness:Harness,options:PushOptions
  if(config){trim();save();wake();}
  return {
   enabled:!!config,
-  register(deviceId,token){
+  register(deviceId,token,contextVersion){
    if(closed)throw new HttpError(503,'Firebase push is closed');
    if(!config)throw new HttpError(503,'Firebase push is not configured');
    if(!active(deviceId))throw new HttpError(404,'Active device not found');
    if(typeof token!=='string'||!token.length||token.length>4096||/\s/.test(token))throw new HttpError(400,'Invalid push registration');
    const previous=registration(deviceId);
-   if(previous?.token!==token){
-    state.set(deviceKey(deviceId),{token,generation:randomUUID()} satisfies Registration);
+   if(previous?.token!==token||previous?.contextVersion!==contextVersion){
+    state.set(deviceKey(deviceId),{token,generation:randomUUID(),...(contextVersion===1?{contextVersion}:{})} satisfies Registration);
     queue.pending=queue.pending.filter(p=>p.deviceId!==deviceId);save();wake();
    }
    return {registered:true,enabled:true};

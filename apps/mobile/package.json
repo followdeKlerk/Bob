@@ -1,6 +1,6 @@
 {
   "name": "BobMobile",
-  "version": "0.3.175",
+  "version": "0.3.194",
   "private": true,
   "scripts": {
     "android": "react-native run-android",

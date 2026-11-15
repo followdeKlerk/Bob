@@ -3,7 +3,9 @@ import Renderer,{act} from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {FlatList,ScrollView,Modal,StyleSheet,View,Platform,KeyboardAvoidingView} from 'react-native';
 import {SectionHeading,SectionActions,RoundAction,SectionAction} from '../components/section-ui';
-import {colors} from '../theme';
+import {menuThemes} from '../menu-theme';
+const menuTheme=menuThemes.dark;
+const {colors}=menuTheme;
 import {ModelPicker,type ModelOption} from '../components/model-picker';
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),clear:jest.fn(async()=>values.clear())};});
@@ -77,7 +79,7 @@ test('thinking choices scroll sideways in a compact panel while Apply stays in a
  expect(panel.findAll(n=>n.props.accessibilityLabel==='Apply model selection')).toHaveLength(0);
  expect(tree.root.findByType(SectionActions).findByProps({testID:'section-footer-actions'}).findAll(n=>n.props.accessibilityLabel==='Apply model selection').length).toBeGreaterThan(0);
  // The bounded panel can shrink with the keyboard; its controls scroll while Apply stays outside that scroll.
- expect(StyleSheet.flatten(panel.props.style)).toMatchObject({maxHeight:'55%',flexShrink:1,minHeight:0});
+ expect(StyleSheet.flatten(panel.props.style)).toMatchObject({maxHeight:'70%',flexShrink:1,minHeight:0});
  expect(StyleSheet.flatten(controls.props.style)).toMatchObject({flexShrink:1});
  expect(controls.props.keyboardShouldPersistTaps).toBe('handled');
  expect(controls.findAll(n=>n.props.accessibilityLabel==='Apply model selection')).toHaveLength(0);
@@ -217,7 +219,7 @@ test('model modal keeps Cancel left and Apply right with a persistent search and
 });
 
 
-test.each(['android','ios'])('model dialog uses native Android resize or iOS avoidance, never both (%s)',async os=>{
+test.each(['android','ios'])('model dialog measures keyboard overlap without duplicating Activity inset padding (%s)',async os=>{
  const originalOS=Object.getOwnPropertyDescriptor(Platform,'OS')!;
  Object.defineProperty(Platform,'OS',{configurable:true,value:os});
  let tree!:Renderer.ReactTestRenderer;
@@ -226,8 +228,8 @@ test.each(['android','ios'])('model dialog uses native Android resize or iOS avo
   const modal=tree.root.findByType(Modal),avoidance=tree.root.findByType(KeyboardAvoidingView);
   expect(modal.props.statusBarTranslucent).not.toBe(true);
   expect(modal.props.navigationBarTranslucent).not.toBe(true);
-  expect(avoidance.props.enabled).toBe(os==='ios');
-  expect(avoidance.props.behavior).toBe('padding');
+  expect(avoidance.props.enabled).toBe(true);
+  expect(avoidance.props.behavior).toBe(os==='ios'?'padding':'height');
   expect(StyleSheet.flatten(avoidance.props.style).paddingBottom).toBeUndefined();
  }finally{
   if(tree)await act(async()=>tree.unmount());
@@ -263,5 +265,36 @@ test('the applied model stays marked while a different model is staged, and the 
   expect(find(tree,'Select Alpha (openai)').props.accessibilityState.checked).toBe(false);expect(find(tree,'Select Soul (other)').props.accessibilityState.checked).toBe(true);
   expect(find(tree,'Select Alpha (openai)').props.accessibilityHint).toBe('Currently applied model');
   expect(tree.root.findByType(FlatList)===list).toBe(true);expect(tree.root.findByProps({testID:'thinking-level-strip'})===strip).toBe(true);expect(apply).not.toHaveBeenCalled();
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test.each(['light','dark'] as const)('%s catalog groups keep inset dividers, independent current/selection/favourite states and wrapping titles',async scheme=>{
+ const {ThemeContext,tokens}=require('../theme-context'),menuTheme=menuThemes[scheme];
+ const {Text:AppText}=require('../components/app-text');
+ const longName='Zeta model with an intentionally long readable catalog title';
+ const catalog=[...models,{provider:'openai',modelId:'zeta',name:longName,thinkingLevels:['medium']},{provider:'hidden',modelId:'no-key',name:'Unavailable provider model',available:false,thinkingLevels:['medium']}];
+ await AsyncStorage.setItem('model-favorites:v1',JSON.stringify([JSON.stringify(['other','soul'])]));
+ const apply=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<ThemeContext.Provider value={tokens[scheme]}><ModelPicker visible models={catalog} current={current} onClose={()=>{}} onApply={apply}/></ThemeContext.Provider>);});
+ try{
+  const row=(id:string)=>StyleSheet.flatten(tree.root.findByProps({testID:`model-row-${id}`}).props.style);
+  expect(row('other-soul')).toMatchObject({backgroundColor:menuTheme.colors.panel,borderTopLeftRadius:24,borderBottomLeftRadius:24});
+  expect(row('openai-alpha').borderTopLeftRadius).toBe(24);expect(row('openai-alpha').borderBottomLeftRadius).toBeUndefined();
+  expect(row('openai-zeta').borderBottomLeftRadius).toBe(24);expect(row('openai-zeta').borderTopLeftRadius).toBeUndefined();
+  const dividers=tree.root.findAll(node=>node.props.testID==='model-row-separator'&&typeof node.type==='string');expect(dividers).toHaveLength(1);
+  expect(StyleSheet.flatten(dividers[0].props.style)).toMatchObject({left:16,right:16,height:StyleSheet.hairlineWidth});
+  expect(find(tree,'Select Unavailable provider model (hidden)')).toBeUndefined();
+  expect(StyleSheet.flatten(find(tree,'Unfavourite Soul (other)').props.style)).toMatchObject({minWidth:48,minHeight:48});
+  expect(StyleSheet.flatten(find(tree,'Unfavourite Soul (other)').props.style).borderWidth).toBeUndefined();
+  await act(async()=>find(tree,`Select ${longName} (openai)`).props.onPress());
+  expect(find(tree,`Select ${longName} (openai)`).props.accessibilityState.checked).toBe(true);
+  expect(row('openai-zeta').backgroundColor).toBe(menuTheme.colors.selectedSurface);
+  expect(row('openai-alpha').borderLeftColor).toBe(menuTheme.colors.accent);
+  expect(find(tree,'Select Alpha (openai)').props.accessibilityHint).toBe('Currently applied model');
+  expect(find(tree,'Unfavourite Soul (other)').props.accessibilityState.selected).toBe(true);
+  const title=tree.root.findAllByType(AppText).find(node=>node.props.children===longName)!;
+  expect(title.props.numberOfLines).toBeUndefined();expect(title.props.allowFontScaling).not.toBe(false);
+  expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:16,lineHeight:24,flexShrink:1});
+  expect(apply).not.toHaveBeenCalled();
  }finally{await act(async()=>tree.unmount());}
 });

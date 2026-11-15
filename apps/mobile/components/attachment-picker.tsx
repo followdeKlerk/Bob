@@ -1,3 +1,4 @@
+import {withMenuTheme} from '../menu-theme';
 import {PageSearch} from './page-search';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
@@ -18,7 +19,7 @@ export async function requestGalleryAccess():Promise<'full'|'limited'|'denied'>{
  const result=await PermissionsAndroid.requestMultiple(Number(Platform.Version)>=34?[images,selected]:[images]);
  return result[images]==='granted'?'full':result[selected]==='granted'?'limited':'denied';
 }
-export function AttachmentPicker({initialTab,limit,onClose,onAdd}:{initialTab:'gallery'|'files';limit:number;onClose:()=>void;onAdd:(items:DraftAttachment[])=>void}){
+function AttachmentPickerContent({initialTab,limit,onClose,onAdd}:{initialTab:'gallery'|'files';limit:number;onClose:()=>void;onAdd:(items:DraftAttachment[])=>void}){
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
@@ -104,3 +105,5 @@ export function AttachmentPicker({initialTab,limit,onClose,onAdd}:{initialTab:'g
 const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({
  searchHeader:{paddingHorizontal:16,paddingBottom:8},body:{flex:1,minHeight:0},root:{flex:1,backgroundColor:colors.background},icon:{...menuButtonChrome({colors,shadows}).circle,width:48,height:48,alignItems:'center',justifyContent:'center'},fileSources:{marginHorizontal:16,flexDirection:'row',flexWrap:'wrap',gap:8},tabs:{marginHorizontal:16,flexDirection:'row',gap:8,padding:0},tab:{...menuButtonChrome({colors,shadows}).pill,borderRadius:999,flex:1,minHeight:48,flexDirection:'row',gap:8,alignItems:'center',justifyContent:'center'},active:{...menuButtonChrome({colors,shadows}).selected},tabText:{...menuButtonChrome({colors,shadows}).label,fontSize:14,color:colors.foreground,flexShrink:1,minWidth:0},row:{...menuButtonChrome({colors,shadows}).pill,flexGrow:1,minHeight:48,flexDirection:'row',alignItems:'center',gap:8,paddingHorizontal:8},rowText:{...menuButtonChrome({colors,shadows}).label,fontSize:16,color:colors.foreground,flexShrink:1,minWidth:0},notice:{paddingHorizontal:20,paddingTop:12,gap:8},caption:{fontSize:12,lineHeight:19,color:colors.muted},section:{flexDirection:'row',alignItems:'center',gap:10,paddingHorizontal:16,paddingVertical:8},sectionTitle:{fontSize:16,color:colors.foreground,flex:1},list:{paddingHorizontal:16,paddingBottom:16,gap:10,flexGrow:1},photo:{...menuChrome.card,flex:1,maxWidth:'50%',aspectRatio:1,overflow:'hidden',backgroundColor:colors.surface},selected:{...menuChrome.selected},image:{width:'100%',height:'100%'},circle:{position:'absolute',top:10,right:10,width:28,height:28,borderRadius:14,borderWidth:2,borderColor:colors.muted,backgroundColor:colors.composer+'dd',alignItems:'center',justifyContent:'center'},checked:{backgroundColor:colors.accent,borderColor:colors.accent},fileCircle:{width:26,height:26,borderRadius:13,borderWidth:1,borderColor:colors.muted,alignItems:'center',justifyContent:'center'},file:{borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:colors.subtle,minHeight:64,padding:12,flexDirection:'row',alignItems:'center',gap:12,backgroundColor:colors.surface},fileSelected:{...menuChrome.selected},fileName:{fontSize:15,color:colors.foreground},empty:{paddingVertical:32,paddingHorizontal:10,color:colors.muted,lineHeight:22,fontSize:14,textAlign:'center'},error:{fontSize:13,lineHeight:20,color:colors.foreground,paddingHorizontal:20,paddingBottom:12},smallButton:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,paddingHorizontal:12,alignItems:'center',justifyContent:'center'},footer:{paddingHorizontal:20,paddingVertical:12,gap:8},
 }));
+
+export const AttachmentPicker=withMenuTheme(AttachmentPickerContent);

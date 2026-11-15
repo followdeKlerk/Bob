@@ -1,3 +1,4 @@
+import {useMenuVariables} from '../../menu-theme';
 // React Native Reusables (MIT), pinned 385834c2196f8a303cbc9057d1ac768f3bde0a3b; imports adapted for Bob.
 import { cn } from '../../lib/utils';
 import { Slot } from '@rn-primitives/slot';
@@ -77,6 +78,7 @@ function Text({
     asChild?: boolean;
   }) {
   const textClass = React.useContext(TextClassContext);
+  const variables=useMenuVariables();
   const Component = asChild ? Slot : RNText;
   return (
     <Component
@@ -85,6 +87,7 @@ function Text({
       role={variant ? ROLE[variant] : undefined}
       aria-level={variant ? ARIA_LEVEL[variant] : undefined}
       {...props}
+      style={variables?[variables,props.style]:props.style}
     />
   );
 }

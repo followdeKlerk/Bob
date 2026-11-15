@@ -366,7 +366,10 @@ class BobFiles(private val context: ReactApplicationContext) : ReactContextBaseJ
             var file: File? = null
             try {
                 val dir = File(context.cacheDir, "bob-previews").apply { mkdirs() }
-                dir.listFiles()?.filter { it.lastModified() < System.currentTimeMillis() - 86400000 }?.forEach { it.delete() }
+                // This directory also owns camera staging and verified APKs. Its
+                // previews may still be held by an Activity or external viewer;
+                // age is not proof of disposal ownership. Only this call's failed
+                // download is removed below; never sweep the shared directory.
                 file = File(dir, UUID.randomUUID().toString())
                 file.outputStream().use { receive(operation(url, token, identity, limit, promise), it) }
                 val intent = if (mime.startsWith("text/") || mime.startsWith("image/") || mime == "application/pdf") {

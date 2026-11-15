@@ -40,7 +40,7 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
     init {
         NotificationRuntime.appVisible = context.lifecycleState == LifecycleState.RESUMED
         context.addLifecycleEventListener(object : LifecycleEventListener {
-            override fun onHostResume() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = true; AttentionNotifications.clear(context); AttentionNotifications.migrate(context); ConversationNotifications.clear(context, NotificationRuntime.visibleBackend, NotificationRuntime.visibleChat) } }
+            override fun onHostResume() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = true; AttentionNotifications.clear(context); AttentionNotifications.migrate(context); AttentionNotifications.clearSession(context, NotificationRuntime.visibleBackend, NotificationRuntime.visibleChat); ConversationNotifications.clear(context, NotificationRuntime.visibleBackend, NotificationRuntime.visibleChat) } }
             override fun onHostPause() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false } }
             override fun onHostDestroy() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false } }
         })
@@ -64,6 +64,31 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
             if (NotificationWatchStore.read(context, identity)?.optBoolean("updates") == true) schedulePeriodicNotifications(context, identity)
             BobPush.activate(context, identity, origin, token)
         }
+    }
+    @ReactMethod fun setWorkstationLabels(rows: ReadableArray, promise: Promise) {
+        try {
+            require(rows.size() <= 64)
+            val labels = (0 until rows.size()).map { index ->
+                val row = requireNotNull(rows.getMap(index)); val id = requireNotNull(row.getString("id")); UUID.fromString(id)
+                id to AttentionNotificationPolicy.label(requireNotNull(row.getString("label")), 40)
+            }
+            synchronized(NotificationDisplayLabels) {
+                NotificationDisplayLabels.identities(context).filter { id -> labels.none { it.first == id } }.forEach { NotificationDisplayLabels.remove(context, it); AttentionNotifications.clearBackend(context, it) }
+                labels.forEach { (id, label) -> NotificationDisplayLabels.update(context, id) { it.put("label", label) } }
+            }
+            promise.resolve(true)
+        } catch (_: Exception) { promise.reject("labels", "Unable to save workstation labels") }
+    }
+    @ReactMethod fun setSessionLabels(identity: String, rows: ReadableArray, promise: Promise) {
+        try {
+            UUID.fromString(identity); require(rows.size() <= 128)
+            val labels = (0 until rows.size()).map { index ->
+                val row = requireNotNull(rows.getMap(index)); val id = row.getDouble("id")
+                require(id > 0 && id % 1.0 == 0.0 && id <= 9007199254740991.0)
+                id.toLong() to AttentionNotificationPolicy.label(requireNotNull(row.getString("title")), 80)
+            }
+            NotificationDisplayLabels.sessions(context, identity, labels); promise.resolve(true)
+        } catch (_: Exception) { promise.reject("labels", "Unable to save session labels") }
     }
     @ReactMethod fun syncPushBackends(identities: ReadableArray, promise: Promise) {
         try {
@@ -107,6 +132,7 @@ class BobNotifications(private val context: ReactApplicationContext) : ReactCont
         synchronized(NotificationWatchStore) {
         NotificationRuntime.visibleBackend = identity; NotificationRuntime.visibleChat = if (chat > 0 && chat % 1.0 == 0.0) chat.toLong() else 0
         if (NotificationRuntime.appVisible && chat > 0) {
+            AttentionNotifications.clearSession(context, identity, chat.toLong())
             ConversationNotifications.clear(context, identity, chat.toLong())
         }
         }
@@ -152,7 +178,7 @@ class BobNotificationWorker(context: Context, parameters: WorkerParameters) : Wo
         var activeBuild = false
         try {
             UUID.fromString(identity); PhoneLocationPolicy.endpoint(config.getString("endpoint"), BuildConfig.DEBUG)
-            val checks = NotificationChecks(applicationContext, current)
+            val checks = NotificationChecks(applicationContext, identity, current)
             activeBuild = checks.check(identity, config)
         } catch (_: SecurityException) {
             NotificationWatchStore.ifCurrent(applicationContext, identity, revision) { BobNotificationReply.revoke(applicationContext, identity); ConversationNotifications.clearBackend(applicationContext, identity); NotificationWatchStore.remove(applicationContext, identity); WorkManager.getInstance(applicationContext).cancelUniqueWork("bob-update-check:$identity") }
@@ -172,8 +198,8 @@ class BobNotificationWorker(context: Context, parameters: WorkerParameters) : Wo
     }
 }
 
-private class NotificationChecks(private val context: Context, private val current: () -> Boolean) {
-    private fun publish(): Boolean = AttentionNotifications.post(context, current, "bob-updates") != ConversationPostResult.RETRY
+private class NotificationChecks(private val context: Context, private val identity: String, private val current: () -> Boolean) {
+    private fun publish(): Boolean = AttentionNotifications.post(context, identity, updates = true, current = current, sourceChannel = "bob-updates") != ConversationPostResult.RETRY
     private fun noticeOnce(prefs: SharedPreferences, bucket: String, receipt: String): Boolean {
         synchronized(NotificationWatchStore) {
             val seen = prefs.getStringSet(bucket, emptySet())!!.toMutableSet()
@@ -185,11 +211,11 @@ private class NotificationChecks(private val context: Context, private val curre
         }
         return false
     }
-    private fun attentionOnce(prefs: SharedPreferences, bucket: String, receipt: String, channel: String): Boolean {
+    private fun attentionOnce(prefs: SharedPreferences, bucket: String, receipt: String, channel: String, chat: Long): Boolean {
         synchronized(NotificationWatchStore) {
             val seen = prefs.getStringSet(bucket, emptySet())!!.toMutableSet()
             if (seen.contains(receipt)) return true
-            when (AttentionNotifications.post(context, current, channel)) {
+            when (AttentionNotifications.post(context, identity, chat, current = current, sourceChannel = channel)) {
                 ConversationPostResult.RETRY -> return false
                 ConversationPostResult.VIEWED -> return true
                 ConversationPostResult.POSTED -> Unit
@@ -201,7 +227,7 @@ private class NotificationChecks(private val context: Context, private val curre
     private fun question(prefs: SharedPreferences, identity: String, chat: Long, value: JSONObject?): Boolean {
         val id = value?.optString("id") ?: return true
         if (id.isBlank() || NotificationRuntime.viewing(identity, chat)) return true
-        return attentionOnce(prefs, "questions", "$identity:$chat:$id", "bob-attention")
+        return attentionOnce(prefs, "questions", "$identity:$chat:$id", "bob-attention", chat)
     }
     private fun get(config: JSONObject, suffix: String): JSONObject {
         val connection = URI(config.getString("endpoint") + suffix).toURL().openConnection() as HttpURLConnection
@@ -229,7 +255,7 @@ private class NotificationChecks(private val context: Context, private val curre
             val item = alerts.getJSONObject(i)
             val sequence = item.getLong("sequence"); val chat = item.getLong("conversationId")
             require(sequence > next && chat > 0)
-            val delivered = NotificationRuntime.viewing(identity, chat) || attentionOnce(prefs, "alerts", "$identity:$sequence", "bob-schedules")
+            val delivered = NotificationRuntime.viewing(identity, chat) || attentionOnce(prefs, "alerts", "$identity:$sequence", "bob-schedules", chat)
             // Disabled channel or revoked permission is not delivery. Leave it retryable.
             if (!delivered) return
             next = sequence
@@ -261,7 +287,7 @@ private class NotificationChecks(private val context: Context, private val curre
                     else if (status == "done" && context.getSharedPreferences("bob-notification-preferences", Context.MODE_PRIVATE).getBoolean("replies", true) && !NotificationRuntime.viewing(identity, chat)) {
                         val reply = operation.optJSONObject("reply")
                         val receipt = "$identity:$chat:" + (reply?.optLong("id", 0)?.takeIf { it > 0 }?.toString() ?: request)
-                        if (!attentionOnce(prefs, "replies", receipt, "bob-completions-quiet")) continue
+                        if (!attentionOnce(prefs, "replies", receipt, "bob-completions-quiet", chat)) continue
                     }
                     NotificationWatchStore.ifCurrent(context, identity, value.getString("revision")) {
                         val completed = prefs.getStringSet("settled", emptySet())!!.toMutableSet(); completed.add(key)

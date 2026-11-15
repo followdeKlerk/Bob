@@ -1,6 +1,6 @@
 import {DatabaseSync} from 'node:sqlite';
 import {spawnSync} from 'node:child_process';
-import {createInterface} from 'node:readline/promises';
+import {terminalBanner,terminalSelect,terminalStyle,terminalText,terminalLine,TerminalCancelled} from './terminal-ui.js';
 import {accessSync,chmodSync,constants,existsSync,lstatSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,renameSync,rmSync,statSync,writeFileSync} from 'node:fs';
 import {homedir,tmpdir,userInfo} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
@@ -49,19 +49,21 @@ export function inspectSetup(state:string,configPath=join(homedir(),'.config/bob
  finally{db?.close();}
 }
 export async function terminalQuestion(question:string,fallback?:string){
- const input=createInterface({input:process.stdin,output:process.stdout});
- try{const answer=(await input.question(`${question}${fallback?` [${fallback}]`:''}: `)).trim();if(!answer&&!fallback)throw Error('An answer is required; rerun setup to continue.');return answer||fallback!;}finally{input.close();}
+ while(true){
+  const answer=(await terminalLine(`${terminalText(question)}${fallback?` [${terminalText(fallback)}]`:''}: `)).trim();
+  if(answer||fallback)return answer||fallback!;
+  console.log('Please enter a value, or press Ctrl+C to cancel.');
+ }
 }
 export async function terminalConfirm(question:string){
- const input=createInterface({input:process.stdin,output:process.stdout});
- try{return /^(y|yes)$/i.test((await input.question(`${question} [y/N] `)).trim());}finally{input.close();}
+ return await terminalSelect(question,[{value:'no',label:'No / skip',hint:'Leave this step unchanged'},{value:'yes',label:'Yes / continue',hint:'Approve only the action described above'}])==='yes';
 }
 export function terminalSecret(question:string):Promise<string>{
  if(!process.stdin.isTTY)throw Error('Private key entry requires a local terminal.');
  return new Promise((resolveSecret,reject)=>{
   let value='';const wasRaw=process.stdin.isRaw;process.stdout.write(question+': ');process.stdin.setRawMode(true);process.stdin.resume();
   const cleanup=()=>{process.stdin.off('data',receive);process.stdin.off('end',ended);process.stdin.setRawMode(wasRaw);process.stdin.pause();process.stdout.write('\n');};
-  const ended=()=>{cleanup();reject(Error('Private entry cancelled.'));};
+  const ended=()=>{cleanup();reject(new TerminalCancelled());};
   const receive=(chunk:Buffer)=>{for(const ch of chunk.toString('utf8')){
    if(ch==='\u0003'||ch==='\u0004'){ended();return;}
    if(ch==='\r'||ch==='\n'){cleanup();if(!value.trim())reject(Error('No key entered.'));else resolveSecret(value.trim());return;}
@@ -111,11 +113,30 @@ export function nativeSetupPort(cliPath=resolve(process.argv[1])):SetupPort{
     else{const cwd=resolve(await port.ask('Existing working folder',process.cwd()));if(!folder(cwd))throw Error('Working folder must exist and be readable.');store.set('cwd',cwd);}
     const old=store.get<{provider:string;modelId:string}>('model');
     if(old&&['openai','anthropic'].includes(old.provider)&&hasProviderCredential(store,old.provider)){port.say('Keeping existing provider credentials and model.');return;}
-    port.say('Authentication: 1 = OpenAI API key; 2 = Bob-owned ChatGPT browser login; 3 = Anthropic API key. Keys are entered privately here, never imported from another app.');
-    const choice=await port.ask('Choose 1, 2 or 3');if(!['1','2','3'].includes(choice))throw Error('Unsupported authentication choice.');
+    port.say('Connect a model account. Keys are entered privately here, never imported from another app. Model use may cost money.');
+    const choice=await terminalSelect('How would you like to authenticate?',[
+     {value:'1',label:'OpenAI API key',hint:'Use your OpenAI API billing account; hidden key entry'},
+     {value:'2',label:'ChatGPT subscription',hint:'Bob-owned browser login; no credential import from other apps'},
+     {value:'3',label:'Anthropic API key',hint:'Use your Anthropic API billing account; hidden key entry'},
+    ]);
     const provider=choice==='3'?'anthropic':'openai';
-    const model=await port.ask('Exact model ID available to your account',old?.provider===provider?old.modelId:undefined);
-    if(!createBackendModels(store).getModel(provider,model))throw Error('Unknown model ID in this Bob release. Configuration is incomplete; no provider request was made.');
+    const catalog=createBackendModels(store);
+    const available=catalog.getModels(provider);
+    port.say('Choose from this release’s model catalog. Listing a model does not prove your account can use it; no paid test request is sent.');
+    let page=0,model:string|undefined;
+    while(!model){
+     const size=6,start=page*size;
+     const choices=available.slice(start,start+size).map((entry,index)=>({value:String(start+index),label:entry.id,hint:entry.name}));
+     if(start+size<available.length)choices.push({value:'next',label:'Next models →',hint:'Browse the next page'});
+     if(page>0)choices.push({value:'previous',label:'← Previous models',hint:'Return to the previous page'});
+     choices.push({value:'manual',label:'Enter an exact model ID',hint:'For a model you already know from this release’s catalog'});
+     const selected=await terminalSelect(`Choose a ${provider} model · page ${page+1}`,choices);
+     if(selected==='next'){page++;continue;}
+     if(selected==='previous'){page--;continue;}
+     const candidate=selected==='manual'?await port.ask('Exact model ID',old?.provider===provider?old.modelId:undefined):available[Number(selected)].id;
+     if(!catalog.getModel(provider,candidate)){port.say('That model ID is not in this release. Choose from the list or check the spelling.');continue;}
+     model=candidate;
+    }
     if(hasProviderCredential(store,provider)){store.set('model',{provider,modelId:model});port.say('Reusing this provider’s existing Bob credentials.');}
     else if(choice==='2'){command(process.execPath,[cliPath,'--state',state,'login','--provider','openai','--model',model],true,330000);}
     else{const key=await terminalSecret(`${provider} API key (input hidden)`);await setProviderKey(store,provider,key);store.set('model',{provider,modelId:model});}
@@ -196,5 +217,8 @@ export async function setupOnTerminal(state:string){
  if(process.getuid?.()===0)throw Error('Run Bob setup as the intended non-root backend account; privileged steps ask for sudo separately.');
  if(!process.stdin.isTTY||!process.stdout.isTTY)throw Error('Guided setup needs an interactive local terminal. Legacy setup --cwd and doctor remain available for scripts.');
  const [major,minor,patch]=process.versions.node.split('.').map(Number);if(major!==24||minor<22||minor===22&&patch<1)throw Error('Use Node >=24.22.1 <25, or run install.sh to provision a private compatible runtime.');
- return guidedSetup(state,nativeSetupPort());
+ terminalBanner();
+ const port=nativeSetupPort();
+ port.step=(number,total,title)=>console.log('\n'+terminalStyle(`STEP ${number}/${total}  ${title}`,'1;36'));
+ return guidedSetup(state,port);
 }

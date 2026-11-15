@@ -1,3 +1,4 @@
+import {withMenuTheme} from '../menu-theme';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
@@ -17,7 +18,7 @@ function fitPaper(viewport:Size,paper:Size){
 const palette=[{label:'Black',value:'#111111'},{label:'Red',value:'#e53935'},{label:'Blue',value:'#246bfe'},{label:'Green',value:'#23935b'}];
 const exportTimeoutMs=10000;
 function pathFor(stroke:Stroke){const path=stroke.points.map((point,index)=>`${index?'L':'M'}${point.x},${point.y}`).join(' ');return stroke.points.length===1?`${path} l0.01,0`:path;}
-export function DrawingEditor({visible,onCancel,onAdd}:{visible:boolean;onCancel:()=>void;onAdd:(pngDataUri:string)=>Promise<void>}){
+function DrawingEditorContent({visible,onCancel,onAdd}:{visible:boolean;onCancel:()=>void;onAdd:(pngDataUri:string)=>Promise<void>}){
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
@@ -116,3 +117,5 @@ const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  tool:{...menuButtonChrome({colors,shadows}).circle,minHeight:48,minWidth:48,borderRadius:24,alignItems:'center',justifyContent:'center'},pill:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,minWidth:48,paddingHorizontal:8,paddingVertical:8,borderRadius:999,justifyContent:'center'},selected:{...menuButtonChrome({colors,shadows}).selected},disabled:{opacity:0.4},toolText:{...menuButtonChrome({colors,shadows}).label,fontSize:13,lineHeight:24,color:colors.foreground},swatch:{height:20,width:20,borderRadius:10},widthRow:{flexDirection:'row',alignItems:'center',gap:8},widthLabel:{fontSize:13,lineHeight:24,color:colors.muted},
  feedback:{fontSize:13,lineHeight:24,color:colors.foreground,paddingBottom:8},canvas:{flex:1,minHeight:0,width:'100%',maxWidth:680,alignSelf:'center',backgroundColor:colors.surface,overflow:'hidden'},
 }));
+
+export const DrawingEditor=withMenuTheme(DrawingEditorContent);

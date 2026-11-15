@@ -1,3 +1,4 @@
+import {menuThemes} from '../menu-theme';
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Modal,ScrollView,StyleSheet,Text as NativeText} from 'react-native';
@@ -14,8 +15,8 @@ const close=(tree:Renderer.ReactTestRenderer)=>tree.root.findByType(Button);
 
 test.each(['light','dark'] as const)('%s sheet uses Bob palette and typography for every text surface, with safe areas and one 48dp close action',scheme=>{
  let tree!:Renderer.ReactTestRenderer;act(()=>{tree=Renderer.create(<ThemeContext.Provider value={tokens[scheme]}><AttachmentDetails artifact={artifact} onClose={()=>{}}/></ThemeContext.Provider>);});
- const {colors}=tokens[scheme],sheet=tree.root.findByProps({testID:'attachment-details-sheet'});
- expect(StyleSheet.flatten(sheet.props.style).backgroundColor).toBe(colors.panel);
+ const {colors}=menuThemes[scheme],sheet=tree.root.findByProps({testID:'attachment-details-sheet'});
+ expect(StyleSheet.flatten(sheet.props.style).backgroundColor).toBe(colors.background);
  for(const value of ['Attachment details',artifact.name])expect(StyleSheet.flatten(text(tree,value).props.style).color).toBe(colors.foreground);
  for(const value of ['Type','MIME type','Size'])expect(StyleSheet.flatten(text(tree,value).props.style).color).toBe(colors.muted);
  for(const value of ['PDF document','application/pdf','2 KB'])expect(StyleSheet.flatten(text(tree,value).props.style).color).toBe(colors.body);
@@ -28,9 +29,10 @@ test.each(['light','dark'] as const)('%s sheet uses Bob palette and typography f
  act(()=>tree.unmount());
 });
 
-test('a mounted sheet follows palette changes without remounting its scroll host',()=>{
+test('a mounted sheet follows theme changes without remounting its scroll host',()=>{
  let tree!:Renderer.ReactTestRenderer;const render=(scheme:'light'|'dark')=><ThemeContext.Provider value={tokens[scheme]}><AttachmentDetails artifact={artifact} onClose={()=>{}}/></ThemeContext.Provider>;
  act(()=>{tree=Renderer.create(render('dark'));});const scroll=tree.root.findByType(ScrollView);
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'attachment-details-sheet'}).props.style).backgroundColor).toBe('#1b1c1d');
  act(()=>tree.update(render('light')));expect(tree.root.findByType(ScrollView)).toBe(scroll);expect(StyleSheet.flatten(text(tree,artifact.name).props.style).color).toBe(tokens.light.colors.foreground);act(()=>tree.unmount());
 });
 

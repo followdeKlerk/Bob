@@ -1,12 +1,15 @@
+import {withMenuTheme} from '../menu-theme';
+import {MotionSurface} from './motion-surface';
 import {PageSearch} from './page-search';
+import {EmptyState} from './empty-state';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text,TextInput} from './app-text';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,AppState,FlatList,Modal,Platform,Pressable,ScrollView,StyleSheet,View} from 'react-native';
+import {Alert,AppState,FlatList,Modal,Platform,Pressable,ScrollView,StyleSheet,View,KeyboardAvoidingView} from 'react-native';
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
 import {v4 as uuid} from 'uuid';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {ArrowLeft,Check,Plus,Pin,Trash2,RefreshCw,Eye,Pencil,Tags} from 'lucide-react-native';
+import {ArrowLeft,Check,Plus,Pin,Trash2,RefreshCw,Eye,Pencil,Tags,NotebookPen} from 'lucide-react-native';
 import {NotesStore,type NotesTransport} from '../notes-store';
 import {noteSnippet,toggleNoteTask} from '../notes-format';
 import {ChatMarkdown} from './chat-markdown';
@@ -43,7 +46,7 @@ function NotesPreview({body,onToggle}:{body:string;onToggle:(line:number)=>void}
   blocks.push(<Pressable key={`task-${index}`} accessibilityRole="checkbox" accessibilityLabel={task[2]||'Checklist item'} accessibilityState={{checked}} onPress={()=>onToggle(index)} style={s.task}><View style={[s.check,checked&&{backgroundColor:colors.accent}]}>{checked&&<Check size={16} color={colors.onAccent}/>}</View><Text typography="ui" style={[s.body,checked&&{textDecorationLine:'line-through',color:colors.muted}]}>{task[2]}</Text></Pressable>);
  });flush(-1);return <View style={{gap:8}}>{blocks}</View>;
 }
-export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:React.ReactNode;backendId:string;request:NotesTransport;visible:boolean;topInset:number;onBack?:()=>void}){
+function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:React.ReactNode;backendId:string;request:NotesTransport;visible:boolean;topInset:number;onBack?:()=>void}){
  const {colors}=useTheme();
  const palette=useThemedValue(paletteTheme);
  const s=useThemedValue(sTheme);
@@ -63,8 +66,8 @@ export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:Rea
  const insets=useSafeAreaInsets();
  const keyboard=useKeyboardInset();
  const categoryScroll=useRef<React.ComponentRef<typeof ScrollView>>(null),categoryInput=useRef<React.ComponentRef<typeof TextInput>>(null);
- // Android RN Modal owns dialog ADJUST_RESIZE; BobKeyboard only observes the Activity.
- // Keep the existing JS keyboard owner on iOS, never apply Activity IME padding to Android dialogs.
+ // BobKeyboard observes the Activity, not this dialog. Edge-to-edge Android
+ // needs measured remaining-overlap avoidance; iOS keeps its existing inset owner.
  const modalKeyboard=Platform.OS==='android'?0:keyboard;
  useEffect(()=>{let cancelled=false;void AsyncStorage.getItem(draftKey).then(raw=>{if(cancelled)return;if(raw){const saved=JSON.parse(raw);setDraft({...NoteValue.parse(valueOf(saved)),id:saved.id,baseRevision:saved.baseRevision??0});setEditing(true);}setEditorReady(true);}).catch(()=>{if(!cancelled)setDraftError('The unsaved note draft could not be loaded. It has not been overwritten.');});return()=>{cancelled=true;};},[draftKey]);
  useEffect(()=>{if(!editorReady)return;editorWrites.current=editorWrites.current.catch(()=>{}).then(()=>draft?AsyncStorage.setItem(draftKey,JSON.stringify(draft)):AsyncStorage.removeItem(draftKey));void editorWrites.current.catch(()=>{});},[draft,draftKey,editorReady]);
@@ -102,7 +105,7 @@ export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:Rea
  });
  if(!visible)return null;
  // This absolute overlay owns its IME clearance; App already consumes the bottom safe area.
- return <View testID="notes-screen" style={[StyleSheet.absoluteFill,s.screen,{paddingTop:topInset,paddingBottom:Math.max(0,keyboard-insets.bottom),zIndex:25}]}>
+ return <MotionSurface active={visible} testID="notes-screen" style={[StyleSheet.absoluteFill,s.screen,{paddingTop:topInset,paddingBottom:Math.max(0,keyboard-insets.bottom),zIndex:25}]}>
   <SectionHeading title="Notes"/>
   <View testID="notes-search-header" style={s.searchHeader}><PageSearch label="Search notes" placeholder="Search notes" value={query} onChangeText={setQuery}/></View>
   <SectionBody footer={<SectionActions overlay menu={menu}><RoundAction label={trash?'Show notes':'Show trash'} icon={trash?ArrowLeft:Trash2} selected={trash} onPress={()=>setTrash(value=>!value)}/><RoundAction label="Categories" icon={Tags} onPress={()=>setManaging(true)} disabled={!store.ready}/><RoundAction label="Sync notes" icon={RefreshCw} onPress={()=>void store.sync()} disabled={store.syncing}/><RoundAction label="Create note" icon={Plus} disabled={!store.ready||!editorReady} onPress={()=>open()} primary/></SectionActions>}>{clearance=>
@@ -112,7 +115,7 @@ export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:Rea
     {!!draftError&&<View style={{gap:8}}><Text typography="ui" style={s.status}>{draftError}</Text><Action label="Discard unreadable draft" onPress={()=>Alert.alert('Discard unreadable draft?','Only the unsaved editor draft will be removed. Your saved notes are kept.',[{text:'Cancel',style:'cancel'},{text:'Discard draft',style:'destructive',onPress:()=>{setDraftError('');setDraft(undefined);setEditorReady(true);}}])}/></View>}
     {(!store.ready||store.error||store.pendingCount>0)&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.status}>{!store.ready?(store.error||'Loading notes…'):store.error||`${store.pendingCount} pending · Saved on this device`}</Text>}
    </View>}
-   ListEmptyComponent={<Text typography="ui" style={[s.body,{paddingVertical:24,color:colors.muted}]}>{!store.ready?'Your saved notes will appear here.':query||category?'No matching notes.':trash?'Trash is empty.':'No notes yet. Tap + to add one.'}</Text>}
+   ListEmptyComponent={<EmptyState icon={NotebookPen} title={!store.ready?'Loading notes…':query||category?'No matching notes':trash?'Trash is empty':'A place for your notes'} description={!store.ready?'Your saved notes will appear here.':query||category?'Try another search or category.':trash?'Deleted notes can be restored here.':'Keep ideas, plans and checklists together. Tap + to add a note.'}/>}
    renderItem={({item})=><View testID={`note-row-${item.id}`} style={[s.noteRow,item.color!=='neutral'&&{backgroundColor:palette[item.color]}]}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Open note ${item.title||'Untitled'}`} disabled={!editorReady} onPress={()=>open(item)} style={s.noteLink}>
      <Text typography="ui" numberOfLines={3} style={s.noteTitle}>{item.title||'Untitled'}</Text>{!!item.body&&<Text typography="ui" numberOfLines={6} style={s.snippet}>{noteSnippet(item.body)}</Text>}
@@ -122,7 +125,7 @@ export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:Rea
     <View style={s.cardActions}><Pressable accessibilityRole="button" accessibilityLabel={`${item.pinned?'Unpin':'Pin'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),pinned:!item.pinned},item.id))} style={s.icon}><Pin size={18} color={item.pinned?colors.accent:colors.muted}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${item.trashed?'Restore':'Trash'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),trashed:!item.trashed},item.id))} style={s.icon}>{item.trashed?<ArrowLeft size={18} color={colors.muted}/>:<Trash2 size={18} color={colors.muted}/>}</Pressable></View>
    </View>}/>
   }</SectionBody>
-  {editing&&draft&&<Modal visible animationType="slide" onRequestClose={closeEditor}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}>
+  {editing&&draft&&<Modal visible animationType="slide" onRequestClose={closeEditor}><KeyboardAvoidingView enabled={Platform.OS==='android'} behavior="height" style={{flex:1}}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}>
    <SectionHeading title={draft.id?'Edit note':'New note'}/>
    <SectionBody footer={<SectionActions overlay leading={<RoundAction label="Save note and go back" disabled={saving} onPress={closeEditor} icon={ArrowLeft}/>}>
     <RoundAction label={preview?'Edit text':'Preview note'} icon={preview?Pencil:Eye} selected={preview} disabled={saving} onPress={()=>{bodyInput.current?.blur();setPreview(value=>!value);}}/>
@@ -136,24 +139,26 @@ export function NotesScreen({menu,backendId,request,visible,topInset}:{menu?:Rea
     <Action label={draft.pinned?'Unpin this note':'Pin this note'} onPress={()=>setDraft({...draft,pinned:!draft.pinned})}/>
    </ScrollView>
    }</SectionBody>
-  </SafeAreaView></Modal>}
-  {managing&&<Modal visible animationType="slide" onRequestClose={()=>{if(!categorySaving.current)setManaging(false);}}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}><SectionHeading title="Categories"/><SectionBody footer={<SectionActions overlay leading={<RoundAction label="Close categories" disabled={savingCategory} onPress={()=>setManaging(false)} icon={ArrowLeft}/>}>
+  </SafeAreaView></KeyboardAvoidingView></Modal>}
+  {managing&&<Modal visible animationType="slide" onRequestClose={()=>{if(!categorySaving.current)setManaging(false);}}><KeyboardAvoidingView enabled={Platform.OS==='android'} behavior="height" style={{flex:1}}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}><SectionHeading title="Categories"/><SectionBody footer={<SectionActions overlay leading={<RoundAction label="Close categories" disabled={savingCategory} onPress={()=>setManaging(false)} icon={ArrowLeft}/>}>
    {categoryForm.id&&<SectionAction label="Cancel category rename" text="Cancel" disabled={savingCategory} onPress={()=>setCategoryForm({name:''})}/>}
    <SectionAction label={categoryForm.id?'Save category name':'Create category'} text={categoryForm.id?'Save':'Create'} primary busy={savingCategory} disabled={savingCategory||!categoryForm.name.trim()} onPress={saveCategory}/>
   </SectionActions>}>{clearance=><ScrollView ref={categoryScroll} style={s.bodyRegion} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:clearance+16,gap:8}}>
    <Text typography="ui" style={s.label}>{categoryForm.id?'Rename category':'New category'}</Text>
    <TextInput typography="ui" ref={categoryInput} accessibilityLabel="Category name" editable={!savingCategory} placeholder="Category name" placeholderTextColor={colors.muted} maxLength={60} value={categoryForm.name} onChangeText={name=>setCategoryForm({...categoryForm,name})} style={s.input}/>
    {categories.map((item:CategoryRecord)=><View key={item.id} style={s.categoryRow}><Text typography="ui" style={s.categoryName}>{item.name}</Text><View style={s.wrap}><Action label={`Rename ${item.name}`} text="Rename" disabled={savingCategory} onPress={()=>{setCategoryForm({id:item.id,name:item.name,revision:item.revision});categoryScroll.current?.scrollTo({y:0,animated:true});categoryInput.current?.focus();}}/><Action label={`Remove category ${item.name}`} text="Remove" disabled={savingCategory} onPress={()=>Alert.alert('Remove category?','Your notes will be kept.',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>invoke(async()=>{await store.saveCategory({name:item.name,deleted:true},item.id);if(category===item.id)setCategory('');})}])}/></View></View>)}
-  </ScrollView>}</SectionBody></SafeAreaView></Modal>}
- </View>;
+  </ScrollView>}</SectionBody></SafeAreaView></KeyboardAvoidingView></Modal>}
+ </MotionSurface>;
 }
 const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({
  bodyRegion:{flex:1,minHeight:0},screen:{backgroundColor:colors.background},
  searchHeader:{paddingHorizontal:16,paddingBottom:8},
- icon:{...menuButtonChrome({colors,shadows}).circle},input:{...menuChrome.input,minHeight:48,color:colors.foreground,padding:8,fontSize:16},
+ icon:{width:48,height:48,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},input:{...menuChrome.input,minHeight:48,color:colors.foreground,padding:14,fontSize:16},
  action:{minHeight:48,minWidth:48,maxWidth:'100%',flexShrink:1,justifyContent:'center'},actionSurface:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,paddingHorizontal:8,paddingVertical:8,borderRadius:999,alignItems:'center',justifyContent:'center'},primary:{...menuButtonChrome({colors,shadows}).primary},actionText:{...menuButtonChrome({colors,shadows}).label,color:colors.foreground,fontSize:13,lineHeight:20,fontWeight:'500',flexShrink:1,textAlign:'center'},
  categoryScroller:{flexGrow:0,flexShrink:0},categoryStrip:{flexDirection:'row',flexWrap:'nowrap',alignItems:'center',gap:8,paddingVertical:6},categoryFilter:{flexShrink:0,maxWidth:undefined},
- chip:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,minWidth:48,maxWidth:'100%',paddingHorizontal:8,paddingVertical:8,borderRadius:999,justifyContent:'center'},selected:{...menuButtonChrome({colors,shadows}).selected},swatchSelected:{borderColor:colors.accent,borderWidth:2},small:{...menuButtonChrome({colors,shadows}).label,color:colors.foreground,fontSize:13,lineHeight:20,flexShrink:1},
- status:{color:colors.muted,fontSize:12,lineHeight:20},body:{color:colors.body,fontSize:16,lineHeight:24,flexShrink:1},noteRow:{paddingVertical:8,gap:8,flexDirection:'row',flexWrap:'wrap',alignItems:'center'},noteLink:{flexGrow:1,flexBasis:192,minWidth:0,maxWidth:'100%',minHeight:48,gap:8,paddingHorizontal:8},cardActions:{flexDirection:'row',justifyContent:'flex-end',gap:8,marginLeft:'auto'},noteTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground},snippet:{fontSize:13,lineHeight:24,color:colors.body},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:13,lineHeight:24,fontWeight:'500'},categoryRow:{paddingVertical:8,gap:8},categoryName:{color:colors.foreground,fontSize:15,lineHeight:24},
+ chip:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,minWidth:48,maxWidth:'100%',paddingHorizontal:8,paddingVertical:8,borderRadius:999,justifyContent:'center'},selected:{...menuButtonChrome({colors,shadows}).selected},swatchSelected:{borderColor:colors.accent,borderWidth:1},small:{...menuButtonChrome({colors,shadows}).label,color:colors.foreground,fontSize:13,lineHeight:20,flexShrink:1},
+ status:{color:colors.body,fontSize:12,lineHeight:20},body:{color:colors.body,fontSize:16,lineHeight:24,flexShrink:1},noteRow:{...menuChrome.card,padding:14,gap:8,flexDirection:'row',flexWrap:'wrap',alignItems:'center'},noteLink:{flexGrow:1,flexBasis:192,minWidth:0,maxWidth:'100%',minHeight:48,gap:8,paddingHorizontal:8},cardActions:{flexDirection:'row',justifyContent:'flex-end',gap:8,marginLeft:'auto'},noteTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground},snippet:{fontSize:14,lineHeight:22,color:colors.body},wrap:{flexDirection:'row',flexWrap:'wrap',gap:8},label:{color:colors.foreground,fontSize:13,lineHeight:24,fontWeight:'500'},categoryRow:{paddingVertical:8,gap:8},categoryName:{color:colors.foreground,fontSize:15,lineHeight:24},
  color:{height:48,width:48,borderRadius:24,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:colors.border},task:{minHeight:48,flexDirection:'row',alignItems:'center',gap:8},check:{width:24,height:24,borderRadius:5,borderWidth:1,borderColor:colors.accent,alignItems:'center',justifyContent:'center'},
 }));
+
+export const NotesScreen=withMenuTheme(NotesScreenContent);

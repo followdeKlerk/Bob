@@ -9,3 +9,10 @@ export function displayContext(display:Display):string{
   : 'This viewer has a legacy fixed inline height limit. Inline must fit completely within the supplied width and height, including native action buttons, without internal scrolling. Use inline only for content that fits; choose fullscreen for taller content or uncertain fit.';
  return `[Bob display context for this request: CSS-pixel layout bounds ${JSON.stringify(display)}. ${rules} No page headings or introductory prose that consume the visual. Fullscreen opens on user tap, not automatically. Keep typography readable. Use responsive layouts; width may change before opening.]`;
 }
+
+/** A request-scoped UI hint; device names never grant tools or permissions. */
+export function clientContext(deviceName: unknown): string {
+ return deviceName === 'Bob Desktop'
+  ? '[Bob client context for this request: The owner is using Bob Desktop on Linux. Replies and interactive views appear inside the desktop app. There is no embedded terminal. Phone-only actions remain on Android and are unavailable through this desktop device. This hint does not grant additional permissions.]'
+  : '';
+}

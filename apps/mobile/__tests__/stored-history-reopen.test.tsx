@@ -1,3 +1,5 @@
+import {cacheGeneration} from '../download-cache';
+jest.mock('../download-cache',()=>({cacheGeneration:jest.fn(()=>0)}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {useStoredHistory,mergeLatestHistory} from '../stored-history';
@@ -7,7 +9,7 @@ const backend='11111111-1111-4111-8111-111111111111';
 const page=(id:number,ids:number[],next?:string)=>({backendId:backend,conversationId:id,coverage:'stored-entries' as const,items:ids.map(id=>({id,kind:'pi.user',model:[{role:'user',content:'saved message'}]})),...(next?{next}:{})});
 let history:ReturnType<typeof useStoredHistory>;
 function Probe({id,request}:{id:number;request:(path:string)=>Promise<unknown>}){history=useStoredHistory(backend,id,request);return null;}
-beforeEach(()=>{jest.clearAllMocks();(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
+beforeEach(()=>{jest.clearAllMocks();(cacheGeneration as jest.Mock).mockReturnValue(0);(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
 test('cold reopening fetches stored messages even without a live snapshot or usable cache',async()=>{
  (readHistoryCache as jest.Mock).mockRejectedValue(Error('unreadable cache'));
  const request=jest.fn().mockResolvedValue(page(781,[1,2,3]));let tree!:Renderer.ReactTestRenderer;
@@ -38,4 +40,30 @@ test('history request failure is visible and refresh retries without clearing ca
 test('disjoint newest pages preserve pagination instead of hiding an offline gap',()=>{
  const merged=mergeLatestHistory(page(781,[1,2]),page(781,[10,11],'earlier'));
  expect(merged.items.map(item=>item.id)).toEqual([10,11]);expect(merged.next).toBe('earlier');
+});
+
+test('a delayed history fetch keeps its admission epoch without discarding the mounted live page',async()=>{
+ (cacheGeneration as jest.Mock).mockReturnValue(7);
+ let finish!:(value:unknown)=>void;
+ const request=jest.fn().mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockResolvedValue(page(781,[1,2]));
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<Probe id={781} request={request}/>);});
+ (cacheGeneration as jest.Mock).mockReturnValue(8); // clear/disable while request is in flight
+ await act(async()=>{finish(page(781,[1]));});
+ expect(writeHistoryCache).toHaveBeenLastCalledWith('history-pages:'+backend+':781',expect.any(String),7);
+ expect(history.page?.items.map(item=>item.id)).toEqual([1]);expect(history.error).toBeUndefined();
+ await act(async()=>{await history.refresh();});
+ expect(writeHistoryCache).toHaveBeenLastCalledWith('history-pages:'+backend+':781',expect.any(String),8);
+ expect(history.page?.items.map(item=>item.id)).toEqual([1,2]);expect(request).toHaveBeenCalledTimes(2);
+ await act(async()=>tree.unmount());
+});
+test('a rejected optional storage write cannot poison history or prevent network recovery',async()=>{
+ (writeHistoryCache as jest.Mock).mockRejectedValueOnce(Error('disk full'));
+ const request=jest.fn().mockResolvedValueOnce(page(781,[1])).mockRejectedValueOnce(Error('offline')).mockResolvedValueOnce(page(781,[1,2]));
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<Probe id={781} request={request}/>);});
+ expect(history.page?.items.map(item=>item.id)).toEqual([1]);expect(history.error).toBeUndefined();
+ await act(async()=>{await history.refresh().catch(()=>{});});expect(history.error).toBe('offline');
+ await act(async()=>{await history.refresh();});expect(history.error).toBeUndefined();expect(history.page?.items.map(item=>item.id)).toEqual([1,2]);
+ await act(async()=>tree.unmount());
 });

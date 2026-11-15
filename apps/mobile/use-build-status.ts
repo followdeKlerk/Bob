@@ -9,22 +9,48 @@ export function useBuildStatus(backend?:BuildBackend){
  const [value,setValue]=useState<{backendId:string;endpoint:string;state:BuildState}>(),[failure,setFailure]=useState<{backendId:string;endpoint:string;message:string}>(),[tick,setTick]=useState(0);
  const json=useRef('');
  useEffect(()=>{
-  if(!backend)return;let stopped=false,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|undefined,running=false;
+  if(!backend)return;
+  const source=backend;
+  type Attempt={controller:AbortController;timeout?:ReturnType<typeof setTimeout>};
+  let stopped=false,foreground=AppState.currentState==='active',timer:ReturnType<typeof setTimeout>|undefined,attempt:Attempt|undefined;
   json.current='';
-  async function poll(){
-   if(stopped||running||AppState.currentState!=='active')return;running=true;
-   controller=new AbortController();const timeout=setTimeout(()=>controller?.abort(),12000);let working=false;
-   try{
-    const c=await Keychain.getGenericPassword({service:`bob.${backend!.backendId}`});if(!c)throw Error('Pairing credential unavailable');
-    const response=await fetch(`${backend!.endpoint}/v1/updates`,{headers:{Authorization:`Bearer ${c.password}`,'x-bob-backend':backend!.backendId},signal:controller.signal});
-    if(!response.ok)throw Error(`Build status unavailable (${response.status})`);
-    const state=await response.json() as BuildState;if(stopped)return;
-    working=!!activeBuild(state);const raw=JSON.stringify(state);if(raw!==json.current){json.current=raw;setValue({backendId:backend!.backendId,endpoint:backend!.endpoint,state});}setFailure(undefined);
-   }catch(e){if(!stopped)setFailure({backendId:backend!.backendId,endpoint:backend!.endpoint,message:String((e as Error).message??e)});}
-   finally{clearTimeout(timeout);running=false;if(!stopped)timer=setTimeout(()=>void poll(),working?3000:15000);}
+  const current=(owned:Attempt)=>!stopped&&foreground&&attempt===owned;
+  function retire(){
+   const old=attempt;attempt=undefined;
+   if(old){clearTimeout(old.timeout);old.controller.abort();}
   }
-  void poll();const listener=AppState.addEventListener('change',state=>{if(state==='active'){clearTimeout(timer);void poll();}else{clearTimeout(timer);controller?.abort();}});
-  return()=>{stopped=true;clearTimeout(timer);controller?.abort();listener.remove();};
+  function schedule(delay:number){clearTimeout(timer);if(!stopped&&foreground)timer=setTimeout(()=>void poll(),delay);}
+  async function poll(){
+   if(stopped||attempt||!foreground)return;
+   const owned:Attempt={controller:new AbortController()};attempt=owned;
+   // An owned deadline is a real status-read failure. Lifecycle cancellation is
+   // silent and releases ownership immediately, even if native fetch settles late.
+   owned.timeout=setTimeout(()=>{
+    if(!current(owned))return;
+    setFailure({backendId:source.backendId,endpoint:source.endpoint,message:'Build status request timed out'});
+    retire();schedule(15000);
+   },12000);
+   let working=false;
+   try{
+    const c=await Keychain.getGenericPassword({service:`bob.${source.backendId}`});if(!current(owned))return;
+    if(!c)throw Error('Pairing credential unavailable');
+    const response=await fetch(`${source.endpoint}/v1/updates`,{headers:{Authorization:`Bearer ${c.password}`,'x-bob-backend':source.backendId},signal:owned.controller.signal});
+    if(!current(owned))return;
+    if(!response.ok)throw Error(`Build status unavailable (${response.status})`);
+    const state=await response.json() as BuildState;if(!current(owned))return;
+    working=!!activeBuild(state);const raw=JSON.stringify(state);if(raw!==json.current){json.current=raw;setValue({backendId:source.backendId,endpoint:source.endpoint,state});}setFailure(undefined);
+   }catch(e){if(current(owned))setFailure({backendId:source.backendId,endpoint:source.endpoint,message:String((e as Error).message??e)});}
+   finally{
+    clearTimeout(owned.timeout);
+    if(attempt===owned){attempt=undefined;schedule(working?3000:15000);}
+   }
+  }
+  void poll();
+  const listener=AppState.addEventListener('change',state=>{
+   foreground=state==='active';clearTimeout(timer);
+   if(foreground)void poll();else retire();
+  });
+  return()=>{stopped=true;clearTimeout(timer);retire();listener.remove();};
  },[backend?.backendId,backend?.endpoint,tick]);
  return {state:value?.backendId===backend?.backendId&&value?.endpoint===backend?.endpoint?value?.state:undefined,error:failure?.backendId===backend?.backendId&&failure?.endpoint===backend?.endpoint?failure?.message??'':'',refresh:()=>setTick(n=>n+1)};
 }

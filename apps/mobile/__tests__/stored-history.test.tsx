@@ -1,3 +1,5 @@
+import {cacheGeneration} from '../download-cache';
+jest.mock('../download-cache',()=>({cacheGeneration:jest.fn(()=>0)}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {useStoredHistory,mergeLatestHistory} from '../stored-history';
@@ -8,7 +10,7 @@ const backend='11111111-1111-4111-8111-111111111111';
 const page=(chat=781,ids=[2,3],next:string|undefined=undefined)=>({backendId:backend,conversationId:chat,coverage:'stored-entries' as const,items:ids.map(id=>({id,kind:'bob.user',data:{text:`Message ${id}`}})),next});
 let history!:ReturnType<typeof useStoredHistory>;
 function Harness({chat=781,request}:{chat?:number;request:(path:string)=>Promise<unknown>}){history=useStoredHistory(backend,chat,request);return null;}
-beforeEach(()=>{jest.clearAllMocks();(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
+beforeEach(()=>{jest.clearAllMocks();(cacheGeneration as jest.Mock).mockReturnValue(0);(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
 test('opening a conversation automatically restores authoritative history even when the cache read fails',async()=>{
  (readHistoryCache as jest.Mock).mockRejectedValue(Error('Oversized cache row'));
  const request=jest.fn().mockResolvedValue(page());let tree!:Renderer.ReactTestRenderer;
@@ -111,7 +113,7 @@ test('opening with a cached queued receipt persists its authoritative terminal r
  expect((history.page?.items[0].data as any).phase).toBe('save-queued');
  await act(async()=>finish(completed));
  expect((history.page?.items[0].data as any).phase).toBe('save-completed');
- expect(writeHistoryCache).toHaveBeenCalledWith('history-pages:'+backend+':781',expect.stringContaining('save-completed'));
+ expect(writeHistoryCache).toHaveBeenCalledWith('history-pages:'+backend+':781',expect.stringContaining('save-completed'),expect.any(Number));
  await act(async()=>tree.unmount());
 });
 

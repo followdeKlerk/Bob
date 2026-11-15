@@ -1,3 +1,4 @@
+import {menuThemes} from '../menu-theme';
 jest.mock('react-native/Libraries/AppState/AppState',()=>({__esModule:true,default:{currentState:'active',addEventListener:jest.fn(()=>({remove:jest.fn()}))}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
@@ -156,7 +157,7 @@ test('menu puts the current chat first and separates workspace and app destinati
  await act(async()=>{tree=Renderer.create(<ChatNavigation open onOpen={()=>{}} onClose={()=>{}} onSelect={()=>{}}/>);});
  const scroll=tree.root.findByType(ScrollView);
  const rows=scroll.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
- expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Chat','Agents and Sessions','Terminal','Notes','Workstations','Settings']);
+ expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Chat','Agents and Sessions','Terminal','Notes','Workstations','Tools','Settings']);
  const headers=scroll.findAllByType(Text).filter(node=>node.props.accessibilityRole==='header').map(node=>node.props.children);
  expect(headers).toEqual(['Workspace','App']);
  expect(rows[0].props.accessibilityState.selected).toBe(true);
@@ -174,20 +175,20 @@ test.each(['Notes','Workstations','Agents','Terminal','Settings'] as const)('men
  }finally{await act(async()=>tree.unmount());}
 });
 
-test.each(['light','dark'] as const)('%s selected menu row uses a thin outline without a filled highlight or remount',async scheme=>{
- const {ThemeContext,tokens}=require('../theme-context');let tree!:Renderer.ReactTestRenderer;
+test.each(['light','dark'] as const)('%s selected menu row uses a quiet selected fill and complete outline without a remount',async scheme=>{
+ const {ThemeContext,tokens}=require('../theme-context'),menuTheme=menuThemes[scheme];let tree!:Renderer.ReactTestRenderer;
  const onSelect=jest.fn();const render=(selected:'Chat'|'Notes')=><ThemeContext.Provider value={tokens[scheme]}><ChatNavigation open selected={selected} onOpen={jest.fn()} onClose={jest.fn()} onSelect={onSelect}/></ThemeContext.Provider>;
  await act(async()=>{tree=Renderer.create(render('Chat'));});
  const chat=tree.root.findByProps({accessibilityLabel:'Chat'}),notes=tree.root.findByProps({accessibilityLabel:'Notes'});
- expect(StyleSheet.flatten(chat.props.style)).toMatchObject({borderWidth:1,borderColor:tokens[scheme].colors.border,borderRadius:14});
- expect(StyleSheet.flatten(chat.props.style).backgroundColor).toBeUndefined();
+ expect(StyleSheet.flatten(chat.props.style)).toMatchObject({borderWidth:1,borderColor:menuTheme.colors.selectedBorder,borderRadius:16});
+ expect(StyleSheet.flatten(chat.props.style).backgroundColor).toBe(menuTheme.colors.selectedSurface);
  expect(StyleSheet.flatten(notes.props.style)).toMatchObject({borderWidth:1,borderColor:'transparent'});
  act(()=>notes.props.onPress());expect(onSelect).toHaveBeenCalledWith('Notes');
  await act(async()=>tree.update(render('Notes')));
  expect(tree.root.findByProps({accessibilityLabel:'Chat'})).toBe(chat);expect(tree.root.findByProps({accessibilityLabel:'Notes'})).toBe(notes);
  expect(chat.props.accessibilityState.selected).toBe(false);expect(notes.props.accessibilityState.selected).toBe(true);
  expect(StyleSheet.flatten(chat.props.style).borderColor).toBe('transparent');
- expect(StyleSheet.flatten(notes.props.style).borderColor).toBe(tokens[scheme].colors.border);
- expect(StyleSheet.flatten(notes.props.style).backgroundColor).toBeUndefined();
+ expect(StyleSheet.flatten(notes.props.style).borderColor).toBe(menuTheme.colors.selectedBorder);
+ expect(StyleSheet.flatten(notes.props.style).backgroundColor).toBe(menuTheme.colors.selectedSurface);
  await act(async()=>tree.unmount());
 });

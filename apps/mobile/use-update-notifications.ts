@@ -1,10 +1,12 @@
 import {useEffect,useRef} from 'react';
+import {workstationLabel} from './workstation-label';
 import {AppState,NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
-type Backend={backendId:string;endpoint:string;name:string};
+type Backend={backendId:string;endpoint:string;name:string;alias?:string};
 export async function enableUpdateNotifications(backends:Backend[],askPermission=true,onRegistered?:(backendId:string)=>Promise<void>){
  if(Platform.OS!=='android'||!backends.length||AppState.currentState!=='active')return false;
+ await NativeModules.BobNotifications.setWorkstationLabels?.(backends.map(backend=>({id:backend.backendId,label:workstationLabel(backend,backends)})));
  await NativeModules.BobNotifications.syncPushBackends?.(backends.map(backend=>backend.backendId));
  // Activation also reconciles deregistration when Android permission was revoked.
  // Native WorkManager retries registration without blocking pairing or the UI.
@@ -28,7 +30,7 @@ export async function enableUpdateNotifications(backends:Backend[],askPermission
  let watching=false;
  for(const backend of backends){
   const credential=await Keychain.getGenericPassword({service:`bob.${backend.backendId}`});
-  if(credential){await NativeModules.BobNotifications.watchUpdates(backend.endpoint,backend.backendId,credential.password,backend.name);await onRegistered?.(backend.backendId);watching=true;}
+  if(credential){await NativeModules.BobNotifications.watchUpdates(backend.endpoint,backend.backendId,credential.password,workstationLabel(backend,backends));await onRegistered?.(backend.backendId);watching=true;}
  }
  return watching;
 }

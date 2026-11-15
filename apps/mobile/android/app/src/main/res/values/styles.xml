@@ -9,10 +9,10 @@
         <item name="editTextStyle">@style/BobEditText</item>
         <item name="android:scrollViewStyle">@style/BobScrollView</item>
         <item name="android:horizontalScrollViewStyle">@style/BobHorizontalScrollView</item>
-        <item name="android:windowBackground">#000000</item>
-        <item name="android:colorBackground">#000000</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#1b1c1d</item>
+        <item name="android:colorBackground">#1b1c1d</item>
+        <item name="android:statusBarColor">#1b1c1d</item>
+        <item name="android:navigationBarColor">#1b1c1d</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <!-- Edge-to-edge drawer content supplies its own fade behind the controls;
@@ -24,8 +24,8 @@
         <item name="android:colorAccent">#e8e0d2</item>
         <item name="colorControlNormal">#e8e0d2</item>
         <item name="android:colorControlNormal">#e8e0d2</item>
-        <item name="colorPrimary">#000000</item>
-        <item name="colorPrimaryDark">#000000</item>
+        <item name="colorPrimary">#1b1c1d</item>
+        <item name="colorPrimaryDark">#1b1c1d</item>
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 

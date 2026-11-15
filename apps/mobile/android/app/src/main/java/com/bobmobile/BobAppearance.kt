@@ -21,7 +21,7 @@ internal object BobAppearance {
         val foregroundCss get() = "#%06x".format(foreground and 0xffffff)
     }
     private val light = Palette(true, Color.parseColor("#e8dfd0"), Color.parseColor("#292720"), Color.parseColor("#655f54"), Color.parseColor("#302d27"), Color.parseColor("#fffdf8"))
-    private val dark = Palette(false, Color.parseColor("#000000"), Color.parseColor("#e8e0d2"), Color.parseColor("#a1a1a1"), Color.parseColor("#e8e0d2"), Color.parseColor("#000000"))
+    private val dark = Palette(false, Color.parseColor("#1b1c1d"), Color.parseColor("#e8e0d2"), Color.parseColor("#b6b5b1"), Color.parseColor("#e8e0d2"), Color.parseColor("#000000"))
     private enum class Role { BACKGROUND, TEXT, MUTED, BUTTON }
     // No value captures its weak key; closed Activities/panels must remain collectible.
     private val views = WeakHashMap<View, Set<Role>>()

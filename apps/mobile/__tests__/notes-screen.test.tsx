@@ -7,7 +7,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useKeyboardInset} from '../keyboard-inset';
 import {NotesScreen} from '../components/notes-screen';
 import {SectionHeading,SectionActions,RoundAction} from '../components/section-ui';
-import {colors} from '../theme';
+import {menuThemes} from '../menu-theme';
+const menuTheme=menuThemes.dark;
+const {colors,menuChrome}=menuTheme;
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:24,bottom:20,left:0,right:0})}));
 jest.mock('../components/ui/button',()=>({Button:require('react-native').Pressable}));
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -35,6 +37,11 @@ test('real Notes UI creates a category and formatted checklist offline, saves on
   await act(async()=>{const save=()=>press(tree,'Save note');save();save();});
   expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
   expect(tree.root.findAllByProps({accessibilityLabel:'Open note My checklist'}).length).toBeGreaterThan(0);
+  const noteLink=tree.root.findAll(node=>node.props.accessibilityLabel==='Open note My checklist'&&typeof node.props.onPress==='function')[0];
+  const snippet=noteLink.findAllByType(Text).find(node=>node.props.numberOfLines===6)!;
+  const categoryText=noteLink.findAllByType(Text).find(node=>node.props.children==='Work')!;
+  expect(StyleSheet.flatten(snippet.props.style).color).toBe(colors.body);
+  expect(StyleSheet.flatten(categoryText.props.style).color).toBe(colors.body);
   const cached=JSON.parse((await AsyncStorage.getItem(`notes:v1:${backend}`))!);
   expect(cached.pending.filter((op:any)=>op.kind==='note')).toHaveLength(1);
   expect(cached.pending.find((op:any)=>op.kind==='note').value.body).toContain('- [x] Milk');
@@ -173,7 +180,7 @@ test('Notes keeps swipeable filters by content and Trash, Tags, Sync, Create in 
   expect(StyleSheet.flatten(all.props.style).maxWidth).toBeUndefined();
   expect(StyleSheet.flatten(all.findByType(Text).props.style)).toMatchObject({textAlign:'center',textAlignVertical:'center',includeFontPadding:false});
   act(()=>press(tree,'Create note'));
-  expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject({borderRadius:14,borderWidth:1,borderColor:colors.border});
+  expect(StyleSheet.flatten(tree.root.findByProps({accessibilityLabel:'Note title'}).props.style)).toMatchObject(menuChrome.input);
   const editorHeading=tree.root.findAllByType(SectionHeading).find(node=>node.props.title==='New note')!;
   expect(editorHeading.findAllByType(RoundAction)).toHaveLength(0);
   const editorFooter=tree.root.findAllByType(SectionActions).find(node=>!!node.props.leading)!;
@@ -182,11 +189,10 @@ test('Notes keeps swipeable filters by content and Trash, Tags, Sync, Create in 
   const save=tree.root.findAll(node=>node.props.accessibilityLabel==='Save note'&&typeof node.props.onPress==='function')[0];
   expect(save.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===colors.surface&&style?.borderRadius===999&&style?.borderColor===colors.foreground;})).toBe(true);
   const shade=tree.root.findByProps({accessibilityLabel:'Note shade: Standard gray'});
-  expect(StyleSheet.flatten(shade.props.style)).toMatchObject({borderRadius:24,borderWidth:2,borderColor:colors.accent,backgroundColor:colors.surface});
+  expect(StyleSheet.flatten(shade.props.style)).toMatchObject({borderRadius:24,borderWidth:1,borderColor:colors.accent,backgroundColor:colors.surface});
   act(()=>input(tree,'Note title','Outlined card'));await act(async()=>press(tree,'Save note'));
   const noteRow=tree.root.findAll(node=>typeof node.props.testID==='string'&&node.props.testID.startsWith('note-row-'))[0];
-  expect(StyleSheet.flatten(noteRow.props.style).borderWidth).toBeUndefined();
-  expect(StyleSheet.flatten(noteRow.props.style).borderRadius).toBeUndefined();
+  expect(StyleSheet.flatten(noteRow.props.style)).toMatchObject(menuChrome.card);
  }finally{await act(async()=>tree.unmount());}
 });
 
@@ -266,7 +272,11 @@ test.each(['android','ios'])('Notes input dialogs use one platform keyboard owne
    expect(modal.props.statusBarTranslucent).not.toBe(true);
    expect(modal.props.navigationBarTranslucent).not.toBe(true);
    expect(StyleSheet.flatten(host.props.style).paddingBottom).toBe(os==='android'?0:300);
-   expect(modal.findAllByType(require('react-native').KeyboardAvoidingView)).toHaveLength(0);
+   const avoidance=modal.findByType(require('react-native').KeyboardAvoidingView);
+   expect(avoidance.props.enabled).toBe(os==='android');
+   expect(avoidance.props.behavior).toBe('height');
+   expect(avoidance.props.keyboardVerticalOffset).toBeUndefined();
+   expect(StyleSheet.flatten(avoidance.props.style)).toMatchObject({flex:1});
    expect(modal.findByType(SectionActions).findAllByProps({testID:'section-footer'}).length).toBeGreaterThan(0);
    if(open==='Categories')act(()=>press(tree,'Close categories'));
   }

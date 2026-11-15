@@ -1,14 +1,17 @@
+import {createSessionActivity} from './session-activity.js';
 import {installedDurableVersion} from './recovery.js';
+import {createBtwManager} from './btw.js';
 import {createTerminalManager,type TerminalManager} from './terminal.js';
 import {agentOverview,conversationAgentStatus} from './agent-overview.js';
 import {Schedules,schedulesView,scheduleAlerts,scheduleHealth} from './schedules.js';
 import {RetiredChat,retiredMetadata,isRetired,isRetiredProvider,requireActiveConversation,retiredMessage} from './retired-chat-profile.js';
-import {displayContext,INLINE_VISUAL_EMERGENCY_HEIGHT} from './display-context.js';
+import {clientContext,displayContext,INLINE_VISUAL_EMERGENCY_HEIGHT} from './display-context.js';
 import {registerDelegationOwner,revokeDelegation} from './delegation-budget.js';
 import {handleDelegationCommand,delegationMenuCommand} from './delegation-command.js';
 import {conversationTitle,isPlaceholderTitle} from './conversation-title.js';
 import {createConversationProjection} from './conversation-projection.js';
 import {connectionStream,connectionActivity} from './connection-stream.js';
+import {createSnapshotDelivery,SNAPSHOT_REFRESH_MS} from './snapshot-delivery.js';
 import {mobileTranscriptEntries} from './mobile-transcript.js';
 import {phoneToolsAvailability,phoneToolsView,claimPhoneTool} from './phone-tools.js';
 import {diagnosticView,respondDiagnostics} from './app-diagnostics.js';
@@ -92,6 +95,8 @@ export async function serve(
   options: {
     port: number;
     host?: string;
+    /** Explicit local UDP bind address when HTTPS is served through a loopback proxy. */
+    terminalHost?: string;
     tls?: { cert: string; key: string };
     runtime?: Runtime;
     devPeerLoopback?: boolean;
@@ -109,8 +114,10 @@ export async function serve(
     );
   const runtime = options.runtime ?? (await openRuntime(state)),
     h = runtime.harness;
+  const sessionActivity=createSessionActivity(state,h,runtime.library.id);
   const streams = new Set<ServerResponse>();
-  const terminal=options.terminal??createTerminalManager(state,{host});
+  const terminal=options.terminal??createTerminalManager(state,{host:options.terminalHost??host});
+  const btw=createBtwManager(runtime.models);
   let activeNotes=0,activeTerminals=0;
   // Upstream ConversationView deliberately contains BUILT-IN docs only.
   // Add Bob's native document snapshots explicitly; never assume watch exposes them.
@@ -125,7 +132,7 @@ export async function serve(
       const live=await h.snapshot(LiveDoc,agent.conversationId,ctx);
       return [name,{...agent,status:conversationAgentStatus(inspection,agent.conversationId,live)}];
     })));
-    return { ...view, entries:mobileTranscriptEntries(await runtime.replyPresentation(id,await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents)))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx),profile:retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{})}, 'bob.profile': retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{}), 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.phone-tools': await phoneToolsView(h,(await h.conversation(id,ctx))!,deviceId,ctx), 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
+    return { ...view, activity:conversationAgentStatus(inspection,id,await h.snapshot(LiveDoc,id,ctx)), entries:mobileTranscriptEntries(await runtime.replyPresentation(id,await presentMemoryStatuses(h,id,await presentSubagentReports(h,id,view.entries,subagents)))), work, docs: { ...view.docs, 'bob.chat': {...meta,...await h.snapshot(SessionUI,id,ctx),profile:retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{})}, 'bob.profile': retiredMetadata(await h.snapshot(RetiredChat,id,ctx)??{}), 'bob.display': {inlineHeight:INLINE_VISUAL_EMERGENCY_HEIGHT}, 'bob.phone-tools': await phoneToolsView(h,(await h.conversation(id,ctx))!,deviceId,ctx), 'bob.diagnostics': await diagnosticView(h,(await h.conversation(id,ctx))!,deviceId), 'bob.schedules': Object.fromEntries(Object.values((await h.snapshot(Schedules,ctx))?.jobs??{}).filter(j=>j.conversationId===id).map(j=>[j.id,{...j,result:undefined,workerId:undefined,history:j.history.slice(-1),health:scheduleHealth(j,inspection)}])), 'bob.todos': todos, 'bob.questions': questions?.pending&&questionChoices?.questionId===questions.pending.id&&questionChoices.options?.length?{...questions,pending:{...questions.pending,options:questionChoices.options,multiple:questionChoices.multiple??false}}:questions, 'app.subagents': subagents?{...subagents,agents}:undefined } };
   }
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -134,7 +141,7 @@ export async function serve(
       if(path==='/internal/update-health'){
         if(!process.env.BOB_HEALTH_TOKEN||req.headers.authorization!=='Bearer '+process.env.BOB_HEALTH_TOKEN)throw new HttpError(401,'Supervisor authorization required');
         const inspection=await h.inspect(ctx);
-        return send(res,200,{backendId:state.id,releaseId:process.env.BOB_RELEASE_ID,foreground:inspection.tasks.filter(t=>!t.record.background).length+inspection.submissions.length+activeNotes+activeTerminals});
+        return send(res,200,{backendId:state.id,releaseId:process.env.BOB_RELEASE_ID,foreground:inspection.tasks.filter(t=>!t.record.background).length+inspection.submissions.length+activeNotes+activeTerminals+btw.activeCount()});
       }
       if(state.get('maintenanceHome')&&req.method!=='GET'&&(path.endsWith('/messages')||path==='/v1/peer/message'||path==='/v1/chats'||path==='/v1/notes/sync'||/^\/v1\/chats\/[^/]+\/terminal$/.test(path))&&withMaintenance(state,store=>store.get('draining')))
         throw new HttpError(503,'Backend update is waiting for active work; retry after reconnect');
@@ -164,8 +171,8 @@ export async function serve(
       if(path==='/v1/push/register'){
         const deviceId=String(state.authenticate(token)!.id);
         if(req.method==='POST'){
-          const p=z.object({token:z.string().min(20).max(4096).regex(/^[A-Za-z0-9_:\-]+$/)}).strict().parse(await body(req,8192));
-          return send(res,200,await runtime.push.register(deviceId,p.token));
+          const p=z.object({token:z.string().min(20).max(4096).regex(/^[A-Za-z0-9_:\-]+$/),contextVersion:z.literal(1).optional()}).strict().parse(await body(req,8192));
+          return send(res,200,await runtime.push.register(deviceId,p.token,p.contextVersion));
         }
         if(req.method==='DELETE'){await runtime.push.unregister(deviceId);return send(res,200,{registered:false});}
         throw new HttpError(405,'Push registration supports POST or DELETE');
@@ -296,7 +303,7 @@ export async function serve(
       if (path === "/v1/library") {
         if (req.method === "GET") {
           const library=await h.snapshot(Library,runtime.library.id,ctx),metadata=await h.snapshot(SkillMetadata,runtime.library.id,ctx);
-          return send(res,200,{...library,skills:Object.fromEntries(Object.entries(library?.skills??{}).filter(([name])=>!metadata?.skills[name]?.archived)),commands:[delegationMenuCommand,{name:'learn',description:'Learn a reusable skill from sources or this workflow.'},{name:'refine',description:'Review this conversation to improve memory and skills.'}],archivedSkills:Object.entries(metadata?.skills??{}).filter(([,skill])=>skill.archived).map(([name])=>name)});
+          return send(res,200,{...library,skills:Object.fromEntries(Object.entries(library?.skills??{}).filter(([name])=>!metadata?.skills[name]?.archived)),commands:[delegationMenuCommand,{name:'btw',description:'Ask a tool-free side question using a recent chat snapshot without interrupting the main task.'},{name:'learn',description:'Learn a reusable skill from sources or this workflow.'},{name:'refine',description:'Review this conversation to improve memory and skills.'}],archivedSkills:Object.entries(metadata?.skills??{}).filter(([,skill])=>skill.archived).map(([name])=>name)});
         }
         if (req.method === "PUT") {
           const value = z
@@ -351,6 +358,7 @@ export async function serve(
           // they simply do not belong in the regular top-level Sessions list.
           const items=await Promise.all(page.items.map(async c=>({
             ...c,
+            lastActivityAt:sessionActivity.lastActivityAt(c.id),
             meta:{...await h.snapshot(ChatMeta,c.id,ctx),...await h.snapshot(SessionUI,c.id,ctx),profile:retiredMetadata(await h.snapshot(RetiredChat,c.id,ctx)??{})},
           })));
           return send(res,200,{items,next:encodeCursor(state,'chats',page.next)});
@@ -397,6 +405,42 @@ export async function serve(
         if (!chat) throw new HttpError(404, "Conversation not found");
         const retired=await isRetired(h,id);
         if(retired&&!['GET','HEAD'].includes(req.method??'')&&action!=='metadata'&&action!=='stop'&&!(action===''&&req.method==='DELETE'))throw new HttpError(410,retiredMessage);
+        if(action==='btw'||action.startsWith('btw/')){
+          if(retired)throw new HttpError(410,retiredMessage);
+          const record=await h.commit(tx=>tx.conversation(id),ctx);
+          if(!record||record.owner)throw new HttpError(403,'Open a main conversation to use side chat');
+          if((await h.snapshot(SessionUI,id,ctx))?.trashed)throw new HttpError(403,'Restore this conversation before using side chat');
+          const device=state.authenticate(token);if(!device)throw new HttpError(401,'Device authorization required');
+          if(action==='btw/discard'&&req.method==='POST'){
+            z.object({allForDevice:z.literal(true)}).strict().parse(await body(req));
+            return send(res,200,{discarded:btw.discardDevice(String(device.id))});
+          }
+          const route=/^btw(?:\/([^/]+)(?:\/(messages|cancel))?)?$/.exec(action);
+          if(!route)throw new HttpError(404,'Side-chat route not found');
+          const thread=route[1]?z.string().uuid().parse(route[1]):undefined,operation=route[2];
+          if(!thread&&req.method==='POST'){
+            z.object({}).strict().parse(await body(req));
+            return send(res,201,await btw.create(chat,String(device.id),ctx));
+          }
+          if(thread&&!operation&&req.method==='GET'){
+            const view=btw.get(id,String(device.id),thread);
+            return send(res,200,url.searchParams.get('revision')===String(view.revision)?{unchanged:true}:view);
+          }
+          if(thread&&!operation&&req.method==='DELETE'){
+            btw.remove(id,String(device.id),thread);return send(res,200,{discarded:true});
+          }
+          if(thread&&operation==='messages'&&req.method==='POST'){
+            const input=z.object({requestId:z.string().uuid(),text:z.string().trim().min(1).max(4000)}).strict().parse(await body(req));
+            // Body reads can yield while an update starts draining. Recheck at
+            // the paid admission boundary; the manager publishes active state synchronously.
+            if(state.get('maintenanceHome')&&withMaintenance(state,store=>store.get('draining')))throw new HttpError(503,'Backend update is waiting for active work; retry after reconnect');
+            return send(res,202,btw.submit(id,String(device.id),thread,input.requestId,input.text));
+          }
+          if(thread&&operation==='cancel'&&req.method==='POST'){
+            z.object({}).strict().parse(await body(req));return send(res,200,btw.cancel(id,String(device.id),thread));
+          }
+          throw new HttpError(405,'Unsupported side-chat operation');
+        }
         if(action==='terminal'){
           if(!['GET','POST','DELETE'].includes(req.method??''))throw new HttpError(405,'Terminal supports GET, POST and DELETE');
           if(retired)throw new HttpError(410,retiredMessage);
@@ -431,6 +475,7 @@ export async function serve(
             if(flags.trashed){flags.archived=false;flags.pinned=false;}
             return {...JSON.parse(JSON.stringify(value)),...flags};
           },ctx);
+          if(patch.archived===false)sessionActivity.touch(id);
           return send(res,200,{id,meta});
         }
         if (action === "" && req.method === "DELETE") {
@@ -542,6 +587,7 @@ export async function serve(
             },ctx);
           };
           if (existing) {await nameSession();return send(res, 200, existing);}
+          if(/^\/btw(?:\s|$)/i.test(p.text.trim()))throw new HttpError(400,'Update the Bob app and open /btw in its separate side-chat workspace. No main-chat input was admitted.');
           // Authenticated owner commands are admitted without model authentication or inference.
           const delegationCommand=await handleDelegationCommand(state,h,runtime.delegation,chat,p.text,requestId,p.requestId,p.questionId);
           if(delegationCommand)return send(res,200,delegationCommand);
@@ -558,9 +604,7 @@ export async function serve(
           await registerDelegationOwner(state,chat,{requestId,clientRequestId:p.requestId,deviceId:String(state.authenticate(token)!.id),allow:p.allowSubagents});
           await bindLocationDevice(chat,String(state.authenticate(token)!.id));
           const submission = await chat.submit(
-            { type: "input", content: p.display ? `${p.text}
-
-${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
+            { type: "input", content: [p.text, clientContext(state.authenticate(token)!.name), p.display ? displayContext(p.display) : ''].filter(Boolean).join('\n\n'), whenBusy: p.mode, requestId,
               entry:{kind:'bob.user',data:{text:p.text,allowSubagents:p.allowSubagents,requestId:p.requestId}} },
             ctx
           );
@@ -603,7 +647,6 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
           const watch = await chat.watch(ctx);
           const project = createConversationProjection(chat, ctx);
           let ended = false;
-          let emitting = Promise.resolve();
           res.writeHead(200, {
             "content-type": "text/event-stream",
             "cache-control": "no-store",
@@ -611,20 +654,21 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
           });
           streams.add(res);
           // Reattach always sends authoritative snapshot; Last-Event-ID is not a mutation retry.
-          // Native watch delivery is serialized, but our periodic Bob-doc refresh
-          // is not part of that watch. Put *all* projection/presentation/writes on
-          // the same line so a slow older refresh cannot overwrite a newer value.
-          const emit = (value: ConversationView) => {
-            emitting = emitting.then(async () => {
-              if (ended) return;
-              const device = state.authenticate(token);
-              if (!device) { res.end(); return; }
+          // Watch and periodic Bob-doc reads share one serialized projection line.
+          // Only the latest pending native value is retained while reading/draining.
+          const delivery = createSnapshotDelivery<ConversationView>({
+            heartbeats: url.searchParams.get('heartbeats') === '1',
+            patches: url.searchParams.get('patches') === '1',
+            authorized: () => !ended && !res.destroyed && !!state.authenticate(token),
+            read: async value => {
+              const device = state.authenticate(token)!;
               const view = await present(await project(value), id, String(device.id));
-              if (ended || res.destroyed) return;
-              if (!state.authenticate(token)) { res.end(); return; }
-              if (!res.write(`event: snapshot\ndata: ${JSON.stringify({
-                backendId: state.id, conversationId: id, view,
-              })}\n\n`)) {
+              return JSON.stringify({backendId: state.id, conversationId: id, view});
+            },
+            heartbeat: () => JSON.stringify({backendId: state.id, conversationId: id, observedAt: Date.now()}),
+            end: () => res.end(),
+            write: async frame => {
+              if (!res.write(frame)) {
                 if (ended || res.destroyed) return;
                 // Whichever event wins, remove both waiters (including their
                 // error listeners) rather than retaining one until disconnect.
@@ -633,25 +677,21 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
                   await Promise.race([once(res, "drain", {signal: wait.signal}), once(res, "close", {signal: wait.signal})]);
                 } finally { wait.abort(); }
               }
-            });
-            return emitting;
-          };
-          let refreshing = false;
+            },
+          });
           const timer = setInterval(() => {
             if (!state.authenticate(token)) { res.end(); return; }
-            if (refreshing || ended) return;
-            refreshing = true;
-            void emit(watch.value).catch(() => res.end()).finally(() => { refreshing = false; });
-          }, 3000);
+            delivery.offer(watch.value, true);
+          }, SNAPSHOT_REFRESH_MS);
           res.on("close", () => {
             ended = true;
+            delivery.stop();
             clearInterval(timer);
             streams.delete(res);
             void watch.stop();
           });
-          await emit(watch.value);
-          if (ended) return;
-          watch.start(async call=>{if(call.kind==='value')await emit(call.value);});
+          delivery.offer(watch.value);
+          watch.start(async call=>{if(call.kind==='value')delivery.offer(call.value);});
           void watch.closed.then(()=>{if(!ended)res.end();});
           return;
         }
@@ -695,10 +735,11 @@ ${displayContext(p.display)}` : p.text, whenBusy: p.mode, requestId,
     server,
     runtime,
     async close() {
+      await sessionActivity.close();
       for (const s of streams) s.end();
       server.close();
       server.closeAllConnections();
-      try{await terminal.close();}finally{await runtime.close();}
+      try{await btw.close();}finally{try{await terminal.close();}finally{await runtime.close();}}
     },
   };
 }

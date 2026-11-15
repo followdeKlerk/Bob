@@ -85,3 +85,41 @@ test('real SSE parser releases cumulative XHR responses during sustained multi-m
   expect(requests.slice(0,-1).every(request=>request.aborted&&request.responseText==='')).toBe(true);
  }finally{stream?.close();globalThis.XMLHttpRequest=original;}
 });
+
+test('negotiates tiny idle heartbeats without transcript publication or frequent reconnects',()=>{
+ const value=create();expect((EventSource as unknown as jest.Mock).mock.calls[0][0]).toBe('https://one.ts.net/events?heartbeats=1&patches=1');
+ emit(0,'snapshot',{data:'initial'});
+ for(let t=0;t<120000;t+=3000){jest.advanceTimersByTime(3000);emit(0,'heartbeat',{data:'{}'});}
+ expect(clients).toHaveLength(1);expect(value.onSnapshot).toHaveBeenCalledTimes(1);expect(value.onReconnect).toHaveBeenCalledTimes(1);
+ value.stream.close();
+});
+test('heartbeats cannot keep alive a connection missing its initial authoritative snapshot',()=>{
+ const value=create();
+ for(let t=0;t<18000;t+=3000){emit(0,'heartbeat',{data:'{}'});jest.advanceTimersByTime(3000);}
+ expect(clients[0].close).toHaveBeenCalled();value.stream.close();
+});
+test('heartbeat callbacks from old sockets cannot mask a stalled replacement',()=>{
+ const value=create();emit(0,'snapshot',{data:'initial'});emit(0,'error',{xhrStatus:0});jest.advanceTimersByTime(1000);
+ emit(1,'snapshot',{data:'replacement'});
+ for(let t=0;t<18000;t+=3000){emit(0,'heartbeat',{data:'{}'});jest.advanceTimersByTime(3000);}
+ expect(clients[1].close).toHaveBeenCalled();value.stream.close();
+});
+test('heartbeat negotiation preserves existing query parameters',()=>{
+ const stream=snapshotStream('https://one.ts.net/events?existing=1',{},jest.fn(),jest.fn());
+ expect((EventSource as unknown as jest.Mock).mock.calls.at(-1)[0]).toBe('https://one.ts.net/events?existing=1&heartbeats=1&patches=1');stream.close();
+});
+test('patches publish reconstructed authoritative views without extra reconciliation',()=>{
+ const value=create(jest.fn(data=>JSON.parse(data)));
+ emit(0,'snapshot',{data:'{"n":1}'});
+ emit(0,'snapshot-patch',{data:JSON.stringify({base:0,sequence:1,prefix:5,remove:1,insert:'2',length:7})});
+ expect(value.onSnapshot.mock.calls.map(call=>call[0])).toEqual(['{"n":1}','{"n":2}']);expect(value.onReconnect).toHaveBeenCalledTimes(1);
+ value.stream.close();
+});
+test('missing patch base reconnects GET-only and requires fresh snapshot before patches',()=>{
+ const value=create();emit(0,'snapshot',{data:'{"n":1}'});
+ emit(0,'snapshot-patch',{data:JSON.stringify({base:2,sequence:3,prefix:5,remove:1,insert:'2',length:7})});
+ jest.advanceTimersByTime(1000);expect(clients).toHaveLength(2);expect(value.onSnapshot).toHaveBeenCalledTimes(1);
+ emit(1,'snapshot-patch',{data:JSON.stringify({base:0,sequence:1,prefix:5,remove:1,insert:'2',length:7})});
+ jest.advanceTimersByTime(2000);expect(clients).toHaveLength(3);
+ emit(2,'snapshot',{data:'{"n":3}'});expect(value.onSnapshot).toHaveBeenLastCalledWith('{"n":3}');value.stream.close();
+});

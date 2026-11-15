@@ -405,7 +405,7 @@ test('metadata validation fails closed rather than deleting or signalling unknow
   await assert.rejects(f.manager.close(),code('invalid_metadata'));
 });
 
-test('real loopback Mosh bootstrap, retry, reconnect, restart recovery and exact tmux End',{
+test('real Mosh bootstrap, retry, reconnect, restart recovery and exact tmux End',{
   skip:process.env.BOB_TEST_MOSH_LIVE!=='1',timeout:30000,
 },async()=>{
   await Promise.all([access('/usr/bin/mosh-server'),access('/usr/bin/tmux')]);
@@ -413,7 +413,7 @@ test('real loopback Mosh bootstrap, retry, reconnect, restart recovery and exact
   const {mkdir}=await import('node:fs/promises');await mkdir(cwd);
   const moved=join(cwd,'changed directory');await mkdir(moved);
   const state=new State(dir),paired=state.pair(state.invite().token,'Isolated terminal test');
-  const device=paired.deviceId,chat=randomUUID(),options={host:'127.0.0.1',portStart:62020,portEnd:62021,maxSessions:2,reapIntervalMs:0};
+  const device=paired.deviceId,chat=randomUUID(),options={host:process.env.BOB_TEST_MOSH_HOST??'127.0.0.1',portStart:62020,portEnd:62021,maxSessions:2,reapIntervalMs:0};
   let manager=createTerminalManager(state,options);
   const socket=join(dir,'terminal','tmux.sock');
   const tmux=(...args:string[])=>exec('/usr/bin/tmux',['-S',socket,'-f','/dev/null',...args],{env:{PATH:'/usr/bin:/bin',HOME:dir,LC_ALL:'C.UTF-8'},timeout:3000});
@@ -513,4 +513,14 @@ finally:
     // Exact fixture socket, never the user's tmux server.
     await tmux('kill-server').catch(()=>{});state.close();await rm(dir,{recursive:true,force:true});
   }
+});
+
+test('explicit local Tailscale transport binds Mosh and receipts to the phone-reachable address',async()=>{
+ const f=fixture({host:'100.95.143.10',localAddresses:['127.0.0.1','100.95.143.10']});
+ try{
+  const receipt=await f.manager.connect('owner','one','/tmp',randomUUID());
+  assert.equal(receipt.host,'100.95.143.10');assert.equal(receipt.port,60020);
+  const command=f.commands.find(c=>c.file.endsWith('/mosh-server'))!;
+  assert.equal(command.args[command.args.indexOf('-i')+1],'100.95.143.10');
+ }finally{await f.manager.close();}
 });

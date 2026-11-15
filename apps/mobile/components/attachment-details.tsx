@@ -1,3 +1,4 @@
+import {withMenuTheme} from '../menu-theme';
 import React from 'react';
 import {Modal,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
@@ -14,7 +15,7 @@ function readableSize(bytes:number){
 }
 
 /** Local display metadata only: opening details never authorizes a file request. */
-export function AttachmentDetails({artifact,onClose}:{artifact:{name:string;mime:string;size:number};onClose:()=>void}){
+function AttachmentDetailsContent({artifact,onClose}:{artifact:{name:string;mime:string;size:number};onClose:()=>void}){
  const {colors}=useTheme(),styles=useThemedValue(stylesTheme);
  const type=attachmentType(artifact.name,artifact.mime);
  return <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
@@ -22,7 +23,7 @@ export function AttachmentDetails({artifact,onClose}:{artifact:{name:string;mime
    <SafeAreaView edges={['top','right','bottom','left']} style={styles.safe}>
     <View testID="attachment-details-sheet" accessibilityViewIsModal style={styles.sheet}>
      <SectionHeading title="Attachment details"/>
-     <SectionBody surfaceColor={colors.panel} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<SectionAction label="Close attachment details" text="Close" onPress={onClose}/>}/>}>{clearance=>
+     <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<SectionAction label="Close attachment details" text="Close" onPress={onClose}/>}/>}>{clearance=>
      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content,{paddingBottom:clearance+24}]} showsVerticalScrollIndicator={false}>
       <Text typography="ui" selectable style={styles.filename}>{artifact.name}</Text>
       <View style={styles.field}><Text typography="ui" style={styles.label}>Type</Text><Text typography="ui" style={styles.value}>{typeLabels[type.kind]}</Text></View>
@@ -38,7 +39,7 @@ export function AttachmentDetails({artifact,onClose}:{artifact:{name:string;mime
 const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  backdrop:{flex:1,backgroundColor:'rgba(0,0,0,0.45)'},
  safe:{flex:1,padding:16,justifyContent:'flex-end'},
- sheet:{...menuChrome.card,borderWidth:0,width:'100%',maxWidth:520,maxHeight:'85%',alignSelf:'center'},
+ sheet:{...menuChrome.card,backgroundColor:colors.background,borderWidth:0,width:'100%',maxWidth:520,maxHeight:'85%',alignSelf:'center'},
  scroll:{flexGrow:0,flexShrink:1},
  content:{paddingHorizontal:16,paddingTop:16,paddingBottom:24,gap:16},
  filename:{color:colors.foreground,fontSize:20,lineHeight:28,fontWeight:'600'},
@@ -46,3 +47,5 @@ const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  label:{color:colors.muted,fontSize:12,lineHeight:18},
  value:{color:colors.body,fontSize:15,lineHeight:23},
 }));
+
+export const AttachmentDetails=withMenuTheme(AttachmentDetailsContent);

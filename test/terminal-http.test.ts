@@ -72,3 +72,15 @@ test('terminal API never accepts caller-supplied shell, cwd, port or arbitrary e
   assert.equal((await f.request(chat,'PUT',{})).status,405);assert.deepEqual(f.calls,[]);
  }finally{await f.close();}
 });
+
+test('an explicit terminal transport address does not change the HTTPS proxy listener and must still be local',{timeout:30000},async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'bob-terminal-proxy-')),state=new State(dir),runtime=await openRuntime(state,undefined,undefined,{resume:false});
+ const app=await serve(state,{port:0,host:'127.0.0.1',terminalHost:'192.0.2.1',runtime});
+ try{
+  assert.equal((app.server.address() as any).address,'127.0.0.1');
+  const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{cwd:'/tmp'}},ctx),pair=state.pair(state.invite().token,'Phone');
+  const response=await fetch(`http://127.0.0.1:${(app.server.address() as any).port}/v1/chats/${chat.id}/terminal`,{headers:{authorization:`Bearer ${pair.credential}`,'x-bob-backend':state.id}});
+  assert.equal(response.status,200);const status=await response.json();
+  assert.equal(status.available,false);assert.match(status.reason,/transport host.*local Tailscale/);
+ }finally{await app.close();state.close();rmSync(dir,{recursive:true,force:true});}
+});

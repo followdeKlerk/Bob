@@ -9,16 +9,23 @@ import { spawnSync } from "node:child_process";
 import { Server as HttpsServer } from "node:https";
 import { State } from "./state.js";
 const configPath = join(homedir(), ".config/bob/cli.json");
-const localConfig: { state?: string; endpoint?: string } = existsSync(configPath)
+const localConfig: { state?: string; endpoint?: string; terminalHost?:string } = existsSync(configPath)
   ? JSON.parse(readFileSync(configPath, "utf8")) : {};
 const cli = new Command()
   .name("bob")
-  .description("Official Durable backend manager (local development build)")
+  .description("Bob — your local AI workspace. Run bob in a terminal for the interactive menu.")
   .option(
     "--state <directory>",
     "Isolated state directory",
     localConfig.state ?? join(homedir(), ".local/share/bob")
   );
+cli.action(async()=>{
+ if(!process.stdin.isTTY||!process.stdout.isTTY){cli.outputHelp();return;}
+ const {menuOnTerminal}=await import('./cli-menu.js');await menuOnTerminal(resolve(cli.opts().state));
+});
+cli.command('menu').description('Open the interactive dashboard and guided setup submenus').action(async()=>{
+ const {menuOnTerminal}=await import('./cli-menu.js');await menuOnTerminal(resolve(cli.opts().state));
+});
 const state = () => new State(resolve(cli.opts().state));
 const unitName = (s: State) => `bob-${s.id}.service`;
 function systemctl(s: State, verb: string) {
@@ -102,6 +109,7 @@ cli
 cli
   .command("serve")
   .option("--host <host>", "Loopback or Tailscale IP", "127.0.0.1")
+  .option("--terminal-host <ip>", "Separate local Tailscale IPv4 for Mosh behind an HTTPS proxy")
   .option("--port <port>", "Port", "49158")
   .option("--cert <file>")
   .option("--key <file>")
@@ -112,6 +120,7 @@ cli
     const s = state();
     const app = await serve(s, {
       host: o.host,
+      terminalHost:o.terminalHost??(localConfig.state&&resolve(localConfig.state)===s.dir?localConfig.terminalHost:undefined),
       port: Number(o.port),
       tls: o.cert !== undefined ? { cert: o.cert, key: o.key } : undefined,
     });
@@ -132,10 +141,27 @@ cli
     process.on("SIGTERM", () => void close());
     process.on("SIGINT", () => void close());
   });
+// Discovery reuses setup inspection and never initializes or starts a runtime.
+async function localBackend(directory: string) {
+  const {inspectSetup} = await import('./setup-host.js');
+  const local = inspectSetup(directory);
+  if (!local.exists || !local.owned || !local.backendId || !local.endpoint)
+    throw new Error('No running local Bob backend with a saved HTTPS endpoint was found.');
+  const {verifySetupEndpoint} = await import('./setup-service.js');
+  await verifySetupEndpoint(local.endpoint, local.backendId);
+  return {backendId: local.backendId, endpoint: local.endpoint, state: directory};
+}
+cli.command('discover')
+  .description('Find and verify this user’s existing local Bob backend; does not start a runtime')
+  .action(async () => {
+    console.log(JSON.stringify(await localBackend(resolve(cli.opts().state))));
+  });
 cli
   .command("connect")
   .alias("pair")
-  .description("Show a QR code to connect your phone")
+  .description("Show a pairing invitation for a phone or desktop")
+  .option("--json", "Output only the invitation JSON", false)
+  .option("--local", "Use and verify the existing running local backend", false)
   .option("--endpoint <url>")
   .option(
     "--dev-loopback",
@@ -144,7 +170,8 @@ cli
   )
   .action(async (o) => {
     const selectedState = resolve(cli.opts().state);
-    const endpoint = o.endpoint ?? (localConfig.state && resolve(localConfig.state) === selectedState ? localConfig.endpoint : undefined);
+    const local = o.local ? await localBackend(selectedState) : undefined;
+    const endpoint = o.endpoint ?? local?.endpoint ?? (localConfig.state && resolve(localConfig.state) === selectedState ? localConfig.endpoint : undefined);
     if (!endpoint) throw new Error("No connection address saved. Run bob connect --endpoint <your Tailscale HTTPS address> once.");
     const u = new URL(endpoint);
     if (u.username || u.password || u.pathname !== "/" || u.search || u.hash)
@@ -160,7 +187,6 @@ cli
       throw new Error("HTTPS required");
     if (!o.devLoopback && !u.hostname.endsWith(".ts.net"))
       throw new Error("Remote endpoint must be a Tailscale HTTPS name");
-    const {default:QRCode}=await import('qrcode');
     const s = state(),
       i = s.invite();
     const payload = {
@@ -170,17 +196,20 @@ cli
       invitation: i.token,
       expiresAt: i.expiresAt,
     };
-    console.log(
-      await QRCode.toString(JSON.stringify(payload), {
-        type: "terminal",
-        small: true,
-      })
-    );
-    console.log("Open Bob on your phone → Scan QR code. This invitation is single-use and expires shortly.");
-    s.close();
+    try {
+      const json = JSON.stringify(payload);
+      if (o.json) console.log(json);
+      else {
+        const {default:QRCode} = await import('qrcode');
+        console.log(await QRCode.toString(json, {type: "terminal", small: true}));
+        console.log("Scan the QR code in Bob on your phone, or paste this JSON into Bob Desktop:");
+        console.log(json);
+        console.log("This invitation is private, single-use and expires shortly.");
+      }
+    } finally { s.close(); }
     if (o.endpoint) {
       mkdirSync(join(homedir(), ".config/bob"), { recursive: true, mode: 0o700 });
-      writeFileSync(configPath, JSON.stringify({ state: selectedState, endpoint: u.origin }, null, 2) + "\n", { mode: 0o600 });
+      writeFileSync(configPath, JSON.stringify({ state: selectedState, endpoint: u.origin,...(localConfig.state&&resolve(localConfig.state)===selectedState&&localConfig.terminalHost?{terminalHost:localConfig.terminalHost}:{}) }, null, 2) + "\n", { mode: 0o600 });
     }
   });
 cli.command("list").action(() => {
@@ -386,4 +415,8 @@ delegation.command('secret <name>').description('Store a dedicated profile/endpo
  const {setDelegationSecret}=await import('./delegation-config.js');
  const s=state();try{setDelegationSecret(s,name,key);console.log('Dedicated delegation credential stored; live inference not verified.');}finally{s.close();}
 });
-await cli.parseAsync();
+try{await cli.parseAsync();}catch(error){
+ const {TerminalCancelled,terminalText}=await import('./terminal-ui.js');
+ console.error(terminalText(error instanceof Error?error.message:String(error)));
+ process.exitCode=error instanceof TerminalCancelled?130:1;
+}

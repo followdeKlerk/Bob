@@ -6,6 +6,8 @@ For setup and everyday use, start with [installation](INSTALL.md) and [features]
 
 For a cross-component change, read the [architecture guide](ARCHITECTURE.md) first: it maps execution flow, state ownership, recovery and trust boundaries to the relevant source and tests.
 
+For a new tool or integration, follow [Adding tools to Bob](EXTENSIONS.md): prefer an existing capability or MCP connection, and use the tested custom-module contract only when needed.
+
 ## Repository map
 
 | Path | Purpose |

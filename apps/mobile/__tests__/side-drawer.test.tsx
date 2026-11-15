@@ -2,7 +2,9 @@ import {SectionHeading} from '../components/section-ui';
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {ActivityIndicator,Alert,BackHandler,Keyboard,Image,Modal,Pressable,StyleSheet,Text,TextInput} from 'react-native';
-import {colors} from '../theme';
+import {menuThemes} from '../menu-theme';
+const menuTheme=menuThemes.dark;
+const {colors}=menuTheme;
 import {Button} from '../components/ui/button';
 import {SectionSegments} from '../components/section-ui';
 import {EdgeFade} from '../components/edge-fade';
@@ -65,7 +67,7 @@ test('the header uses the actual bundled Bob wordmark image, not a replacement t
  expect(logo.type).toBe(Image);
  expect(logo.props.source).toBe(require('../assets/bob-wordmark.png'));
  expect(logo.props.resizeMode).toBe('contain');
- expect(StyleSheet.flatten(logo.props.style).tintColor).toBe('#e8e0d2');
+ expect(StyleSheet.flatten(logo.props.style).tintColor).toBe(colors.foreground);
  expect(tree.root.findAll(node=>node.type===Text&&node.props.children==='Bob')).toHaveLength(0);
 });
 test('searching and switching tabs keep the same native scroll list and fade overlays',()=>{
@@ -76,7 +78,7 @@ test('searching and switching tabs keep the same native scroll list and fade ove
  expect(tree.root.findByProps({testID:'drawer-scroll-list'})).toBe(list);
 });
 
-test('New chat uses the charcoal theme with light text and remains available in the menu',()=>{
+test('New chat uses the coordinated light menu palette and remains available in the menu',()=>{
  const create=button('New conversation');expect(StyleSheet.flatten(create.props.style).backgroundColor).toBe(colors.surface);
  const text=create.findAll(node=>node.type===Text&&node.props.children==='New chat')[0];
  expect(StyleSheet.flatten(text.props.style).color).toBe(colors.foreground);
@@ -84,8 +86,8 @@ test('New chat uses the charcoal theme with light text and remains available in 
  act(()=>create.props.onPress());expect(newChat).toHaveBeenCalledTimes(1);
 });
 
-test('drawer has a thin white right edge without changing its full-height scroll layout',()=>{
- expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style)).toMatchObject({borderRightWidth:1,borderRightColor:'#e8e0d2',height:'100%',overflow:'hidden'});
+test('drawer has a thin readable right edge without changing its full-height scroll layout',()=>{
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'drawer-panel'}).props.style)).toMatchObject({borderRightWidth:1,borderRightColor:colors.foreground,height:'100%',overflow:'hidden'});
 });
 
 test('embedded Workstations is a full-width destination with pairing but no sessions',async()=>{
@@ -271,4 +273,11 @@ test('workstation search is always visible below the heading, preserves identity
  act(()=>button('Back to previous menu').props.onPress());
  expect(onBack).not.toHaveBeenCalled();expect(tree.root.findAllByProps({testID:'workstation-pairing'})).toHaveLength(0);
  act(()=>button('Back to previous menu').props.onPress());expect(onBack).toHaveBeenCalledTimes(1);
+});
+
+
+test('workstation alias edit is a sibling target and does not open or switch the workstation',async()=>{
+ const alias=jest.fn();await act(async()=>tree.update(<SideDrawer embedded mode="workstations" visible onClose={close} navigation={[]} workspaces={[{id:'machine',label:'Desktop',onPress:open,onAlias:alias}]} conversations={[]} onNew={newChat} onSettings={()=>{}} disabled={false} pairing={null} onSessionAction={action}/>));
+ act(()=>button('Edit alias for Desktop').props.onPress());expect(alias).toHaveBeenCalledTimes(1);expect(open).not.toHaveBeenCalled();
+ act(()=>button('Desktop').props.onPress());expect(open).toHaveBeenCalledTimes(1);expect(alias).toHaveBeenCalledTimes(1);
 });

@@ -1,16 +1,16 @@
 // Semantic palettes. Never recolor drawing paper or user-generated visuals.
 // Chat gets dedicated deeper-beige surfaces, not the shared selection/panel colors.
 const warmWhite='#e8e0d2' as const;
-export const darkColors={background:'#000000',navigationSurface:warmWhite,assistantBubble:'#191919',ownerBubble:'#303030',bubbleMuted:'#a1a1a1',panel:'#191919',iconSurface:'#262626',selectedSurface:'#303030',selectedBorder:'#737373',surface:'#272727',composer:'#242424',foreground:warmWhite,body:warmWhite,muted:'#a1a1a1',border:'#3f3f3f',subtle:'#2b2b2b',accent:warmWhite,onAccent:'#000000',navigationInk:'#111111',destructive:'#5c5c5c'} as const;
+export const darkColors={background:'#1b1c1d',navigationSurface:warmWhite,assistantBubble:'#292a2c',ownerBubble:'#424346',bubbleMuted:'#b6b5b1',panel:'#292a2c',iconSurface:'#333436',selectedSurface:'#424346',selectedBorder:'#91918d',surface:'#333436',composer:'#333436',foreground:warmWhite,body:warmWhite,muted:'#b6b5b1',border:'#545557',subtle:'#3b3c3e',accent:warmWhite,onAccent:'#000000',navigationInk:'#111111',destructive:'#5c5c5c',danger:'#efa99e'} as const;
 export type ThemeColors={[K in keyof typeof darkColors]:string};
-export const lightColors:ThemeColors={background:'#e8dfd0',navigationSurface:'#e5dfd4',assistantBubble:'#d5c5ae',ownerBubble:'#ddcfbb',bubbleMuted:'#554d40',panel:'#f0e8dc',iconSurface:'#e9e4da',selectedSurface:'#e2ddd2',selectedBorder:'#736b5e',surface:'#eee5d8',composer:'#f0e8dc',foreground:'#292720',body:'#343129',muted:'#655f54',border:'#958d7f',subtle:'#e6e0d5',accent:'#302d27',onAccent:'#fffdf8',navigationInk:'#3e382e',destructive:'#e2ddd2'};
+export const lightColors:ThemeColors={background:'#e8dfd0',navigationSurface:'#e5dfd4',assistantBubble:'#d5c5ae',ownerBubble:'#ddcfbb',bubbleMuted:'#554d40',panel:'#f0e8dc',iconSurface:'#e9e4da',selectedSurface:'#e2ddd2',selectedBorder:'#736b5e',surface:'#eee5d8',composer:'#f0e8dc',foreground:'#292720',body:'#343129',muted:'#655f54',border:'#958d7f',subtle:'#e6e0d5',accent:'#302d27',onAccent:'#fffdf8',navigationInk:'#3e382e',destructive:'#e2ddd2',danger:'#9b3428'};
 // Compatibility for non-rendering consumers; app components use useTheme.
 export const colors=darkColors;
-export const menuRadii={card:20,control:14,icon:10} as const;
+export const menuRadii={card:24,control:24,icon:14} as const;
 export function makeMenuChrome(colors:ThemeColors){return {
- card:{borderRadius:menuRadii.card,borderWidth:1,borderColor:colors.border,backgroundColor:colors.panel},
- control:{borderRadius:menuRadii.control,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
- input:{borderRadius:menuRadii.control,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
+ card:{borderRadius:menuRadii.card,borderWidth:1,borderColor:colors.subtle,backgroundColor:colors.panel},
+ control:{borderRadius:menuRadii.control,minHeight:48,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
+ input:{borderRadius:menuRadii.control,minHeight:48,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surface},
  icon:{borderRadius:menuRadii.icon,backgroundColor:colors.iconSurface},
  selected:{borderColor:colors.selectedBorder,backgroundColor:colors.selectedSurface},
 } as const;}

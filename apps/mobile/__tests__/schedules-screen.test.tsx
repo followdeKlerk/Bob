@@ -1,8 +1,10 @@
+import {menuThemes} from '../menu-theme';
+const menuTheme=menuThemes.dark;
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {AppState,StyleSheet,View,Text as NativeText} from 'react-native';
 import {SectionHeading,SectionActions,RoundAction,SectionSegments,SectionAction} from '../components/section-ui';
-import {colors} from '../theme';
+import {colors,menuChrome} from '../theme';
 import {APP_FONT_FAMILY,APP_UI_FONT_FAMILY} from '../typography';
 import {SchedulesScreen,ScheduleReceipt,ScheduleAlert,scheduleFrequency,type ScheduleJob} from '../components/schedules-screen';
 jest.mock('uuid',()=>({v4:()=> '11111111-1111-4111-8111-111111111111'}));
@@ -97,11 +99,11 @@ test('schedule footer has return left and Refresh/Create right below a separate 
   await act(async()=>press(tree,'Refresh schedules'));expect(request).toHaveBeenCalledTimes(2);
   act(()=>press(tree,'Create a schedule in chat'));expect(compose).toHaveBeenCalledWith('Create a schedule: ');
   const pause=tree.root.findAll(node=>node.props.accessibilityLabel==='Pause'&&typeof node.props.onPress==='function')[0];
-  expect(StyleSheet.flatten(pause.props.style)).toMatchObject({borderRadius:999,borderWidth:1,borderColor:colors.border});
-  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.borderBottomColor===colors.subtle;})).toBe(true);
+  expect(StyleSheet.flatten(pause.props.style)).toMatchObject({borderRadius:999,borderWidth:1,borderColor:menuTheme.colors.border});
+  expect(tree.root.findAllByType(View).some(node=>{const style=StyleSheet.flatten(node.props.style);return style?.backgroundColor===menuTheme.colors.panel&&style?.borderRadius===menuChrome.card.borderRadius;})).toBe(true);
   await act(async()=>tree.update(<ScheduleReceipt job={job} onOpen={()=>{}}/>));
   const receipt=tree.root.findAll(node=>node.props.accessibilityLabel==='View schedule Check release notes'&&typeof node.props.onPress==='function')[0];
-  expect(StyleSheet.flatten(receipt.props.style)).toMatchObject({borderRadius:20,borderWidth:1,borderColor:colors.border});
+  expect(StyleSheet.flatten(receipt.props.style)).toMatchObject(menuChrome.card);
  }finally{await act(async()=>tree.unmount());}
 });
 

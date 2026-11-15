@@ -54,7 +54,7 @@ internal object BobPush {
                     BobPushStore.update(context, identity) {
                         it.put("paired", false).put("registered", false).put("revision", UUID.randomUUID().toString())
                     }
-                    AttentionNotifications.clear(context)
+                    AttentionNotifications.clearBackend(context, identity)
                     schedule(context, identity) // Offline DELETE never grants local display permission.
                 }
             }
@@ -77,7 +77,11 @@ class BobMessagingService : FirebaseMessagingService() {
         if (!AttentionNotificationPolicy.accepts(message.data, message.from, getString(R.string.gcm_defaultSenderId), message.notification != null, BobPush.registered(applicationContext))) return
         val identity = message.data.getValue("backendId")
         val sources = AttentionNotificationPolicy.sources(message.data.getValue("sources")) ?: return
-        AttentionNotifications.post(applicationContext, { identity in BobPush.registered(applicationContext) }, sources = sources)
+        val targets = message.data["context"]?.let { AttentionNotificationPolicy.targets(it) } ?: sources.map { AttentionNotificationPolicy.Target(it, 0) }
+        targets.groupBy { it.chat }.forEach { (chat, rows) ->
+            val categories = rows.map { it.source }.toSet()
+            AttentionNotifications.post(applicationContext, identity, chat, updates = chat == 0L && categories == setOf("update"), current = { identity in BobPush.registered(applicationContext) }, sources = categories)
+        }
     }
 }
 
@@ -105,11 +109,19 @@ class BobPushRegistrationWorker(context: Context, parameters: WorkerParameters) 
             if (!current()) return Result.success()
             val request = Request.Builder().url("$endpoint/v1/push/register")
                 .header("Authorization", "Bearer $credential").header("x-bob-backend", identity).header("Accept", "application/json")
-            if (token != null) request.post(JSONObject().put("token", token).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            if (token != null) request.post(JSONObject().put("token", token).put("contextVersion", 1).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             else request.delete()
             val call = client.newCall(request.build()); activeCall = call
             if (!current()) { call.cancel(); return Result.success() }
-            call.execute().use { response ->
+            var response = call.execute()
+            if (response.code == 400 && token != null && current()) {
+                response.close()
+                val legacy = client.newCall(request.post(JSONObject().put("token", token).toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build())
+                activeCall = legacy
+                if (!current()) { legacy.cancel(); return Result.success() }
+                response = legacy.execute()
+            }
+            response.use { response ->
                 if (response.code in listOf(401, 403, 409)) {
                     BobPushStore.ifCurrent(applicationContext, identity, revision) { BobPushStore.update(applicationContext, identity) { it.put("registered", false) } }
                     return Result.success() // Fresh pairing/activation is required; never spin on revoked credentials.

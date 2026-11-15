@@ -8,7 +8,7 @@ export function menuButtonChrome({colors,shadows}:Pick<ThemeTokens,'colors'|'sha
   circle:{...surface,width:48,height:48,minWidth:48,minHeight:48,borderRadius:24,flexShrink:0,alignItems:'center' as const,justifyContent:'center' as const},
   pill:{...surface,minWidth:48,minHeight:48,maxWidth:'100%' as const,borderRadius:999,flexShrink:1,paddingHorizontal:16,paddingVertical:10,alignItems:'center' as const,justifyContent:'center' as const},
   label:{textAlign:'center' as const,textAlignVertical:'center' as const,includeFontPadding:false},
-  selected:{backgroundColor:colors.selectedSurface,borderColor:colors.foreground},
+  selected:{backgroundColor:colors.selectedSurface,borderColor:colors.selectedBorder},
   primary:{borderColor:colors.foreground},
  };
 }

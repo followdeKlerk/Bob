@@ -19,7 +19,7 @@ class SlowResponse extends EventEmitter {
  write(frame:string){this.frames.push(frame);this.emit('frame');if(this.closeOnWrite)this.end();return false;}
  end(){if(!this.destroyed){this.destroyed=true;this.emit('close');}return this;}
 }
-for(const outcome of ['drain','close','error','closed-write'] as const){
+for(const outcome of ['drain','close','error','closed-write','revoked'] as const){
  test(`snapshot SSE ${outcome} releases wait listeners and stops its native watch`,{timeout:15000},async t=>{
   const dir=await mkdtemp(join(tmpdir(),'bob-sse-wait-')),state=new State(dir);
   let runtime:Awaited<ReturnType<typeof openRuntime>>|undefined,app:Awaited<ReturnType<typeof serve>>|undefined;
@@ -35,6 +35,8 @@ for(const outcome of ['drain','close','error','closed-write'] as const){
     const watch=await originalWatch(context),stop=watch.stop.bind(watch);
     t.mock.method(watch,'stop',()=>{stops++;return stop();});return watch;
    });
+   let now=Date.now();
+   t.mock.method(Date,'now',()=>now);
    let refresh:(()=>void)|undefined;
    const interval=globalThis.setInterval;
    t.mock.method(globalThis,'setInterval',((callback:()=>void,ms:number,...args:unknown[])=>{
@@ -43,7 +45,7 @@ for(const outcome of ['drain','close','error','closed-write'] as const){
    }) as typeof setInterval);
    app=await serve(state,{port:0,runtime});
    const device=state.pair(state.invite().token,'SSE fixture');
-   const request={method:'GET',url:`/v1/chats/${chat.id}/events`,headers:{authorization:`Bearer ${device.credential}`,'x-bob-backend':state.id}} as IncomingMessage;
+   const request={method:'GET',url:`/v1/chats/${chat.id}/events?heartbeats=1`,headers:{authorization:`Bearer ${device.credential}`,'x-bob-backend':state.id}} as IncomingMessage;
    const handler=app.server.listeners('request')[0] as (req:IncomingMessage,res:ServerResponse)=>Promise<void>;
    const first=once(response,'frame');running=handler(request,response as unknown as ServerResponse);await first;
    assert.ok(refresh);assert.match(response.frames[0],/^event: snapshot\ndata: /);
@@ -53,10 +55,11 @@ for(const outcome of ['drain','close','error','closed-write'] as const){
      assert.equal(response.listenerCount('drain'),0);
      assert.equal(response.listenerCount('error'),0,'no abandoned error listener after drain');
      assert.equal(response.listenerCount('close'),1,'only the stream lifecycle listener remains');
-     if(i<24){const next=once(response,'frame');refresh();await next;}
+     if(i<24){now+=3000;const next=once(response,'frame');refresh();await next;assert.match(response.frames.at(-1)!,/^event: heartbeat\ndata: /);}
     }
     await running;response.end();
-   }else if(outcome==='close')response.end();
+   }else if(outcome==='revoked'){state.revoke(device.deviceId);refresh();}
+   else if(outcome==='close')response.end();
    else if(outcome==='error')response.emit('error',Error('synthetic transport error'));
    await running;await turn();
    assert.equal(response.destroyed,true);assert.equal(response.listenerCount('drain'),0);assert.equal(response.listenerCount('error'),0);

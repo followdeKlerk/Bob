@@ -3,6 +3,7 @@ import {AppState} from 'react-native';
 import {HistoryPage} from '../../src/contracts';
 import {retryDelay,retryableError} from './network-policy';
 import {readHistoryCache,writeHistoryCache} from './history-cache';
+import {cacheGeneration} from './download-cache';
 import {reusePresentedEntry} from './snapshot-cache';
 type Page=ReturnType<typeof HistoryPage.parse>;
 type Session={scope:string;backendId?:string;conversationId?:number;ready:boolean;loading:boolean;page?:Page;error?:string;controller?:AbortController;retry?:ReturnType<typeof setTimeout>;attempts?:number;retryAfterAt?:number};
@@ -35,7 +36,7 @@ export function useStoredHistory(backendId:string|undefined,conversationId:numbe
    return;
   }
   clearTimeout(session.retry);session.retry=undefined;session.loading=true;publish(session);
-  const previous=session.page,controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);session.controller=controller;
+  const generation=cacheGeneration(),previous=session.page,controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);session.controller=controller;
   try{
    const cursor=older?previous?.next:undefined;
    const page=HistoryPage.parse(await requestRef.current(`chats/${session.conversationId}/history${cursor?'?cursor='+encodeURIComponent(cursor):''}`,controller.signal));
@@ -43,7 +44,7 @@ export function useStoredHistory(backendId:string|undefined,conversationId:numbe
    if(active.current!==session||scopeRef.current!==session.scope)return;
    session.page=older&&previous?{...page,items:sorted([...previous.items,...page.items])}:mergeLatestHistory(previous,page);
    session.ready=true;session.error=undefined;session.attempts=0;session.retryAfterAt=undefined;publish(session);
-   void writeHistoryCache(`history-pages:${session.scope}`,JSON.stringify(session.page));
+   void writeHistoryCache(`history-pages:${session.scope}`,JSON.stringify(session.page),generation).catch(()=>{});
   }catch(error){
    if(active.current===session&&scopeRef.current===session.scope){session.error=String((error as Error).message??error);session.ready=true;publish(session);
     if(retryableError(error)&&AppState.currentState!=='background'&&AppState.currentState!=='inactive'){

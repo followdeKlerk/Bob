@@ -341,3 +341,40 @@ test('coalescing preserves source categories so muted replies cannot hide a ques
   assert.throws(()=>r.push.attention('invalid','private text' as any),(e:any)=>e.status===400);
  }finally{await r.close();}
 });
+
+test('opted-in phones receive bounded session/source hints; legacy phones keep the exact generic protocol',async()=>{
+ const r=await fixture();
+ try{
+  r.push.register(r.device.deviceId,'CONTEXT_TOKEN',1);
+  const chat=await r.chat();await settled(r.h,chat.id);await r.push.flush();
+  let message=sends(r.fake).at(-1)!.body.message;
+  assert.equal(message.data.context,`reply:${chat.id}`);
+  assert.equal(message.android.collapse_key,`bob-attention:${r.state.id}`);
+  assert.doesNotMatch(JSON.stringify(message),/PRIVATE_|title|endpoint|credential/);
+  r.push.attention('session-a','reply',19);r.push.attention('session-b','question',20);r.push.attention('build','update');
+  r.push.register(r.device.deviceId,'CONTEXT_TOKEN',1);
+  assert.equal(r.push.status().pending,1,'same capability does not discard queued session context');
+  await r.push.flush();message=sends(r.fake).at(-1)!.body.message;
+  assert.equal(message.data.context,'reply:19,question:20,update:0');
+  assert.equal(message.data.sources,'reply,question,update');
+  assert.throws(()=>r.push.attention('bad','reply',-1),(e:any)=>e.status===400);
+  assert.throws(()=>r.push.attention('bad','reply',1.5),(e:any)=>e.status===400);
+  assert.throws(()=>r.push.attention('bad','update',19),(e:any)=>e.status===400);
+  r.push.register(r.device.deviceId,'CONTEXT_TOKEN');r.push.attention('legacy','reply',19);await r.push.flush();
+  assert.deepEqual(sends(r.fake).at(-1)!.body.message.data,{type:'bob_attention',backendId:r.state.id,sources:'reply'});
+ }finally{await r.close();}
+});
+test('context coalescing preserves session categories and explicit overflow without an oversized push',async()=>{
+ const r=await fixture();
+ try{
+  r.push.register(r.device.deviceId,'CONTEXT_TOKEN',1);
+  r.push.attention('important-question','question',1);
+  for(let i=2;i<=100;i++)r.push.attention(`reply:${i}`,'reply',i);
+  await r.push.flush();const message=sends(r.fake).at(-1)!.body.message;
+  const targets=message.data.context.split(',');
+  assert.ok(targets.length<=32);assert.ok(targets.includes('question:0'));
+  assert.ok(targets.includes('reply:100'));assert.ok(targets.includes('reply:0'));
+  assert.ok(Buffer.byteLength(JSON.stringify(message.data))<4096);
+  assert.equal(message.data.sources,'reply,question');
+ }finally{await r.close();}
+});

@@ -4,7 +4,7 @@ import {AccessibilityInfo,AppState} from 'react-native';
 import {useChatFollow} from '../use-chat-follow';
 let change:(state:string)=>void;
 let follow:ReturnType<typeof useChatFollow<any>>;
-function Harness({scope,inverted=false}:{scope:string;inverted?:boolean}){follow=useChatFollow(scope,inverted);return null;}
+function Harness({scope,inverted=false,active=true}:{scope:string;inverted?:boolean;active?:boolean}){follow=useChatFollow(scope,inverted,active);return null;}
 const event=(y:number)=>({nativeEvent:{contentOffset:{y},contentSize:{height:2000},layoutMeasurement:{height:600}}}) as any;
 beforeEach(()=>{jest.useFakeTimers();jest.spyOn(AppState,'addEventListener').mockImplementation((_event,callback)=>{change=callback as any;return{remove:jest.fn()};});jest.spyOn(AccessibilityInfo,'isReduceMotionEnabled').mockResolvedValue(false);jest.spyOn(AccessibilityInfo,'addEventListener').mockReturnValue({remove:jest.fn()} as any);});
 afterEach(()=>{jest.useRealTimers();jest.restoreAllMocks();});
@@ -91,4 +91,21 @@ test('oldest-message navigation is deliberately the opposite end in bottom-ancho
  let tree!:Renderer.ReactTestRenderer;const latest=jest.fn(),end=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="first" inverted/>);});(follow.list as any).current={scrollToOffset:latest,getScrollResponder:()=>({scrollToEnd:end})};
  act(()=>follow.oldest());expect(end).toHaveBeenCalledWith({animated:false});act(()=>follow.props.onScroll(invertedEvent(10000)));expect(follow.showJump).toBe(true);
  act(()=>follow.props.onContentSizeChange(300,900000));flush();expect(latest).not.toHaveBeenCalled();await act(async()=>tree.unmount());
+});
+
+test('hidden live growth defers scrolling until visible without resetting the follow policy',async()=>{
+ let tree!:Renderer.ReactTestRenderer;const end=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="retained"/>);});(follow.list as any).current={scrollToEnd:end};
+ act(()=>{follow.props.onLayout(layout(600));follow.props.onContentSizeChange(300,2000);});flush();act(()=>follow.props.onScroll(event(1400)));end.mockClear();
+ await act(async()=>tree.update(<Harness scope="retained" active={false}/>));
+ act(()=>follow.props.onContentSizeChange(300,2500));flush();expect(end).not.toHaveBeenCalled();
+ await act(async()=>tree.update(<Harness scope="retained"/>));flush();expect(end).toHaveBeenCalledTimes(1);expect(follow.following).toBe(true);
+ await act(async()=>tree.unmount());
+});
+test('hidden geometry and lifecycle events cannot unpause a retained reader or reset its jump control',async()=>{
+ let tree!:Renderer.ReactTestRenderer;const latest=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="retained" inverted/>);});(follow.list as any).current={scrollToOffset:latest};
+ act(()=>{follow.props.onLayout(layout(600));follow.props.onContentSizeChange(300,20000);follow.props.onScrollBeginDrag();follow.props.onScroll(invertedEvent(500));follow.props.onMomentumScrollEnd(invertedEvent(500));});expect(follow.showJump).toBe(true);
+ await act(async()=>tree.update(<Harness scope="retained" inverted active={false}/>));
+ act(()=>{follow.props.onScroll(invertedEvent(0));follow.props.onContentSizeChange(300,25000);change('background');change('active');});flush();expect(latest).not.toHaveBeenCalled();
+ await act(async()=>tree.update(<Harness scope="retained" inverted/>));flush();expect(latest).not.toHaveBeenCalled();expect(follow.showJump).toBe(true);expect(follow.following).toBe(false);
+ await act(async()=>tree.unmount());
 });

@@ -1,3 +1,4 @@
+import {MenuTheme,useMenuTheme} from '../menu-theme';
 import React,{useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Alert,AppState,BackHandler,Keyboard,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,requireNativeComponent,type NativeSyntheticEvent,type ViewProps} from 'react-native';
 import {Copy,Ellipsis,History,Keyboard as KeyboardIcon,ClipboardPaste,RefreshCw,Trash2,X} from 'lucide-react-native';
@@ -17,6 +18,7 @@ type Phase='idle'|'checking'|'starting'|'running'|'closed'|'failed'|'unavailable
 
 export function TerminalScreen({visible,target,workstation,allowed,bottomInset=0,menuOpen=false,menu,onBack,request}:Props){
  const styles=useThemedValue(stylesTheme),{colors}=useTheme(),window=useWindowDimensions();
+ const menuTheme=useMenuTheme(),menuStyles=stylesTheme(menuTheme),menuColors=menuTheme.colors;
  const [frame,setFrame]=useState({width:0,height:0}),[headerHeight,setHeaderHeight]=useState(44),[footerHeight,setFooterHeight]=useState(64);
  const [status,setStatus]=useState<TerminalStatus>(),[phase,setPhase]=useState<Phase>('idle'),[message,setMessage]=useState(''),[handle,setHandle]=useState<string>(),[more,setMore]=useState(false),[ctrl,setCtrl]=useState(false),[control,setControl]=useState<TerminalControl>(),[endUnknown,setEndUnknown]=useState(false);
  const [foreground,setForeground]=useState(AppState.currentState!=='background'&&AppState.currentState!=='inactive');
@@ -169,16 +171,16 @@ export function TerminalScreen({visible,target,workstation,allowed,bottomInset=0
     <RoundAction label="Terminal controls" icon={Ellipsis} onPress={()=>{if(!showKeys)send('keyboard',undefined,false);setMore(true);}} disabled={!!unavailable}/>
    </SectionActions></View>
   </View>
-  {more&&<View testID="terminal-controls" accessibilityViewIsModal style={styles.moreOverlay}>
+  {more&&<MenuTheme><View testID="terminal-controls" accessibilityViewIsModal style={menuStyles.moreOverlay}>
    <Pressable accessibilityLabel="Close terminal controls" onPress={()=>setMore(false)} style={StyleSheet.absoluteFill}/>
-   <View style={[styles.morePanel,compactControls&&styles.compactPanel]}>
-    <View style={[styles.moreHeading,compactControls&&styles.compactHeading]}>{(!frame.height||frame.height>=160)&&<Text typography="ui" style={styles.moreTitle}>Terminal controls</Text>}<RoundAction label="Close controls" icon={X} onPress={()=>setMore(false)}/></View>
+   <View style={[menuStyles.morePanel,compactControls&&menuStyles.compactPanel]}>
+    <View style={[menuStyles.moreHeading,compactControls&&menuStyles.compactHeading]}>{(!frame.height||frame.height>=160)&&<Text typography="ui" style={menuStyles.moreTitle}>Terminal controls</Text>}<RoundAction label="Close controls" icon={X} onPress={()=>setMore(false)}/></View>
     <ScrollView keyboardShouldPersistTaps="always">
      {handle&&<TerminalKeyRow ready={ready} ctrl={ctrl} onCtrl={()=>{setMore(false);toggleCtrl();}} onInput={value=>{setMore(false);send('input',value);}}/>}
-     {menuRows.map(({label,icon:Icon,onPress,disabled})=><Button key={label} variant="ghost" accessibilityLabel={label} disabled={disabled} onPress={()=>{setMore(false);onPress();}} style={[styles.menuRow,disabled&&styles.disabled]}><Icon size={20} color={colors.foreground}/><Text typography="ui" style={styles.menuText}>{label}</Text></Button>)}
+     {menuRows.map(({label,icon:Icon,onPress,disabled})=><Button key={label} variant="ghost" accessibilityLabel={label} disabled={disabled} onPress={()=>{setMore(false);onPress();}} style={[menuStyles.menuRow,disabled&&menuStyles.disabled]}><Icon size={20} color={menuColors.foreground}/><Text typography="ui" style={menuStyles.menuText}>{label}</Text></Button>)}
     </ScrollView>
    </View>
-  </View>}
+  </View></MenuTheme>}
  </View>;
 }
 const stylesTheme=themed(theme=>{const {colors}=theme;return StyleSheet.create({

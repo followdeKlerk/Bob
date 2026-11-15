@@ -9,7 +9,7 @@ test('CLI help, invalid serve arguments and local inspection do not load the bac
  const dir=mkdtempSync(join(tmpdir(),'bob-cli-startup-')),state=join(dir,'missing-state'),hook=join(dir,'guard.mjs');
  try{
   writeFileSync(hook,`import{registerHooks}from'node:module';registerHooks({resolve(specifier,context,next){const result=next(specifier,context);if(/\\/(runtime|server)\\.(ts|js)$/.test(new URL(result.url).pathname))throw Error('Unexpected backend runtime import for a lightweight CLI operation');return result;}});`);
-  for(const [args,status] of [[['--help'],0],[['setup','--help'],0],[['serve','--key',join(dir,'unused.pem')],1],[['doctor'],0]] as const){
+  for(const [args,status] of [[[],0],[['menu','--help'],0],[['menu'],1],[['--help'],0],[['setup','--help'],0],[['serve','--key',join(dir,'unused.pem')],1],[['doctor'],0]] as const){
    const result=spawnSync(process.execPath,['--import','tsx','--import',hook,'src/cli.ts','--state',state,...args],{env:{...process.env,HOME:dir},encoding:'utf8',timeout:15000});
    assert.equal(result.error,undefined);assert.equal(result.status,status,result.stderr);
    assert.doesNotMatch(result.stderr,/Unexpected backend runtime import/);

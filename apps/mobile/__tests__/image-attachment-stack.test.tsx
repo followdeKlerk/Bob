@@ -1,3 +1,4 @@
+import {menuRadii} from '../theme';
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {AccessibilityInfo,Animated,AppState,Image,PanResponder,StyleSheet,Text as NativeText,type PanResponderCallbacks} from 'react-native';
@@ -71,8 +72,8 @@ test('one image is a large rounded card, opens on tap, with small equal unboxed 
  expect(rootStyle).toMatchObject({width:'100%',maxWidth:280,overflow:'hidden'});expect(rootStyle.alignSelf).toBeUndefined();
  const front=StyleSheet.flatten(node('image-stack-card-a').props.style);
  expect(front).toMatchObject({left:16,right:16,top:20,height:248});
- const card=node('image-stack-card-a').findAll(item=>{const style=StyleSheet.flatten(item.props.style);return style?.borderRadius===20&&style.overflow==='hidden';})[0];
- expect(StyleSheet.flatten(card.props.style)).toMatchObject({overflow:'hidden',borderRadius:20});
+ const card=node('image-stack-card-a').findAll(item=>{const style=StyleSheet.flatten(item.props.style);return style?.borderRadius===menuRadii.card&&style.overflow==='hidden';})[0];
+ expect(StyleSheet.flatten(card.props.style)).toMatchObject({overflow:'hidden',borderRadius:menuRadii.card});
  const info=StyleSheet.flatten(button('Attachment details: a.jpg').props.style),save=StyleSheet.flatten(button('Save a.jpg').props.style);
  expect(info).toEqual(save);expect(info).toMatchObject({width:48,height:48});expect(info.borderWidth).toBeUndefined();expect(info.backgroundColor).toBeUndefined();
  await press('Open a.jpg');await press('Attachment details: a.jpg');await press('Save a.jpg');

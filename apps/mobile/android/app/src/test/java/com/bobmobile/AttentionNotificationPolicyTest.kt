@@ -21,6 +21,32 @@ class AttentionNotificationPolicyTest {
         assertFalse(accepts(value = data + ("text" to "private preview")))
         assertFalse(accepts(value = data + ("chatId" to "42")))
     }
+    @Test fun scopedHintsAreStrictBoundedAndNeverContainTitlesOrMessageText() {
+        assertTrue(accepts(value = data + ("context" to "reply:19")))
+        assertTrue(accepts(value = data + mapOf("sources" to "reply,question,update", "context" to "reply:19,question:20,update:0")))
+        assertEquals(listOf(AttentionNotificationPolicy.Target("reply", 19L)), AttentionNotificationPolicy.targets("reply:19"))
+        for (invalid in listOf("", "reply:-1", "reply:1.5", "reply:01", "reply:1,reply:1", "reply:9007199254740992", "reply:999999999999999999999999", "update:19", "unknown:7", "reply:7:private", "reply: 7")) {
+            assertNull(invalid, AttentionNotificationPolicy.targets(invalid))
+            assertFalse(invalid, accepts(value = data + ("context" to invalid)))
+        }
+        assertFalse(accepts(value = data + ("context" to "question:19")))
+        assertFalse(accepts(value = data + ("context" to "reply:19,question:20")))
+        assertNull(AttentionNotificationPolicy.targets((1..33).joinToString(",") { "reply:$it" }))
+    }
+    @Test fun noticeIdentityIsWorkstationAndSessionScopedAndMigrationPreservesNewNotices() {
+        val other = "c0bb0c00-0000-4000-8000-000000000002"
+        val first = AttentionNotificationPolicy.tag(backend, 7, false)
+        assertNotEquals(first, AttentionNotificationPolicy.tag(other, 7, false))
+        assertNotEquals(first, AttentionNotificationPolicy.tag(backend, 8, false))
+        assertNotEquals(AttentionNotificationPolicy.tag(backend, 0, true), AttentionNotificationPolicy.tag(backend, 0, false))
+        assertFalse(AttentionNotificationPolicy.migrate(first, "bob-attention", false, false))
+        assertEquals("Home PC", AttentionNotificationPolicy.label(" Home\nPC\u202e ", 40))
+        assertTrue(source("AttentionNotifications").contains("setData(android.net.Uri.parse(destination))"))
+        assertTrue(source("AttentionNotifications").contains("bob://work/$" + "identity/$" + "chat"))
+        assertTrue(source("AttentionNotifications").contains("NotificationDisplayLabels.workstation"))
+        assertTrue(source("AttentionNotifications").contains("NotificationDisplayLabels.session"))
+        assertTrue(source("AttentionNotifications").contains("clearSession"))
+    }
     @Test fun sourceUnionIsStrictAndRespectsReplyAndCategoryDisablePolicies() {
         assertEquals(setOf("question", "reply"), AttentionNotificationPolicy.sources("question,reply"))
         assertEquals(setOf("reply", "question", "schedule", "update"), AttentionNotificationPolicy.sources("reply,question,schedule,update"))
@@ -47,15 +73,15 @@ class AttentionNotificationPolicyTest {
         assertFalse(AttentionNotificationPolicy.migrate(null, "bob-location", false, false))
         assertFalse(AttentionNotificationPolicy.migrate(null, "bob-reply-status", false, false))
     }
-    @Test fun genericPresentationIsSharedAndContainsNoPreviewReplyOrDeepLink() {
+    @Test fun scopedPresentationContainsWorkstationAndSessionButNoMessagePreviewOrReply() {
         val attention = source("AttentionNotifications")
         assertTrue(attention.contains("setContentText(AttentionNotificationPolicy.BODY)"))
         assertEquals("Bob needs your attention", AttentionNotificationPolicy.BODY)
         assertTrue(attention.contains(".setOnlyAlertOnce(true)"))
-        assertTrue(attention.contains("manager.notify(AttentionNotificationPolicy.TAG, AttentionNotificationPolicy.ID"))
-        for (forbidden in listOf("MessagingStyle", "BigTextStyle", "addAction(", "RemoteInput.Builder", "bob://work", "HttpURLConnection", "OkHttpClient")) assertFalse(forbidden, attention.contains(forbidden))
+        assertTrue(attention.contains("manager.notify(AttentionNotificationPolicy.tag(identity, chat, updates), AttentionNotificationPolicy.ID"))
+        for (forbidden in listOf("MessagingStyle", "BigTextStyle", "addAction(", "RemoteInput.Builder", "HttpURLConnection", "OkHttpClient")) assertFalse(forbidden, attention.contains(forbidden))
         val checks = source("BobNotifications").substringAfter("private class NotificationChecks")
-        assertTrue(checks.contains("AttentionNotifications.post(context, current, channel)"))
+        assertTrue(checks.contains("AttentionNotifications.post(context, identity, chat, current = current, sourceChannel = channel)"))
         assertFalse(checks.contains("ConversationNotifications.post(")); assertFalse(checks.contains("optString(\"text\")"))
         assertTrue(checks.contains("if (!delivered) return"))
         assertTrue(checks.indexOf("if (!delivered) return") < checks.indexOf("putLong(\"cursor:"))
@@ -64,7 +90,7 @@ class AttentionNotificationPolicyTest {
     }
     @Test fun displayIsGatedByVisibilityPermissionChannelAndCurrentPairing() {
         val attention = source("AttentionNotifications")
-        assertTrue(attention.contains("ConversationPublicationPolicy.run(NotificationWatchStore, current, { NotificationRuntime.appVisible })"))
+        assertTrue(attention.contains("ConversationPublicationPolicy.run(NotificationWatchStore, current, { if (chat > 0) NotificationRuntime.viewing(identity, chat)"))
         assertTrue(attention.contains("Manifest.permission.POST_NOTIFICATIONS"))
         assertTrue(attention.contains("if (sources != null && !sourcesEnabled(context, sources))"))
         assertTrue(source("BobNotifications").contains("setReplyNotifications(enabled: Boolean) { synchronized(NotificationWatchStore)"))

@@ -101,3 +101,22 @@ test('suggestions have a fixed heading and Cancel-left footer outside the scalab
  expect(tree.root.findAllByType(AppText).every(node=>node.props.typography==='ui')).toBe(true);
  await act(async()=>tree.unmount());
 });
+
+test('skill suggestions share a quiet panel with inset separators and bounded descriptions, never clamped names or disabled-state ambiguity',async()=>{
+ const {Text:AppText}=require('../components/app-text');
+ const name='a-long-skill-name-that-must-still-wrap-at-large-font-sizes',description='A detailed explanation. '.repeat(30);
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<SkillPicker scope="polish" query="" loadLibrary={async()=>({skills:{[name]:{description,enabled:true},disabled:{description:'Unavailable skill',enabled:false}}})} bottom={300} maxHeight={250} onSelect={()=>{}} onDismiss={()=>{}}/>);});
+ try{
+  const panel=StyleSheet.flatten(tree.root.findByProps({testID:'skill-picker'}).props.style);
+  expect(panel.borderRadius).toBe(24);expect(panel.borderWidth).toBeUndefined();
+  const divider=tree.root.findByProps({testID:'skill-picker-separator'});
+  expect(StyleSheet.flatten(divider.props.style)).toMatchObject({marginHorizontal:12,height:StyleSheet.hairlineWidth});
+  const row=tree.root.findByProps({accessibilityLabel:`Use skill ${name}`});
+  expect(row.props.accessibilityHint).toBe(description);
+  const title=row.findAllByType(AppText).find(node=>node.props.children[1]===name)!;
+  expect(title.props.numberOfLines).toBeUndefined();
+  const summary=row.findAllByType(AppText).find(node=>node.props.children===description)!;expect(summary.props.numberOfLines).toBe(3);
+  expect(tree.root.findByProps({accessibilityLabel:'Use skill disabled (disabled)'}).props.accessibilityState.disabled).toBe(true);
+ }finally{await act(async()=>tree.unmount());}
+});

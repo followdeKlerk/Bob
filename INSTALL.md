@@ -40,6 +40,17 @@ To revisit guided setup or check an existing backend:
 ~/.local/bin/bob --state /absolute/path/to/state doctor
 ```
 
+### Interactive CLI
+
+Run `bob` (or `bob menu`) in a terminal to open the dashboard. Use **↑/↓** and **Enter** to select an action, **Esc** to go back or cancel, and **Back** to return from a submenu. Opening a menu does not initialize or change backend state.
+
+- **Guided setup** walks through inspection, workspace/model account (with authentication choices and a paginated model catalog), private networking and HTTPS, background service, verification, and phone pairing. Completed steps are kept if you cancel; rerun setup to continue. Existing running/supervised backends remain protected.
+- **Phone & pairing** offers a private QR invitation or a paired-device list.
+- **Health & service** provides local configuration checks, service status, and explicit start/stop controls. Stopping asks for confirmation.
+- **Advanced tools** explains authentication and exposes help for integrations, backups, and all direct commands.
+
+Select a backend with `bob --state /absolute/path/to/state`. All existing direct commands and JSON output remain available for scripts. Without an interactive terminal, bare `bob` prints help instead of prompting. `NO_COLOR=1` disables styling; `BOB_MENU_PLAIN=1 bob` uses numbered, line-based menus (also used for `TERM=dumb` and narrow terminals). Setup confirmations default to **No / skip**; select **Yes / continue** to approve the described action. API keys are still entered without echo.
+
 New guided installations include the supervisor used by `self_update` and **Build & install**. Backend updates work without Android tools. Building the Android app additionally requires Java, an accepted/licensed Android SDK, your existing private signing properties and a trusted reference APK. Setup can record paths to those existing files; it never generates a replacement signing identity or installs Android tools silently.
 
 Use `systemctl --user status bob-<backend-id>.service` to inspect the service. Keep existing supervised deployments on their own update path. Setup does not automatically stop a running standalone backend just to add updates.
@@ -109,6 +120,8 @@ The user service now keeps the supervised backend running. From the same checkou
 node dist/cli.js --state /absolute/path/to/new-bob-state connect \
   --endpoint https://YOUR_MACHINE.YOUR_TAILNET.ts.net:49158
 ```
+
+The command displays both the QR code and its JSON invitation. Use `bob connect --json` for JSON-only output. `bob discover` verifies the existing local backend without starting one; `bob connect --local --json` creates an invitation for that verified backend. Bob Desktop uses these commands for automatic local pairing and keeps manual JSON pairing for other machines.
 
 Scan the single-use invitation with Bob after installing the app. Keep the invitation private. Loopback-only serving cannot be reached directly from another phone; do not bypass TLS or expose an unrestricted public listener. For a persistent service, prefer the guided setup.
 

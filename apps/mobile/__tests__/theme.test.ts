@@ -1,15 +1,15 @@
 const {readFileSync,readdirSync}=jest.requireActual('node:fs');
 const {resolve}=jest.requireActual('node:path');
 declare const __dirname:string;
-import {colors,lightColors} from '../theme';
+import {colors,lightColors,menuRadii,makeMenuChrome} from '../theme';
 const source=(path:string)=>readFileSync(resolve(__dirname,'..',path),'utf8');
-test('app background is pure black while raised controls remain distinguishable',()=>{
- expect(colors.background).toBe('#000000');expect(colors.surface).not.toBe(colors.background);expect(colors.composer).not.toBe(colors.background);
+test('charcoal canvas, grouped panels and neutral controls remain distinguishable',()=>{
+ expect(colors.background).toBe('#1b1c1d');expect(colors.panel).toBe('#292a2c');expect(colors.surface).toBe('#333436');expect(colors.surface).not.toBe(colors.background);expect(colors.composer).not.toBe(colors.background);
  expect(require('../tailwind.config').theme.extend.colors.background).toBe('rgb(var(--color-background) / <alpha-value>)');
 });
-test('Android launch window and system bars use the same pure-black background',()=>{
+test('Android launch window and system bars use the same theme canvas',()=>{
  const styles=source('android/app/src/main/res/values/styles.xml');
- for(const name of ['windowBackground','colorBackground','statusBarColor','navigationBarColor'])expect(styles).toContain(`<item name="android:${name}">#000000</item>`);
+ for(const name of ['windowBackground','colorBackground','statusBarColor','navigationBarColor'])expect(styles).toContain(`<item name="android:${name}">${colors.background}</item>`);
 });
 test('interactive host chrome matches the app without recoloring user-generated visuals',()=>{
  const native=source('android/app/src/main/java/com/bobmobile/BobInteractive.kt');expect(native).toContain('BobAppearance.background(this)');expect(native).toContain('background:${colors.backgroundCss};color:${colors.foregroundCss}');
@@ -23,13 +23,14 @@ test('all formerly white foreground and primary-control tokens match warm naviga
  for(const key of ['foreground','primary','secondary-foreground','accent-foreground','ring'])expect(tailwind.theme.extend.colors[key]).toBe(`rgb(var(--color-${key}) / <alpha-value>)`);
  expect(tailwind.theme.extend.colors['primary-foreground']).toBe('rgb(var(--color-primary-foreground) / <alpha-value>)');
  expect(source('App.tsx')).not.toContain('<BottomTabs');
- const {navigationSurface,foreground,body,accent,...monochrome}=colors;
- for(const color of Object.values(monochrome)){
+ const {navigationSurface,foreground,body,accent,danger,...neutral}=colors;
+ for(const color of Object.values(neutral)){
   expect(color).toMatch(/^#[0-9a-f]{6}$/i);
-  expect(color.slice(1,3)).toBe(color.slice(3,5));expect(color.slice(3,5)).toBe(color.slice(5,7));
+  const channels=[1,3,5].map(i=>parseInt(color.slice(i,i+2),16));
+  expect(Math.max(...channels)-Math.min(...channels)).toBeLessThanOrEqual(5);
  }
  // Preserve contrast for secondary copy and black labels on light buttons.
- expect(colors.muted).toBe('#a1a1a1');expect(colors.onAccent).toBe('#000000');
+ expect(colors.muted).toBe('#b6b5b1');expect(colors.onAccent).toBe('#000000');
 });
 
 test('warm foreground and button labels retain normal-text contrast',()=>{
@@ -151,4 +152,25 @@ test('delicate shadows are opt-in and do not change native elevation or flat car
  expect(tokens.light.shadows.popup.boxShadow).toContain('0.13');
  expect(source('App.tsx')).toContain('composerCapsule:{...shadows.floating,');
  for(const file of ['plus-menu','skill-picker','chat-navigation','model-picker','side-drawer'])expect(source(`components/${file}.tsx`)).toContain('...shadows.popup');
+});
+
+
+test.each([colors,lightColors])('shared card, field and semantic ink tokens remain readable with subtle selection-ready card borders',palette=>{
+ const lum=(hex:string)=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
+ const contrast=(a:string,b:string)=>{const [lo,hi]=[lum(a),lum(b)].sort((a,b)=>a-b);return(hi+.05)/(lo+.05);};
+ for(const bg of [palette.background,palette.panel,palette.surface,palette.selectedSurface]){
+  for(const ink of [palette.foreground,palette.muted,palette.danger])expect(contrast(ink,bg)).toBeGreaterThanOrEqual(4.5);
+ }
+ const chrome=makeMenuChrome(palette);
+ // Attachment cards compose these two styles: selection must reveal an outline
+ // without introducing a new border width or changing the thumbnail geometry.
+ const selected={...chrome.card,...chrome.selected};
+ expect(selected.borderWidth).toBe(chrome.card.borderWidth);
+ expect(selected.borderWidth).toBeGreaterThan(0);
+ expect(selected.borderRadius).toBe(chrome.card.borderRadius);
+ expect(selected.borderColor).toBe(palette.selectedBorder);
+ expect(selected.borderColor).not.toBe(chrome.card.borderColor);
+ expect(chrome.card).toMatchObject({borderRadius:menuRadii.card,borderWidth:1,borderColor:palette.subtle,backgroundColor:palette.panel});
+ for(const field of [chrome.control,chrome.input])expect(field).toMatchObject({minHeight:48,borderRadius:menuRadii.control});
+ expect(palette.danger).not.toBe(palette.destructive);
 });

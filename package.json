@@ -35,6 +35,7 @@
     "dist/*.js",
     "README.md",
     "ARCHITECTURE.md",
+    "EXTENSIONS.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
     ".mise.toml",

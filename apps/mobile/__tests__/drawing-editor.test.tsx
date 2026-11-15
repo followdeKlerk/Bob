@@ -3,7 +3,9 @@ import Renderer,{act} from 'react-test-renderer';
 import {Alert,Modal,PanResponder,StyleSheet} from 'react-native';
 import {DrawingEditor} from '../components/drawing-editor';
 import {SectionHeading,SectionActions} from '../components/section-ui';
-import {colors} from '../theme';
+import {menuThemes} from '../menu-theme';
+const menuTheme=menuThemes.dark;
+const {colors}=menuTheme;
 
 const mockExport=jest.fn();
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:'SafeAreaView'}));

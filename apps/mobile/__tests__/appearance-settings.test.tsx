@@ -3,10 +3,14 @@ import Renderer,{act} from 'react-test-renderer';
 import {Appearance,NativeModules,Platform,StyleSheet,Text,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {ThemeProvider} from '../theme-provider';
+import {MenuTheme} from '../menu-theme';
 import {useTheme,useThemedValue,themed,darkColors,lightColors} from '../theme';
 import {AppearanceSettings} from '../components/appearance-settings';
 import {DraftInput} from '../components/draft-input';
 import {ChatMarkdown} from '../components/chat-markdown';
+import {TouchTarget} from '../components/touch-target';
+import {selectionHaptic} from '../haptics';
+jest.mock('../haptics',()=>({selectionHaptic:jest.fn()}));
 jest.unmock('react-native/Libraries/Utilities/useColorScheme');
 jest.mock('@react-native-async-storage/async-storage',()=>{const values=new Map();return{getItem:jest.fn(async(key:string)=>values.get(key)??null),setItem:jest.fn(async(key:string,value:string)=>{values.set(key,value);}),clear:jest.fn(async()=>values.clear())};});
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
@@ -37,6 +41,27 @@ test('System follows phone changes, while an explicit choice stays fixed',async(
  await act(async()=>api.setPreference('light'));expect(Appearance.setColorScheme).toHaveBeenLastCalledWith('light');
  await act(async()=>{scheme='dark';listeners.forEach(listener=>listener());});expect(api.scheme).toBe('light');
  await act(async()=>api.setPreference('system'));expect(Appearance.setColorScheme).toHaveBeenLastCalledWith('unspecified');expect(api.scheme).toBe('dark');
+});
+
+test('menu palettes follow real System changes and explicit overrides without remounting or owning appearance',async()=>{
+ jest.replaceProperty(Platform,'OS','android');
+ let menu!:ReturnType<typeof useTheme>;
+ const MenuProbe=memo(function MenuProbe(){menu=useTheme();return <View testID="menu-probe" style={{backgroundColor:menu.colors.background}}/>;});
+ await mount(<><Probe/><MenuTheme><MenuTheme><MenuProbe/></MenuTheme></MenuTheme></>);
+ const host=tree!.root.findByProps({testID:'menu-probe'});
+ const check=(expected:'light'|'dark')=>{
+  expect(api.scheme).toBe(expected);expect(menu.scheme).toBe(expected);expect(menu.colors).toBe(api.colors);
+  expect(menu.preference).toBe(api.preference);expect(menu.setPreference).toBe(api.setPreference);
+  expect(tree!.root.findByProps({testID:'menu-probe'})).toBe(host);
+  expect(StyleSheet.flatten(host.props.style).backgroundColor).toBe(expected==='light'?'#e8dfd0':'#1b1c1d');
+ };
+ const phone=async(value:'light'|'dark')=>{await act(async()=>{scheme=value;listeners.forEach(listener=>listener());});};
+ check('light');await phone('dark');check('dark');await phone('light');check('light');
+ expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+ await act(async()=>api.setPreference('dark'));check('dark');await phone('dark');check('dark');await phone('light');check('dark');
+ await act(async()=>api.setPreference('light'));check('light');await phone('dark');check('light');
+ await act(async()=>api.setPreference('system'));check('dark');await phone('light');check('light');
+ expect(AsyncStorage.setItem).toHaveBeenCalledTimes(3);expect(Appearance.setColorScheme).not.toHaveBeenCalled();
 });
 
 test('appearance radios update memoized content without remounting or losing the focused draft',async()=>{
@@ -80,4 +105,27 @@ test('Android updates owned native chrome without changing platform night mode o
  await act(async()=>api.setPreference('system'));expect(api.scheme).toBe('light');
  expect(NativeModules.BobPlatform.setAppearance).toHaveBeenLastCalledWith('system');
  expect(Appearance.setColorScheme).not.toHaveBeenCalled();
+});
+
+
+test('appearance uses scalable wrapping radios and one immediate selection tick, including reduced-motion-compatible shared targets',async()=>{
+ await mount(<><Probe/><AppearanceSettings/></>);
+ const group=tree!.root.findAllByType(View).find(node=>node.props.accessibilityRole==='radiogroup')!;
+ expect(StyleSheet.flatten(group.props.style)).toMatchObject({flexDirection:'row',flexWrap:'wrap'});
+ expect(group.props.accessibilityLabel).toBe('Theme');
+ expect(tree!.root.findAllByType(Text).some(node=>node.props.children==='Light uses beige menus. Dark uses dark menus. System follows your phone. Your choice is saved on this phone.')).toBe(true);
+ for(const mode of ['System','Light','Dark']){
+  const button=radio(mode),style=StyleSheet.flatten(button.props.style);
+  expect(button.type).toBe(TouchTarget);expect(button.props.haptic).toBe(false);
+  expect(style.minHeight).toBeGreaterThanOrEqual(48);expect(style.height).toBeUndefined();expect(style.maxHeight).toBeUndefined();
+  for(const label of button.findAllByType(Text)){
+   expect(label.props.allowFontScaling).not.toBe(false);expect(label.props.maxFontSizeMultiplier).toBeUndefined();expect(label.props.numberOfLines).toBeUndefined();expect(label.props.adjustsFontSizeToFit).not.toBe(true);
+  }
+ }
+ const native=radio('Dark').findAll(node=>node.type!==TouchTarget&&typeof node.props.onPressIn==='function'&&typeof node.props.onPress==='function')[0];
+ await act(async()=>native.props.onPress({}));
+ expect(selectionHaptic).toHaveBeenCalledTimes(1);expect(api.preference).toBe('dark');
+ await act(async()=>native.props.onPress({}));
+ expect(selectionHaptic).toHaveBeenCalledTimes(1);expect(api.preference).toBe('dark');
+ expect(tree!.root.findAllByType(View).find(node=>node.props.accessibilityRole==='radiogroup')).toBe(group);
 });

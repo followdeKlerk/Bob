@@ -1,3 +1,4 @@
+import {withMenuTheme} from '../menu-theme';
 import {PageSearch} from './page-search';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
@@ -14,7 +15,7 @@ export type ModelChoice={model?:{provider:string;modelId:string};thinkingLevel?:
 const favoriteKey='model-favorites:v1';
 const key=(m:{provider:string;modelId:string})=>JSON.stringify([m.provider,m.modelId]);
 const labels:Record<string,string>={off:'Off',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Maximum'};
-export function ModelPicker({visible,models,current,onClose,onApply,loading=false}:{visible:boolean;loading?:boolean;models:ModelOption[];current:ModelChoice;onClose:()=>void;onApply:(choice:Required<ModelChoice>)=>Promise<void>}){
+function ModelPickerContent({visible,models,current,onClose,onApply,loading=false}:{visible:boolean;loading?:boolean;models:ModelOption[];current:ModelChoice;onClose:()=>void;onApply:(choice:Required<ModelChoice>)=>Promise<void>}){
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
@@ -35,8 +36,9 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
   try{await AsyncStorage.setItem(favoriteKey,JSON.stringify(next));setFavorites(next);setError('');}catch{setError('Could not save favourites. Please try again.');}finally{favoriteBusy.current=false;setFavoriteSaving(false);}
  }
  return <Modal visible={visible} transparent animationType="slide" onRequestClose={()=>{if(!saving)onClose();}}>
-  {/* Android RN Modal already resizes its dialog for the IME; only iOS needs JS avoidance. */}
-  <KeyboardAvoidingView style={s.overlay} enabled={Platform.OS==='ios'} behavior="padding">
+  {/* Edge-to-edge Android dialogs may not resize for the IME. Let RN measure
+      actual overlap rather than subtracting the Activity's inset a second time. */}
+  <KeyboardAvoidingView style={s.overlay} enabled behavior={Platform.OS==='ios'?'padding':'height'}>
    <Pressable style={StyleSheet.absoluteFill} onPress={()=>{if(!saving)onClose();}} accessibilityLabel="Close model selection"/>
    <SafeAreaView edges={['top','bottom']} style={s.sheet}>
     <SectionHeading title="Model & thinking"/>
@@ -48,11 +50,12 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
     <FlatList data={rows} keyExtractor={key} style={s.models} keyboardShouldPersistTaps="handled" extraData={[selected,favorites,favoriteSaving,saving,loading]} ListHeaderComponent={<View style={s.header}>
 
      {providers.length>1&&<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={s.filters}>{['',...providers].map(p=><Button key={p||'all'} variant={provider===p?'secondary':'ghost'} style={[s.filter,provider===p&&s.choice]} disabled={saving||loading} onPress={()=>setProvider(p)} accessibilityLabel={p||'All providers'} accessibilityState={{selected:provider===p}}>{provider===p&&<Check size={18} color={colors.accent}/>}<Text typography="ui" style={[s.text,s.buttonLabel]}>{p||'All providers'}</Text></Button>)}</ScrollView>}
-    </View>} renderItem={({item:m,index})=>{const favorite=favorites.includes(key(m));return <View>
-     {(index===0||favorite!==favorites.includes(key(rows[index-1])))&&<Text typography="ui" style={s.group}>{favorite?'Favourites':'All models'}</Text>}
-     <View style={[s.row,current.model&&key(m)===key(current.model)&&s.current,selected===key(m)&&s.selected]}>
+    </View>} renderItem={({item:m,index})=>{const favorite=favorites.includes(key(m)),first=index===0||favorite!==favorites.includes(key(rows[index-1])),last=index===rows.length-1||favorite!==favorites.includes(key(rows[index+1]));return <View>
+     {first&&<Text typography="ui" accessibilityRole="header" style={s.group}>{favorite?'Favourites':'All models'}</Text>}
+     <View testID={`model-row-${m.provider}-${m.modelId}`} style={[s.row,first&&s.groupTop,last&&s.groupBottom,current.model&&key(m)===key(current.model)&&s.current,selected===key(m)&&s.selected]}>
       <Pressable style={s.model} disabled={saving||loading} onPress={()=>choose(m)} accessibilityLabel={`Select ${m.name} (${m.provider})`} accessibilityRole="radio" accessibilityHint={current.model&&key(m)===key(current.model)?"Currently applied model":"Applies only after tapping Apply"} accessibilityState={{checked:selected===key(m)}}><View style={s.modelText}><Text typography="ui" style={s.text}>{m.name}</Text><Text typography="ui" style={s.caption}>{m.provider}{current.model&&key(m)===key(current.model)?' · Current':''}</Text></View>{selected===key(m)&&<Check size={18} color={colors.accent}/>}</Pressable>
-      <Pressable style={s.touch} disabled={!favoritesReady||favoriteSaving||saving||loading} onPress={()=>{void toggleFavorite(m);}} accessibilityRole="button" accessibilityLabel={`${favorite?'Unfavourite':'Favourite'} ${m.name} (${m.provider})`} accessibilityState={{selected:favorite,disabled:!favoritesReady||favoriteSaving||saving||loading}}><Star size={20} color={favorite?colors.accent:colors.muted} fill={favorite?colors.accent:'transparent'}/></Pressable>
+      <Pressable style={s.touch} disabled={!favoritesReady||favoriteSaving||saving||loading} onPress={()=>{void toggleFavorite(m);}} accessibilityRole="button" accessibilityLabel={`${favorite?'Unfavourite':'Favourite'} ${m.name} (${m.provider})`} accessibilityState={{selected:favorite,disabled:!favoritesReady||favoriteSaving||saving||loading}}><Star size={22} color={favorite?colors.accent:colors.muted} fill={favorite?colors.accent:'transparent'}/></Pressable>
+      {!last&&<View testID="model-row-separator" pointerEvents="none" style={s.separator}/>}
      </View>
     </View>;}} ListEmptyComponent={<Text typography="ui" style={s.caption}>{loading?'Loading available models…':available.length?'No matching models.':'Connect a provider in Settings to choose a model.'}</Text>}/>
     {/* Keep thinking controls reachable outside the catalog; swipe choices sideways and allow vertical overflow only on short screens. */}
@@ -70,4 +73,35 @@ export function ModelPicker({visible,models,current,onClose,onApply,loading=fals
   </KeyboardAvoidingView>
  </Modal>;
 }
-const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},sheet:{...shadows.popup,height:'94%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,borderWidth:1,borderColor:colors.border,gap:8},buttonLabel:{...menuButtonChrome({colors,shadows}).label},text:{color:colors.foreground,fontSize:15,flexShrink:1},label:{color:colors.foreground,fontSize:14,fontWeight:'600'},caption:{fontSize:14,color:colors.muted,lineHeight:20},header:{gap:10},searchHeader:{paddingHorizontal:16,gap:10},summary:{paddingVertical:4,gap:2},models:{flex:1,minHeight:0,marginHorizontal:20},row:{flexDirection:'row',alignItems:'center',borderBottomWidth:StyleSheet.hairlineWidth,borderColor:colors.border,borderLeftWidth:3,borderLeftColor:'transparent'},current:{borderLeftColor:colors.accent},model:{flex:1,minHeight:52,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:5,paddingLeft:10},modelText:{flex:1,gap:1},touch:{...menuButtonChrome({colors,shadows}).circle,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},selected:{backgroundColor:colors.selectedSurface,borderRadius:menuRadii.control},group:{color:colors.muted,fontSize:14,fontWeight:'600',paddingTop:14,paddingBottom:6,paddingLeft:10},filters:{gap:4},filter:{...menuButtonChrome({colors,shadows}).pill,borderRadius:999,height:'auto',minHeight:48,minWidth:48,paddingHorizontal:12,paddingVertical:8,flexShrink:0},effortScroll:{flexGrow:0,flexShrink:0},effortStrip:{gap:6,paddingVertical:4,paddingHorizontal:2},choice:{...menuButtonChrome({colors,shadows}).selected},selection:{paddingHorizontal:20,maxHeight:'55%',flexShrink:1,minHeight:0,paddingTop:12,gap:8},controls:{flexGrow:0,flexShrink:1},section:{gap:8,paddingBottom:8},error:{color:colors.foreground,fontSize:14},}));
+const sTheme=themed(({colors,shadows})=>StyleSheet.create({
+ overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
+ sheet:{...shadows.popup,height:'94%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,gap:8},
+ buttonLabel:{...menuButtonChrome({colors,shadows}).label},
+ text:{color:colors.foreground,fontSize:16,lineHeight:24,flexShrink:1},
+ label:{color:colors.muted,fontSize:14,lineHeight:22,fontWeight:'600'},
+ caption:{fontSize:14,color:colors.muted,lineHeight:21},
+ header:{gap:12},searchHeader:{paddingHorizontal:16,gap:12},
+ models:{flex:1,minHeight:0,marginHorizontal:16},
+ // Adjacent virtualized rows share a panel; only group edges are rounded.
+ row:{flexDirection:'row',alignItems:'center',backgroundColor:colors.panel,borderLeftWidth:3,borderLeftColor:'transparent',paddingRight:8,minWidth:0},
+ groupTop:{borderTopLeftRadius:24,borderTopRightRadius:24},
+ groupBottom:{borderBottomLeftRadius:24,borderBottomRightRadius:24},
+ separator:{position:'absolute',left:16,right:16,bottom:0,height:StyleSheet.hairlineWidth,backgroundColor:colors.border},
+ current:{borderLeftColor:colors.accent},
+ model:{flex:1,minWidth:0,minHeight:72,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:12,paddingLeft:13,paddingRight:4},
+ modelText:{flex:1,minWidth:0,gap:2},
+ touch:{width:48,height:48,minWidth:48,minHeight:48,flexShrink:0,alignItems:'center',justifyContent:'center'},
+ selected:{backgroundColor:colors.selectedSurface},
+ group:{color:colors.muted,fontSize:14,lineHeight:22,fontWeight:'600',paddingTop:18,paddingBottom:8,paddingLeft:4},
+ filters:{gap:8,paddingVertical:4},
+ filter:{...menuButtonChrome({colors,shadows}).pill,borderRadius:999,height:'auto',minHeight:48,minWidth:48,paddingHorizontal:14,paddingVertical:10,flexShrink:0},
+ effortScroll:{flexGrow:0,flexShrink:0},effortStrip:{gap:8,paddingVertical:4,paddingHorizontal:2},
+ choice:{...menuButtonChrome({colors,shadows}).selected},
+ // Include measured footer clearance in this cap: at 150% text with the IME,
+ // a 55% cap places the first effort control underneath Cancel. The catalog
+ // remains independently scrollable while the complete effort row gets room.
+ selection:{paddingHorizontal:16,maxHeight:'70%',flexShrink:1,minHeight:0,paddingTop:12,gap:8},
+ controls:{flexGrow:0,flexShrink:1},section:{gap:8,paddingBottom:8},error:{color:colors.foreground,fontSize:14,lineHeight:22},
+}));
+
+export const ModelPicker=withMenuTheme(ModelPickerContent);

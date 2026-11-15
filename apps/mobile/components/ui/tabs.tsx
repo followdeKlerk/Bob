@@ -1,3 +1,4 @@
+import {useMenuVariables} from '../../menu-theme';
 // React Native Reusables (MIT), pinned 385834c2196f8a303cbc9057d1ac768f3bde0a3b; imports adapted for Bob.
 import { TextClassContext } from './text';
 import { cn } from '../../lib/utils';
@@ -8,7 +9,8 @@ function Tabs({
   className,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
-  return <TabsPrimitive.Root className={cn('flex flex-col gap-2', className)} {...props} />;
+  const variables=useMenuVariables();
+  return <TabsPrimitive.Root className={cn('flex flex-col gap-2', className)} {...props} style={variables?[variables,props.style]:props.style} />;
 }
 
 function TabsList({

@@ -1,9 +1,12 @@
+import {menuThemes} from '../menu-theme';
 import {PageSearch} from '../components/page-search';
 jest.mock('lucide-react-native',()=>new Proxy({},{get:(_,name)=>name==='__esModule'?true:()=>null}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {View,StyleSheet,Modal} from 'react-native';
 import {AgentsScreen} from '../components/agents-screen';
+import {menuRadii} from '../theme';
+import {ThemeContext,tokens} from '../theme-context';
 import {EdgeFade} from '../components/edge-fade';
 import {SectionHeading,SectionActions} from '../components/section-ui';
 import type {AgentSession} from '../use-agent-overview';
@@ -194,5 +197,44 @@ test('lean row controls are unboxed metadata siblings and the single toolbar use
   expect(StyleSheet.flatten(button(tree,'New session').props.style)).toMatchObject({width:48,height:48});
   expect(tree.root.findAllByProps({testID:'sessions-footer-filters'})).toHaveLength(0);expect(tree.root.findAllByType(SectionActions)).toHaveLength(1);
   for(const view of tree.root.findAllByType(View))expect(view.children.filter(child=>typeof child==='string')).toEqual([]);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('selected session has a rounded outline on all sides and moves without changing row geometry',async()=>{
+ const p=props();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} currentSessionId={7}>{null}</AgentsScreen>);});
+ const style=(id:number)=>StyleSheet.flatten(tree.root.findByProps({testID:`agent-session-${id}`}).props.style);
+ expect(style(7).borderWidth).toBe(1);expect(style(7).borderRadius).toBe(menuRadii.card);
+ expect(style(7).borderColor).not.toBe('transparent');expect(style(20).borderColor).toBe('transparent');
+ expect(style(7).borderLeftWidth).toBeUndefined();expect(style(20).borderWidth).toBe(style(7).borderWidth);
+ await act(async()=>tree.update(<AgentsScreen {...p} currentSessionId={20}>{null}</AgentsScreen>));
+ expect(style(7).borderColor).toBe('transparent');expect(style(20).borderColor).not.toBe('transparent');
+ expect(button(tree,'Open Bob session Research trip').props.accessibilityState.selected).toBe(true);
+ expect(tree.root.findByProps({testID:'agent-session-tree'}).props.extraData).toBe(20);
+ await act(async()=>tree.unmount());
+});
+
+
+test.each(['light','dark'] as const)('selected session card has a complete quiet border and natural sizing in %s mode',async(scheme)=>{
+ const p=props(),theme=tokens[scheme],menuTheme=menuThemes[scheme];let tree!:Renderer.ReactTestRenderer;
+ const longTitle='Can we work on Bob application and CLI, with a long title that wraps naturally?';
+ const rows=[{...sessions[0],title:longTitle},sessions[1]];
+ const render=(currentSessionId:number)=><ThemeContext.Provider value={theme}><AgentsScreen {...p} sessions={rows} currentSessionId={currentSessionId} onSessionAction={async()=>{}}>{null}</AgentsScreen></ThemeContext.Provider>;
+ await act(async()=>{tree=Renderer.create(render(7));});
+ try{
+  const card=tree.root.findByProps({testID:'agent-session-7'}),shape=StyleSheet.flatten(card.props.style);
+  expect(shape).toMatchObject({borderWidth:1,borderRadius:menuRadii.card,marginBottom:10,borderColor:menuTheme.colors.selectedBorder,backgroundColor:menuTheme.colors.selectedSurface});
+  expect(shape.borderColor).not.toBe(menuTheme.colors.accent);
+  // A per-edge separator color overrides borderColor on Android and previously
+  // erased the selected card's bottom edge. Keep spacing outside the outline.
+  for(const edge of ['Top','Right','Bottom','Left'])expect(shape[`border${edge}Color`]).toBeUndefined();
+  for(const key of ['height','maxHeight','overflow'])expect(shape[key]).toBeUndefined();
+  const open=button(tree,`Open Bob session ${longTitle}`),label=open.findAll(node=>node.props.children===longTitle)[0];
+  expect(label.props.numberOfLines).toBeUndefined();expect(label.props.allowFontScaling).not.toBe(false);
+  expect(StyleSheet.flatten(button(tree,`Session controls for ${longTitle}`).props.style).minHeight).toBeGreaterThanOrEqual(48);
+  await act(async()=>tree.update(render(20)));
+  expect(tree.root.findByProps({testID:'agent-session-7'})).toBe(card);
+  const unselected=StyleSheet.flatten(card.props.style);expect(unselected.borderColor).toBe('transparent');expect(unselected.backgroundColor).toBe(menuTheme.colors.panel);
+  expect(unselected.borderWidth).toBe(shape.borderWidth);expect(unselected.marginBottom).toBe(shape.marginBottom);
  }finally{await act(async()=>tree.unmount());}
 });

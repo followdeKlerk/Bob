@@ -13,9 +13,10 @@ Open **Menu** above the message box to switch between:
 - **Notes** — a notebook shared across conversations on the selected machine.
 - **Workstations** — your paired machines. Each keeps its own conversations and configuration.
 - **Agents and Sessions** — opens the compact **Sessions** screen on the selected workstation. Search loaded conversations and helpers above the list; one **Active ▾** selector in the bottom controls opens Active, Archived and Trash choices. Conversation titles come first, with Bob, session IDs and real status below. Tap a row to open its chat, or expand its helper count for view-only helper transcripts, including completed helpers. Each row’s **⋯** menu (also available by long press) provides rename, pin/unpin, archive/unarchive, move to Trash or restore. Plain row ellipses and inline helper counts keep the list compact. A single in-flow bottom toolbar keeps the filter selector, **Schedules**, the **+** New session action and **Menu** available without covering list content; soft, theme-matched fades ease the list into its header and footer.
-- **Settings** — a short index with separate **Appearance**, **Conversation settings**, **Notifications**, **Voice**, **Phone & location**, **Connection**, **App & updates** and **Advanced** pages, plus Schedules. Each submenu has Back; opening a category does not toggle its settings.
+- **Tools** — Modules for this conversation and Connections for the selected workstation. Compact cards keep versions and setup details behind a tap.
+- **Settings** — a short index with separate **Appearance**, **Conversation settings**, **Notifications**, **Voice**, **Phone & location**, **Connection**, **Storage & cache**, **App & updates** and **Advanced** pages, plus Schedules. Each submenu has Back; opening a category does not toggle its settings.
 
-Switching sections keeps your chat draft and reading position. **Settings → Appearance** offers Light, Dark and System themes. Text follows Android's text-size setting. The light theme uses a warm beige background with deeper beige chat bubbles: a richer shade for assistant replies and a slightly lighter shade for owner messages. The selected Menu destination uses a thin rounded outline and checkmark rather than a filled highlight. Non-chat action buttons share outlined circular icons or matching text pills with a slightly stronger soft shadow, as do existing raised composer and pop-up surfaces; message bubbles and tool rows stay flat. Nunito is bundled offline for chat text, inputs, menus, settings, pickers, editors and app-owned native controls. These surfaces share compact rounded headings, consistent spacing and soft header/footer fades. Search boxes stay directly below page headings; Back/Cancel stays left and primary actions sit before Menu in the bottom controls. Code, raw technical payloads and the terminal retain Nordwand Mono for alignment.
+Switching sections keeps your chat draft and reading position. **Settings → Appearance** offers Light, Dark and System themes for chat and menus. Light-mode menu and settings windows use a beige canvas (`#e8dfd0`); Dark mode keeps dark menus, and System follows the phone’s current appearance. Both palettes use coordinated readable controls. Text follows Android's text-size setting. The light theme uses a warm beige background with deeper beige chat bubbles: a richer shade for assistant replies and a slightly lighter shade for owner messages. The selected Menu destination uses a quiet rounded outline and checkmark. Non-chat action buttons share outlined circular icons or matching text pills with a slightly stronger soft shadow, as do existing raised composer and pop-up surfaces; message bubbles and tool rows stay flat. Nunito is bundled offline for chat text, inputs, menus, settings, pickers, editors and app-owned native controls. These surfaces share compact rounded headings, consistent spacing and soft header/footer fades. Search boxes stay directly below page headings; Back/Cancel stays left and primary actions sit before Menu in the bottom controls. Code, raw technical payloads and the terminal retain Nordwand Mono for alignment.
 
 ## Conversation controls
 
@@ -30,6 +31,14 @@ Text-only messages can continue sending in the background. Keep Bob open for att
 
 Your messages appear on the right and Bob's replies on the left. New streamed prose has a brief leading-edge fade, without delaying the words; reduced-motion and screen-reader settings disable chat animations. Expand a tool row to see what Bob called, its result or an error. Small link footers show the reply's existing labels and destination domains without fetching web previews. Code blocks have a copy button; wide tables and code can be scrolled sideways.
 
+### BTW: ask without interrupting
+
+Type **`/btw <question>`** to ask a side question while the main task continues. Bare **`/btw`**, or **Chat actions → More → BTW · side chat**, opens the side workspace. Follow-up questions stay there; nothing is automatically sent back to the main conversation. Side questions are text-only.
+
+A new thread uses the current model and thinking level with a bounded snapshot of recent saved chat text. It does not include live output, tool payloads, attachments or private reasoning, and does not refresh itself as the main task progresses. **New side chat** discards the old thread and captures a fresh snapshot. The side model has no tools. Each question makes an additional provider request and incurs normal model usage.
+
+Closing the workspace does not stop its answer. Use **Stop side response** to cancel that response independently; the main agent's Stop button is separate. Unknown delivery is checked by receipt rather than automatically resent. Side history is temporary, not saved across app/backend restarts, and expires thirty minutes after thread creation; thread and provider-call limits apply. **Clear temporary side chats** discards all side threads for this paired device on this backend, including hidden conversations, after confirmation; it can reclaim slots after an app restart. Main conversations are untouched. Keep important answers elsewhere before discarding a thread.
+
 ## Models and conversation settings
 
 Open **Model & thinking** from the chat’s **+** menu. The current model is marked directly in the list; choose a model, swipe the single thinking-effort row sideways, then tap **Apply**. Star models to keep favourites handy. Availability and cost depend on your provider account.
@@ -37,6 +46,16 @@ Open **Model & thinking** from the chat’s **+** menu. The current model is mar
 Conversation instructions and the working folder are under **Settings → Conversation settings**. These apply to that conversation, not every paired machine. Unsaved edits survive navigating away while the app stays open; save them before closing the app.
 
 Previously created local-model conversations and uploaded files remain available as read-only history. They cannot send messages, change models, enable tools or become normal Bob conversations. Start a new ordinary conversation to continue with Bob; a separately running model/server is unaffected.
+
+## Tools and integrations
+
+Open **Menu → Tools**. **Modules** lists the capabilities supplied by the selected workstation, including installed custom modules. In an ordinary conversation, its controls change that conversation only; installation, running registration and new-conversation defaults remain separate facts in each module’s details. With no conversation selected, you can inspect the workstation catalog without pretending to enable anything for a chat. Read-only conversations remain inspect-only.
+
+**Connections** manages explicitly configured MCP services on that workstation. Add or edit the endpoint and exact allowed tool names, then deliberately enable the connection. Credentials stay on the backend and use the existing secure-input CLI flow; changing an endpoint or removing a connection removes its saved credential. An enabled connection is not a successful connection test. MCP use also requires the Interactive tools module in the conversation.
+
+Refresh and loading errors do not silently change settings. A failed save may have reached the backend: inspect the saved state rather than repeatedly resubmitting. Related controls stay locked while a request is pending, even after leaving and reopening Tools; refresh can reconcile them only after that request settles. This protection belongs to the current app process, not simultaneous edits from another device. Backend work must settle before changing a conversation’s modules; the app does not stop it automatically.
+
+The optional setup help explains which extension mechanism fits. Guided setup opens a suggested message in your current chat, preserving any existing draft; it does not send, install or enable anything automatically. Ask Bob to use the **bob-tool-extension-development** skill where installed. For authoring, the [extension guide](EXTENSIONS.md) includes a tested starter, exact compatibility requirements and the backed-up offline import workflow. Ordinary supported MCP setup does not require an app update; new trusted backend modules need their separate installation/activation process.
 
 ## Terminal (Linux / arm64 Android prototype)
 
@@ -133,7 +152,29 @@ Agents in other conversations are independent. Contacting one does not grant con
 
 Bob can split suitable work between helpers, such as a researcher, an implementation worker and a reviewer. **Agents and Sessions** groups helpers beneath their conversation, with pinned sessions first, then running sessions. Helper groups are collapsed by default; expand the count to see their names, statuses and transcripts. Empty helper groups are omitted. The screen shares the compact Nunito hierarchy used by the other menus; chat prose also uses Nunito while code remains monospaced. Status labels reflect known execution state; it does not invent activity times, previews or failure states. One bottom filter selector switches between Active, Archived and Trash; the choices appear only while selecting. The overview refreshes while visible; **More sessions** loads older groups, and search filters the groups already loaded. A helper opens in a view-only transcript, with **Back to agent list** returning to the tree. Opening it never starts or stops work or changes an unsent message in the main chat. Unknown or failed refreshes are shown explicitly rather than treated as idle. This overview covers the selected workstation, not every paired machine at once.
 
+Completed helper reports appear as expandable **Agent report** activity as soon as the backend receives them, even while Bob is still working. The same report stays in place rather than appearing again after the final reply. This is a report-ready indication, not a claim that Bob has already reviewed it or that the helper's conclusions are correct; model delivery still follows the normal reply queue.
+
 Use `/delegation` to inspect available routing choices. With configured profiles, `/delegation auto on` allows Bob to choose helpers for suitable tasks; `/delegation auto off` disables that automatic permission. It is off by default. Helpers can incur additional model costs, and simple work should stay with Bob rather than creating unnecessary agents.
+
+## Switching live sessions
+
+Bob keeps your **two most recently opened conversations mounted and live while the app is in the foreground**, including conversations on different workstations. Switching back preserves each retained transcript, reading position, draft input and mounted controls instead of rebuilding the chat. Workstation selection returns to that workstation’s last selected conversation when one is known. Session identity includes both the workstation and conversation number.
+
+Opening menus or a workstation’s session browser does not use a conversation slot. Opening a third conversation replaces the least recently selected mounted conversation view; its history can reload from local cache and the backend. Draft text, staged attachments and conversation-settings drafts have separate ownership. There is no battery-saving or idle-time rule that unloads the two retained conversations.
+
+Backgrounding Bob keeps these views in memory while Android permits the process to live, but foreground chat sockets suspend and reconnect on return. Process termination, extended offline gaps and Android memory reclamation still require recovery; this is not a promise that every conversation is completely available offline. Hidden chats cannot operate phone tools, steal navigation or play media merely because their transcript remains live. Notes remains one notebook/editor per workstation, independent of which conversation is selected.
+
+## Storage & cache
+
+**Settings → Storage & cache** manages downloaded chat copies on this phone, across all paired workstations:
+
+- Turn conversation-list and conversation-history caching on or off independently. Turning a category off asks for confirmation, removes its downloaded copies and stops saving new ones until re-enabled.
+- Choose how many conversations to keep in the offline cache: 10, 25, 50, 100, 200 or 500, with 50 as the default. Snapshots and older downloaded pages count together as one conversation. The cache favors recently opened conversations and also has a 128 MiB history-data ceiling; this does not download complete conversations in advance.
+- Inspect downloaded list/history usage, refresh the measurement, or explicitly clear downloaded chat copies. Enabled caches may refill with new activity. Storage errors are shown rather than reported as successful cleanup.
+
+The offline limit is **separate from the two live conversations**. Clearing or disabling caches leaves open transcripts, scroll positions, drafts and live connections intact. It does not delete workstation history, unsent messages, staged attachments, Notes recovery, pairings or APK downloads. Images and file previews are not managed by these controls.
+
+Usage measures managed cached-data bytes, not total app storage or space immediately reclaimed by Android. These controls add no application-level encryption, and clearing is not secure erasure.
 
 ## Keep connected
 

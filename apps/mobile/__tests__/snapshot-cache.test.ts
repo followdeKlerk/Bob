@@ -1,4 +1,5 @@
 jest.mock('../history-cache',()=>({readHistoryCache:jest.fn(),writeHistoryCache:jest.fn()}));
+jest.mock('../download-cache',()=>({cacheGeneration:()=>0}));
 import {reuseSnapshotEntries} from '../snapshot-cache';
 test('immutable stored entries retain object identity while new live documents and entries advance',()=>{
  const original={id:1,data:{text:'Original preserved reply'}},previous={entries:[original],docs:{live:'before'}};

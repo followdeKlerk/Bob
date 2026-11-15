@@ -238,12 +238,16 @@ test('authenticated GET/SSE preserve legacy context, native pending→ready and 
     await delay(100);
     assert.equal(metaReads, 1, 'all watch and refresh presentation is serialized');
     release.resolve();
-    const olderFrame = await stream.next(), newerFrame = await stream.next();
-    assert.deepEqual(ids(olderFrame.view.entries), ids(entries));
+    // The delayed refresh is identical to the delivered view and is suppressed.
+    const newerFrame = await stream.next();
     assert.deepEqual(ids(newerFrame.view.entries), [...ids(entries), ...ids(newer)]);
     assert.equal(Object.hasOwn(newerFrame.view, 'before'), false);
     refresh();
-    assert.deepEqual(ids((await stream.next()).view.entries), ids(newerFrame.view.entries), 'later refresh cannot roll back entries');
+    await chat.commit(async tx => { (await tx.doc(ChatMeta, chat.id)).title = 'Changed Bob document'; }, ctx);
+    refresh();
+    const docFrame = await stream.next();
+    assert.deepEqual(ids(docFrame.view.entries), ids(newerFrame.view.entries), 'later refresh cannot roll back entries');
+    assert.equal(docFrame.view.docs['bob.chat'].title, 'Changed Bob document');
 
     stream.close();
     const reattached = await connect(`${base}/${chat.id}/events`, headers, 'irrelevant-old-event-id'); streams.push(reattached);

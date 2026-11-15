@@ -1,3 +1,4 @@
+import {colors} from '../theme';
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{createAnimatedComponent:(component:any)=>component},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:jest.fn((value:any)=>value),withTiming:jest.fn((value:any)=>value),Easing:{out:(value:any)=>value,inOut:(value:any)=>value,cubic:jest.fn()}}));
 jest.mock('react-native-svg',()=>{const create=require('react').createElement;const component=(name:string)=>(props:any)=>create(name,props,props.children);return{__esModule:true,default:component('Svg'),Path:component('Path'),Rect:component('Rect'),Circle:component('Circle'),Defs:component('Defs'),ClipPath:component('ClipPath'),G:component('G')};});
 import React from 'react';
@@ -94,7 +95,7 @@ test('Agents shows a monochrome live count only while agents are active and keep
  const tab=()=>tree.root.findAll(node=>node.props.accessibilityRole==='tab'&&node.props.accessibilityLabel==='Agents'&&typeof node.props.onPress==='function')[0];
  const badge=()=>tree.root.findByProps({testID:'active-agent-badge'});
  expect(badge().findByType(Text).props.children).toBe(2);
- expect(StyleSheet.flatten(badge().props.style)).toMatchObject({backgroundColor:'#303030',minWidth:18,minHeight:18});
+ expect(StyleSheet.flatten(badge().props.style)).toMatchObject({backgroundColor:colors.selectedSurface,minWidth:18,minHeight:18});
  expect(badge().props.pointerEvents).toBe('none');expect(badge().props.accessibilityElementsHidden).toBe(true);
  expect(tab().props.accessibilityValue.text).toBe('2 active agents');act(()=>tab().props.onPress());expect(select).toHaveBeenCalledWith('Agents');
  await act(async()=>tree.update(<BottomTabs selected="Agents" activeAgentCount={1} onSelect={select}/>));

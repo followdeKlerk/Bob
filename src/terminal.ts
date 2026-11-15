@@ -268,7 +268,7 @@ export function createTerminalManager(state:TerminalState,options:TerminalOption
     const base={protocol:'mosh' as const,maxSessions,portStart,portEnd};
     const addresses=options.localAddresses??Object.values(networkInterfaces()).flatMap(entries=>entries??[]).filter(a=>a.family==='IPv4').map(a=>a.address);
     if((options.platform??process.platform)!=='linux')return available={...base,available:false,reason:'Terminal hosting requires Linux'};
-    if(!allowedHost(host)||!addresses.includes(host))return available={...base,available:false,reason:'Terminal requires the actual serve host to be a local Tailscale IPv4 or loopback address'};
+    if(!allowedHost(host)||!addresses.includes(host))return available={...base,available:false,reason:'Terminal requires its transport host to be a local Tailscale IPv4 or loopback address'};
     if(Buffer.byteLength(socket)>100)return available={...base,available:false,reason:'Terminal state directory path is too long for a private tmux socket'};
     try{await io.pidfdAvailable(timeout);await io.prepare(directory,mosh,tmux);}
     catch{return available={...base,available:false,reason:'Terminal requires mosh-server, tmux, Python 3 with Linux pidfd support, and a private terminal state directory'};}

@@ -1,12 +1,14 @@
+import {useMenuVariables} from '../../menu-theme';
 // React Native Reusables (MIT), pinned 385834c2196f8a303cbc9057d1ac768f3bde0a3b; imports adapted for Bob.
 import { TextClassContext } from './text';
 import { cn } from '../../lib/utils';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Platform, Pressable } from 'react-native';
+import {TouchTarget} from '../touch-target';
 
 const buttonVariants = cva(
   cn(
-    'group shrink-0 flex-row items-center justify-center gap-2 rounded-md shadow-none',
+    'group shrink-0 flex-row items-center justify-center gap-2 rounded-full shadow-none',
     Platform.select({
       web: "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive whitespace-nowrap outline-none transition-all focus-visible:ring-[3px] disabled:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
     })
@@ -41,10 +43,10 @@ const buttonVariants = cva(
         link: '',
       },
       size: {
-        default: cn('h-10 px-4 py-2 sm:h-9', Platform.select({ web: 'has-[>svg]:px-3' })),
-        sm: cn('h-9 gap-1.5 rounded-md px-3 sm:h-8', Platform.select({ web: 'has-[>svg]:px-2.5' })),
-        lg: cn('h-11 rounded-md px-6 sm:h-10', Platform.select({ web: 'has-[>svg]:px-4' })),
-        icon: 'h-10 w-10 sm:h-9 sm:w-9',
+        default: cn('min-h-12 px-4 py-2', Platform.select({ web: 'has-[>svg]:px-3' })),
+        sm: cn('min-h-12 gap-1.5 px-3 py-2', Platform.select({ web: 'has-[>svg]:px-2.5' })),
+        lg: cn('min-h-12 px-6 py-3', Platform.select({ web: 'has-[>svg]:px-4' })),
+        icon: 'h-12 w-12 min-h-12 min-w-12',
       },
     },
     defaultVariants: {
@@ -92,12 +94,14 @@ const buttonTextVariants = cva(
 type ButtonProps = React.ComponentProps<typeof Pressable> & React.RefAttributes<typeof Pressable> & VariantProps<typeof buttonVariants>;
 
 function Button({ className, variant, size, ...props }: ButtonProps) {
+  const variables=useMenuVariables(),style=props.style;
   return (
     <TextClassContext.Provider value={buttonTextVariants({ variant, size })}>
-      <Pressable
+      <TouchTarget
         className={cn(props.disabled && 'opacity-50', buttonVariants({ variant, size }), className)}
         role="button"
         {...props}
+        style={variables?(typeof style==='function'?state=>[variables,style(state)]:[variables,style]):style}
       />
     </TextClassContext.Provider>
   );

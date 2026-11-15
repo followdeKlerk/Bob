@@ -10,18 +10,18 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class BobPlatform(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     private val fullscreenListener = object : com.facebook.react.interfaces.ExtraWindowEventListener {
-        override fun onExtraWindowCreate(window: android.view.Window) { BobFullscreen.attach(window) }
-        override fun onExtraWindowDestroy(window: android.view.Window) { BobFullscreen.detach(window) }
+        override fun onExtraWindowCreate(window: android.view.Window) { BobFullscreen.attach(window); BobHaptics.attach(window) }
+        override fun onExtraWindowDestroy(window: android.view.Window) { BobFullscreen.detach(window); BobHaptics.detach(window) }
     }
     private var scanPromise: Promise? = null
     private var notificationTarget: WritableMap? = null
     private fun target(intent: Intent?): WritableMap? {
         val raw = intent?.data ?: return null
         if (raw.scheme != "bob" || raw.query != null || raw.fragment != null) return null
-        if (raw.authority == "updates" && raw.pathSegments.size == 1) return try {
+        if (raw.authority in listOf("updates", "sessions") && raw.pathSegments.size == 1) return try {
             val identity = raw.pathSegments[0]; java.util.UUID.fromString(identity)
             intent.data = null
-            Arguments.createMap().apply { putString("backendId", identity); putString("screen", "updates") }
+            Arguments.createMap().apply { putString("backendId", identity); putString("screen", raw.authority) }
         } catch (_: Exception) { null }
         if (raw.authority != "work" || raw.pathSegments.size != 2) return null
         return try {
@@ -50,10 +50,12 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
     }
     override fun invalidate() {
         context.removeExtraWindowEventListener(fullscreenListener)
+        UiThreadUtil.runOnUiThread { BobHaptics.clear() }
         super.invalidate()
     }
     override fun getName() = "BobPlatform"
     override fun getConstants(): Map<String, Any> = mapOf("loopbackTesting" to BuildConfig.DEBUG)
+    @ReactMethod fun selectionHaptic() { BobHaptics.selection(context) }
     @ReactMethod fun setAppearance(mode: String, promise: Promise) {
         if (mode != "light" && mode != "dark" && mode != "system") {
             promise.reject("appearance", "Appearance must be light, dark, or system"); return

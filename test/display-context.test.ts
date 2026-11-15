@@ -5,12 +5,19 @@ import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {Message,INLINE_VISUAL_EMERGENCY_HEIGHT} from '@bob-local/core/contracts';
 import {MAX_INLINE_HEIGHT,INITIAL_INLINE_HEIGHT} from '../apps/mobile/inline-visual-policy.js';
-import {displayContext} from '../src/display-context.js';
+import {clientContext,displayContext} from '../src/display-context.js';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage} from '@earendil-works/pi-ai/providers/faux';
 import {State} from '../src/state.js';
 import {openRuntime,ctx} from '../src/runtime.js';
 import {serve} from '../src/server.js';
+
+test('desktop context is a UI hint without permission changes',()=>{
+ assert.match(clientContext('Bob Desktop'),/Linux/);
+ assert.match(clientContext('Bob Desktop'),/does not grant additional permissions/);
+ assert.equal(clientContext('Bob Android'),'');
+ assert.equal(clientContext(undefined),'');
+});
 
 const display=(height:number)=>({inline:{width:313,height},fullscreen:{width:361,height:754}});
 const message=(height:number)=>({requestId:randomUUID(),text:'Make a card',mode:'steer',display:display(height)});
@@ -40,16 +47,18 @@ test('authenticated requests deliver viewer-specific guidance without rewriting 
   const seen:string[]=[];
   faux.setResponses([8192,420].map(()=>request=>{seen.push(JSON.stringify(request.messages.filter(m=>m.role==='user').at(-1)));return fauxAssistantMessage('Fixture complete');}));
   for(const height of [8192,420]){
+   const deviceHeaders=height===420?{...headers,authorization:`Bearer ${state.pair(state.invite().token,'Bob Desktop').credential}`}:headers;
    const chat=await runtime.harness.createConversation({ownership:{kind:'ownerless'},agent:{model:{provider:'faux',modelId:'faux-1'}}},ctx);
    const snapshotResponse=await fetch(base+`/chats/${chat.id}`,{headers});assert.equal(snapshotResponse.status,200);
    const snapshot=await snapshotResponse.json() as any;assert.deepEqual(snapshot.view.docs['bob.display'],{inlineHeight:8192});
    const rawView=await chat.watch(ctx);try{assert.equal(rawView.value.docs['bob.display'],undefined,'capability is read-only presentation metadata, not persisted state');}finally{await rawView.stop();}
    const request={...message(height),text:'Show a card #nomem'};
-   const response=await fetch(base+`/chats/${chat.id}/messages`,{method:'POST',headers,body:JSON.stringify(request)});assert.equal(response.status,202);
+   const response=await fetch(base+`/chats/${chat.id}/messages`,{method:'POST',headers:deviceHeaders,body:JSON.stringify(request)});assert.equal(response.status,202);
    const accepted=await response.json() as any;await(await runtime.harness.submission(accepted.id,ctx))!.wait(ctx);
    const entry=(await chat.entries({},100,undefined,ctx)).items.find(e=>e.id===accepted.entry)!;
    assert.equal(entry.kind,'bob.user');assert.equal(entry.data?.text,request.text);assert.doesNotMatch(JSON.stringify(entry.data),/display context|emergency ceiling/);
   }
+  assert.doesNotMatch(seen[0],/Bob client context/);assert.match(seen[1],/owner is using Bob Desktop on Linux/);
   assert.match(seen[0],/Ordinary tall cards should stay inline/);assert.match(seen[1],/legacy fixed inline height limit/);
  }finally{await app.close();state.close();}
 });
