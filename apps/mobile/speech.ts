@@ -29,12 +29,12 @@ export function subscribeSpeech(listener:()=>void){
  listeners.add(listener);ensureEvents();
  return ()=>{listeners.delete(listener);if(!listeners.size){events?.remove();events=undefined;}};
 }
-export async function stopSpeech(id?:string){
- if(id&&active!==id)return;
+export async function stopSpeech(id?:string):Promise<boolean>{
+ if(id&&active!==id)return true;
  const selected=active,previousRequest=request;
  request=null;publish(null);
- try{await NativeModules.BobSpeech?.stop(id?(previousRequest??''):'');}
- catch{if(selected)Alert.alert('Unable to stop speech','Leave Bob to stop playback.');}
+ try{await NativeModules.BobSpeech?.stop(id?(previousRequest??''):'');return true;}
+ catch{if(selected)Alert.alert('Unable to stop speech','Leave Bob to stop playback.');return false;}
 }
 export async function startSpeech(id:string,text:string){
  const spoken=speechText(text);
