@@ -2,82 +2,104 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Animated,StyleSheet} from 'react-native';
 import {PebblePresence} from '../components/pebble-presence';
+import {MotionSurface} from '../components/motion-surface';
 import {useAppMotion} from '../app-motion';
+import {ThemeContext,tokens} from '../theme-context';
 import type {ComposerActivity} from '../composer-activity';
-import {PEBBLE_QUIPS,pickPebbleQuip} from '../pebble-quips';
 jest.mock('../app-motion',()=>({...jest.requireActual('../app-motion'),useAppMotion:jest.fn(()=>true)}));
 const activity=(phase:ComposerActivity['phase']='thinking',text='Thinking…'):ComposerActivity=>({phase,text,animate:true});
-const render=(phase:ComposerActivity['phase']='thinking',scope='one',active=true)=><PebblePresence active={active} scope={scope} activity={activity(phase)}/>;
+const render=(phase:ComposerActivity['phase']='thinking',scope='one',active=true,text='Thinking…')=><PebblePresence active={active} scope={scope} activity={activity(phase,text)}/>;
 beforeEach(()=>{
- jest.useFakeTimers({doNotFake:['setImmediate','nextTick','queueMicrotask']});jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+ jest.useFakeTimers({doNotFake:['setImmediate','nextTick','queueMicrotask']});
  jest.mocked(useAppMotion).mockReturnValue(true);
  jest.spyOn(Animated,'timing').mockReturnValue({start:jest.fn(),stop:jest.fn(),reset:jest.fn()});
  jest.spyOn(Animated,'loop').mockReturnValue({start:jest.fn(),stop:jest.fn(),reset:jest.fn()});
 });
 afterEach(()=>{jest.restoreAllMocks();jest.useRealTimers();});
-const quips=(tree:Renderer.ReactTestRenderer)=>tree.root.findAll(node=>typeof node.type==='string'&&node.props.testID==='pebble-quip');
-test('truth first, delayed bounded quip, then silence; no repeat while phase remains unchanged',async()=>{
+const label=(tree:Renderer.ReactTestRenderer)=>tree.root.findAllByProps({testID:'pebble-status-text'})[0];
+const flatten=(value:any):string=>typeof value==='string'?value:Array.isArray(value)?value.map(flatten).join(''):value?.children?flatten(value.children):'';
+const factual=(tree:Renderer.ReactTestRenderer,text:string)=>{
+ expect(label(tree).props.children).toBe(text);expect(flatten(tree.toJSON())).toBe(text);
+ const status=tree.root.findAllByProps({accessibilityLabel:text})[0];
+ expect(status.props).toMatchObject({accessible:true,accessibilityRole:'text',accessibilityLiveRegion:'polite'});
+ expect(tree.root.findAllByProps({testID:'pebble-quip'})).toHaveLength(0);
+ expect(jest.getTimerCount()).toBe(0);
+};
+
+test('only the factual label remains after prolonged work; no filler timers are ever scheduled',async()=>{
+ const timeout=jest.spyOn(globalThis,'setTimeout'),interval=jest.spyOn(globalThis,'setInterval');
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(render());});
- expect(quips(tree)).toHaveLength(0);
- await act(async()=>jest.advanceTimersByTime(6500));expect(quips(tree)).toHaveLength(1);
- const first=quips(tree)[0].props.children;
- expect(tree.root.findAllByProps({testID:'pebble-status-text'})[0].props.children).toBe('Thinking…');
- await act(async()=>jest.advanceTimersByTime(7200));expect(quips(tree)).toHaveLength(0);
- await act(async()=>jest.advanceTimersByTime(24800));expect(quips(tree)).toHaveLength(1);expect(quips(tree)[0].props.children).not.toBe(first);
+ factual(tree,'Thinking…');
+ for(const elapsed of [6500,7200,32000,300000]){
+  await act(async()=>jest.advanceTimersByTime(elapsed));factual(tree,'Thinking…');
+ }
+ expect(timeout).not.toHaveBeenCalled();expect(interval).not.toHaveBeenCalled();
  await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
 });
-test('new phases, scope switches and hidden Chat cannot retain old jokes or timers',async()=>{
+
+test('phase and scope changes show the latest literal immediately without remounting the avatar',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(render());});
- await act(async()=>jest.advanceTimersByTime(6500));expect(quips(tree)).toHaveLength(1);
- await act(async()=>tree.update(render('question')));expect(quips(tree)).toHaveLength(0);expect(jest.getTimerCount()).toBe(0);
- await act(async()=>tree.update(render('working','two')));expect(quips(tree)).toHaveLength(0);
- await act(async()=>jest.advanceTimersByTime(6500));expect(quips(tree)).toHaveLength(1);
- await act(async()=>tree.update(render('working','two',false)));expect(quips(tree)).toHaveLength(0);expect(jest.getTimerCount()).toBe(0);
+ const avatar=tree.root.findByProps({testID:'pebble-bob'}),speech=tree.root.findByType(MotionSurface);
+ for(const [phase,scope,text] of [
+  ['preparing','one','Preparing tools…'],['working','one','Running tools…'],
+  ['writing','two','Writing response…'],['question','two','Waiting for your answer'],
+  ['stopping','one','Stopping…'],['connection','one','Connection needs attention • pair again'],
+  ['compaction','one','Retrying summary…'],
+ ] as const){
+  await act(async()=>tree.update(render(phase,scope,true,text)));factual(tree,text);
+  expect(tree.root.findByType(MotionSurface)===speech).toBe(true);
+  expect(speech.props.transitionKey).toBe(`${scope}:${phase}`);
+  expect(tree.root.findByProps({testID:'pebble-bob'})===avatar).toBe(true);
+ }
+ await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
+});
+
+test('a same-phase label correction does not restart the speech entrance',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(render('compaction','one',true,'Condensing conversation…'));});
+ const calls=jest.mocked(Animated.timing).mock.calls.length;
+ await act(async()=>tree.update(render('compaction','one',true,'Retrying summary…')));
+ factual(tree,'Retrying summary…');expect(jest.mocked(Animated.timing)).toHaveBeenCalledTimes(calls);
+ expect(tree.root.findByType(MotionSurface).props.transitionKey).toBe('one:compaction');
  await act(async()=>tree.unmount());
 });
-test.each(['idle','connecting','sending'] as const)('%s has no bubble or joke loop',async phase=>{
+
+test.each(['idle','connecting','sending'] as const)('%s remains silent with the same reserved avatar lane',async phase=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(render(phase));});
- expect(tree.root.findAllByProps({testID:'pebble-speech'})).toHaveLength(0);expect(jest.getTimerCount()).toBe(0);
- await act(async()=>tree.unmount());
-});
-test('reduced motion or screen-reader gate keeps literal status and disables random chatter',async()=>{
- jest.mocked(useAppMotion).mockReturnValue(false);let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(render());});
- expect(tree.root.findAllByProps({testID:'pebble-status-text'}).length).toBeGreaterThan(0);
- expect(jest.getTimerCount()).toBe(0);expect(quips(tree)).toHaveLength(0);
- await act(async()=>tree.unmount());
-});
-test('catalogue is short, unique and excludes safety/interaction phases; picker excludes recent history',()=>{
- const lines=Object.values(PEBBLE_QUIPS).flat();expect(new Set(lines).size).toBe(lines.length);
- expect(lines.every(line=>line.length<=64)).toBe(true);
- for(const phase of ['retry','question','stopping','connection','idle'] as const)expect(pickPebbleQuip(phase,[])).toBeUndefined();
- const pool=PEBBLE_QUIPS.thinking!;
- expect(pickPebbleQuip('thinking',[pool[0]],()=>0)).toBe(pool[1]);
- expect(pickPebbleQuip('thinking',pool,()=>0)).toBeUndefined();
+ expect(tree.root.findAllByProps({testID:'pebble-speech'})).toHaveLength(0);
+ expect(StyleSheet.flatten(tree.root.findByProps({testID:'pebble-presence'}).props.style).height).toBe(76);
+ expect(jest.getTimerCount()).toBe(0);await act(async()=>tree.unmount());
 });
 
-test('connection recovery and summary retries stay visible and joke-free',async()=>{
- let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<PebblePresence active scope="one" activity={activity('connection','Connection needs attention • pair again')}/>);});
- expect(tree.root.findAllByProps({testID:'pebble-status-text'})[0].props.children).toBe('Connection needs attention • pair again');
- expect(jest.getTimerCount()).toBe(0);
- await act(async()=>tree.update(<PebblePresence active scope="one" activity={activity('compaction','Retrying summary…')}/>));
- expect(jest.getTimerCount()).toBe(0);expect(quips(tree)).toHaveLength(0);
- await act(async()=>tree.unmount());
-});
-
-test('speech overlays the chat without reflowing the avatar lane as labels and quips grow',async()=>{
- let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(render());});
+test('hidden/foreground and reduced-motion/screen-reader gates never replace or replay factual state',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(render('working','one',true,'Running tools…'));});
  const avatar=tree.root.findByProps({testID:'pebble-bob'});
- const lane=()=>StyleSheet.flatten(tree.root.findByProps({testID:'pebble-presence'}).props.style);
- const bubble=()=>StyleSheet.flatten(tree.root.findAllByProps({testID:'pebble-speech'})[0].props.style);
- expect(lane()).toMatchObject({height:76,overflow:'visible'});
- expect(bubble()).toMatchObject({position:'absolute',left:78,right:3,bottom:18});
- await act(async()=>jest.advanceTimersByTime(6500));expect(quips(tree)).toHaveLength(1);
- expect(lane().height).toBe(76);expect(bubble().bottom).toBe(18);
- await act(async()=>tree.update(<PebblePresence active scope="one" activity={activity('question','A longer label that wraps over several lines at accessibility text sizes')}/>));
- expect(tree.root.findByProps({testID:'pebble-bob'})).toBe(avatar);expect(lane().height).toBe(76);
- expect(bubble().position).toBe('absolute');expect(bubble().height).toBeUndefined();
+ await act(async()=>tree.update(render('writing','two',false,'Writing response…')));
+ expect(tree.root.findAllByProps({testID:'pebble-speech'})).toHaveLength(0);expect(jest.getTimerCount()).toBe(0);
+ jest.mocked(useAppMotion).mockReturnValue(false);
+ await act(async()=>tree.update(render('writing','two',true,'Writing response…')));factual(tree,'Writing response…');
+ expect(tree.root.findByProps({testID:'pebble-bob'})===avatar).toBe(true);
+ const calls=jest.mocked(Animated.timing).mock.calls.length;
+ await act(async()=>tree.update(render('question','two',true,'Waiting for your answer')));factual(tree,'Waiting for your answer');
+ expect(jest.mocked(Animated.timing)).toHaveBeenCalledTimes(calls);
+ jest.mocked(useAppMotion).mockReturnValue(true);
+ await act(async()=>tree.update(render('question','two',true,'Waiting for your answer')));factual(tree,'Waiting for your answer');
+ await act(async()=>jest.advanceTimersByTime(60000));factual(tree,'Waiting for your answer');
+ await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
+});
+
+test('both themes retain foreground status ink and scalable overlay geometry without moving the avatar',async()=>{
+ const text='A longer factual label that wraps over several lines at accessibility text sizes';
+ const themed=(scheme:'light'|'dark')=><ThemeContext.Provider value={tokens[scheme]}>{render('question','one',true,text)}</ThemeContext.Provider>;
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(themed('light'));});
+ const avatar=tree.root.findByProps({testID:'pebble-bob'});
+ for(const scheme of ['light','dark'] as const){
+  await act(async()=>tree.update(themed(scheme)));factual(tree,text);
+  expect(tree.root.findByProps({testID:'pebble-bob'})===avatar).toBe(true);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'pebble-presence'}).props.style)).toMatchObject({height:76,overflow:'visible'});
+  expect(StyleSheet.flatten(tree.root.findByType(MotionSurface).props.style)).toMatchObject({position:'absolute',left:78,right:3,bottom:18});
+  expect(StyleSheet.flatten(tree.root.findByType(MotionSurface).props.style).height).toBeUndefined();
+  expect(StyleSheet.flatten(label(tree).props.style)).toMatchObject({fontSize:13,lineHeight:19,color:tokens[scheme].colors.foreground});
+  expect(label(tree).props.numberOfLines).toBeUndefined();expect(label(tree).props.allowFontScaling).not.toBe(false);
+ }
  await act(async()=>tree.unmount());
 });
