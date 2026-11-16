@@ -13,6 +13,7 @@ import android.os.*
 import android.provider.Settings
 import com.facebook.react.bridge.*
 import com.facebook.react.common.LifecycleState
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
@@ -54,15 +55,69 @@ private object ConnectionRuntime {
     private var status = "off"
     private val failures = mutableMapOf<String, ConnectionFailure>()
     private val main = Handler(Looper.getMainLooper())
+    private val cache = ChatStreamCache()
+    private val observer = ChatStreamObserver()
+    private val stateInvalidation = ChatStateInvalidation()
+    private var bridgeResumed = false
+    private var bridge: ReactApplicationContext? = null
+    private var notificationQueued = false
+
+    fun bridge(context: ReactApplicationContext) = synchronized(lock) {
+        if (bridge !== context) { observer.detach(); stateInvalidation.detach() }
+        bridge = context; bridgeResumed = context.lifecycleState == LifecycleState.RESUMED
+        observer.lifecycle(bridgeResumed); stateInvalidation.lifecycle(bridgeResumed); notifyLocked()
+    }
+    fun lifecycle(context: ReactApplicationContext, active: Boolean) = synchronized(lock) {
+        if (bridge === context) {
+            bridgeResumed = active; observer.lifecycle(active); stateInvalidation.lifecycle(active); notifyLocked()
+        }
+    }
+    fun detachBridge(context: ReactApplicationContext) = synchronized(lock) {
+        if (bridge === context) { bridge = null; bridgeResumed = false; observer.detach(); stateInvalidation.detach() }
+    }
+    private fun emit(context: ReactApplicationContext, event: String, pair: ConnectionPair, id: String? = null) {
+        if (!context.hasActiveReactInstance()) return
+        val payload = Arguments.createMap().apply {
+            putString("backendId", pair.backendId); putDouble("conversationId", pair.chat.toDouble())
+            if (id != null) putString("observerId", id)
+        }
+        try { context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit(event, payload) }
+        catch (_: Exception) { /* A detached React runtime must never stop the owner service. */ }
+    }
+    private fun notifyLocked() {
+        if (notificationQueued || bridge == null || !bridgeResumed) return
+        notificationQueued = true
+        main.post { synchronized(lock) {
+            notificationQueued = false
+            val context = bridge ?: return@synchronized
+            observer.take()?.let { emit(context, "BobConnectionStream", it.pair, it.id) }
+            stateInvalidation.take()?.let { emit(context, "BobConnectionState", it) }
+        } }
+    }
+    private fun changedLocked(pair: ConnectionPair, stateChange: Boolean = false) {
+        observer.changed(pair)
+        if (stateChange) stateInvalidation.changed(pair)
+        notifyLocked()
+    }
+    private fun statusLocked(candidate: ConnectionConfig, next: String) {
+        if (status != next) { status = next; changedLocked(candidate.pair, true) }
+    }
 
     private fun cancelLocked() { service?.cancelTransport() }
     private fun retireLocked() {
-        scope.retire(); config = null; published = -1; status = "off"; cancelLocked()
+        val previous = config?.pair ?: scope.selected
+        scope.retire(); config = null; published = -1; status = "off"; cache.clear(); cancelLocked()
+        previous?.let { changedLocked(it, true) }
         val old = service
         if (old != null) main.post { synchronized(lock) { if (service === old && config == null) old.retire() } }
     }
     fun select(pair: ConnectionPair?) = synchronized(lock) {
-        if (scope.select(pair)) retireLocked()
+        val previous = scope.selected
+        if (scope.select(pair)) {
+            retireLocked()
+            previous?.let { changedLocked(it, true) }
+            pair?.let { changedLocked(it, true) }
+        }
     }
     fun startTicket(pair: ConnectionPair): Long? = synchronized(lock) { scope.startTicket(pair) }
     fun start(context: Context, endpoint: String, pair: ConnectionPair, token: String, allowEnable: Boolean, ticket: Long): Boolean = synchronized(lock) {
@@ -75,7 +130,8 @@ private object ConnectionRuntime {
         // No mutation occurs until validation by the bridge, including visible Activity/channel checks.
         val epoch = scope.begin(pair)
         config = ConnectionConfig(endpoint, pair, token, epoch); published = -1; status = "connecting"
-        failures.remove(pair.backendId); cancelLocked()
+        failures.remove(pair.backendId); cache.clear(); cancelLocked()
+        changedLocked(pair, true)
         if (allowEnable) connectionPrefs(context).edit().putBoolean(pair.backendId, true).apply()
         try {
             // Even credentials for a private backend must not be serialized into an Android Intent.
@@ -93,6 +149,7 @@ private object ConnectionRuntime {
     fun stop(context: Context, id: String) = synchronized(lock) {
         connectionPrefs(context).edit().remove(id).apply(); failures.remove(id)
         if (config?.pair?.backendId == id) retireLocked() else scope.revokeStarts(id)
+        changedLocked(scope.selected?.takeIf { it.backendId == id } ?: ConnectionPair(id, 0), true)
     }
     fun notificationStop(context: Context, nonce: String?, epoch: Long) = synchronized(lock) {
         val current = config ?: return
@@ -124,8 +181,29 @@ private object ConnectionRuntime {
         if (!current(value, candidate)) return false
         value.installTransport(socket); true
     }
+    fun activity(value: BobConnectionService, candidate: ConnectionConfig): Boolean = synchronized(lock) {
+        if (!current(value, candidate)) return false
+        value.workerActivity(candidate.generation); true
+    }
+    fun attempt(value: BobConnectionService, candidate: ConnectionConfig): Boolean = synchronized(lock) {
+        if (!current(value, candidate)) return false
+        cache.attempt(); statusLocked(candidate, if (cache.snapshot == null) "connecting" else "reconnecting")
+        changedLocked(candidate.pair); true
+    }
+    fun received(candidate: ConnectionConfig, snapshot: String?) = synchronized(lock) {
+        if (config !== candidate || !scope.accepts(candidate.generation, candidate.pair)) return
+        val now = SystemClock.elapsedRealtime()
+        val recovered = if (snapshot != null) cache.snapshot(snapshot, now) else cache.heartbeat(now)
+        // A stale local read can report reconnecting while the socket's status still says connected.
+        if (recovered && status == "connected") changedLocked(candidate.pair, true)
+        if (cache.healthy(now)) statusLocked(candidate, "connected")
+        if (snapshot != null) changedLocked(candidate.pair)
+    }
     fun health(candidate: ConnectionConfig, next: String) = synchronized(lock) {
-        if (config === candidate && scope.accepts(candidate.generation, candidate.pair)) status = next
+        if (config === candidate && scope.accepts(candidate.generation, candidate.pair)) {
+            if (next != "connected") cache.disconnected()
+            statusLocked(candidate, next)
+        }
     }
     fun fail(candidate: ConnectionConfig, error: String) = synchronized(lock) {
         if (config !== candidate || !scope.accepts(candidate.generation, candidate.pair)) return
@@ -138,9 +216,33 @@ private object ConnectionRuntime {
         val old = config
         if (old != null && old.generation == value.foregroundGeneration) {
             failures[old.pair.backendId] = ConnectionFailure(old.pair, "start")
-            config = null; scope.retire(); status = "off"
+            config = null; scope.retire(); status = "off"; cache.clear(); changedLocked(old.pair, true)
         }
     }
+    private fun currentStatus(): String = if (status == "connected" && !cache.healthy(SystemClock.elapsedRealtime())) "reconnecting" else status
+    fun readStream(context: Context, pair: ConnectionPair, observerId: String, afterRevision: Double): String {
+      // Capture one immutable view and acknowledge atomically; escaping a large
+      // snapshot must not block worker publication, Stop or Activity callbacks.
+      val result = synchronized(lock) {
+        val selected = scope.selected == pair
+        observer.read(pair, observerId, selected)
+        val enabled = connectionEnabled(context, pair.backendId)
+        val active = config?.takeIf { it.pair == pair && scope.accepts(it.generation, pair) }
+        val failure = failures[pair.backendId]?.takeIf { it.pair == pair && selected }
+        JSONObject().put("backendId", pair.backendId).put("conversationId", pair.chat)
+            .put("enabled", enabled).put("selected", selected)
+            .put("status", if (!enabled || !selected) "off" else if (failure != null) "attention" else if (active != null) currentStatus() else "off")
+            .put("revision", cache.revision).put("epoch", cache.epoch).apply {
+                if (enabled && failure != null) put("error", failure.error)
+                if (active != null) {
+                    if (cache.revision.toDouble() != afterRevision) cache.snapshot?.let { put("snapshot", it) }
+                    cache.age(SystemClock.elapsedRealtime())?.let { put("heartbeatAgeMs", it) }
+                }
+            }
+      }
+      return result.toString()
+    }
+    fun releaseStream(id: String) = synchronized(lock) { observer.release(id) }
     fun state(context: Context, id: String): String = synchronized(lock) {
         val enabled = connectionEnabled(context, id)
         val active = config?.takeIf { it.pair.backendId == id }
@@ -148,12 +250,19 @@ private object ConnectionRuntime {
         val running = active != null && published == active.generation && service != null
         val batteryRestricted = Build.VERSION.SDK_INT >= 23 && !context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
         JSONObject().put("enabled", enabled).put("running", running)
-            .put("status", if (!enabled) "off" else if (failure != null) "attention" else if (active != null) status else "off")
+            .put("status", if (!enabled) "off" else if (failure != null) "attention" else if (active != null) currentStatus() else "off")
             .put("batteryRestricted", batteryRestricted).apply { if (enabled && failure != null) put("error", failure.error) }.toString()
     }
 }
 
-class BobConnection(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+class BobConnection(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
+    init { context.addLifecycleEventListener(this); ConnectionRuntime.bridge(context) }
+    override fun onHostResume() { ConnectionRuntime.lifecycle(context, true) }
+    override fun onHostPause() { ConnectionRuntime.lifecycle(context, false) }
+    override fun onHostDestroy() { ConnectionRuntime.lifecycle(context, false) }
+    override fun invalidate() {
+        context.removeLifecycleEventListener(this); ConnectionRuntime.detachBridge(context); super.invalidate()
+    }
     override fun getName() = "BobConnection"
     @ReactMethod fun select(backendId: String, chat: Double, promise: Promise) {
         try {
@@ -193,6 +302,19 @@ class BobConnection(private val context: ReactApplicationContext) : ReactContext
         try { promise.resolve(ConnectionRuntime.state(context, ConnectionPolicy.identity(backendId))) }
         catch (_: Exception) { promise.reject("identity", "Invalid backend identity") }
     }
+    @ReactMethod fun addListener(eventName: String) { /* NativeEventEmitter compatibility. */ }
+    @ReactMethod fun removeListeners(count: Double) { /* JS subscriptions never own the service. */ }
+    @ReactMethod fun readStream(backendId: String, chat: Double, observerId: String, afterRevision: Double, promise: Promise) {
+        try {
+            require(observerId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+            require(afterRevision.isFinite() && afterRevision >= -1 && afterRevision <= ConnectionPolicy.MAX_CHAT && afterRevision == afterRevision.toLong().toDouble())
+            val pair = ConnectionPair(ConnectionPolicy.identity(backendId), ConnectionPolicy.chat(chat))
+            promise.resolve(ConnectionRuntime.readStream(context, pair, observerId, afterRevision))
+        } catch (_: Exception) { promise.reject("identity", "Invalid stream observer") }
+    }
+    @ReactMethod fun releaseStream(observerId: String, promise: Promise) {
+        ConnectionRuntime.releaseStream(observerId); promise.resolve(true)
+    }
     @ReactMethod fun openBatterySettings(promise: Promise) {
         UiThreadUtil.runOnUiThread {
             if (context.lifecycleState != LifecycleState.RESUMED || context.currentActivity?.let { !it.isFinishing && !it.isDestroyed } != true) {
@@ -207,12 +329,17 @@ class BobConnection(private val context: ReactApplicationContext) : ReactContext
     }
 }
 
-/** Optional owner-visible private chat transport, not execution of agent work. No wake lock, restart,
- * headless JS, message replay, phone dispatch, or shared lifecycle with BobLocationService.
- * Android Doze/OEM policies can still delay or suspend this socket. */
+/** Owner-enabled continuous private chat transport. Timed CPU leases do not wake the screen.
+ * No restart, headless JS, message replay, phone dispatch, or shared BobLocationService lifecycle.
+ * Android Doze/OEM/network policies can still interrupt connectivity. */
 class BobConnectionService : Service() {
     @Volatile private var alive = true
     private var worker: Thread? = null
+    private val cpu by lazy {
+        getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Bob:ChatStream").apply { setReferenceCounted(false) }
+    }
+    private val cpuLease = ConnectionWakeLease({ cpu.acquire(it) }, { if (cpu.isHeld) cpu.release() })
+    internal fun workerActivity(generation: Long) { cpuLease.activity(generation, SystemClock.elapsedRealtime()) }
     private val wake = Semaphore(0)
     private val socket = AtomicReference<HttpURLConnection?>(null)
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -270,7 +397,7 @@ class BobConnectionService : Service() {
     }
     private fun signal() { if (wake.availablePermits() == 0) wake.release() }
     internal fun installTransport(value: HttpURLConnection) { socket.set(value) }
-    internal fun cancelTransport() { socket.getAndSet(null)?.disconnect(); signal() }
+    internal fun cancelTransport() { cpuLease.clear(); socket.getAndSet(null)?.disconnect(); signal() }
     private fun networkChanged() {
         // A single existing worker reconnects; network callbacks never spawn another stream.
         cancelTransport()
@@ -289,6 +416,7 @@ class BobConnectionService : Service() {
             wake.drainPermits()
             try {
                 if (!connectionVisible(this)) throw ConnectionProtocolException("notifications")
+                if (!ConnectionRuntime.activity(this, config)) continue
                 val began = SystemClock.elapsedRealtime()
                 stream(config) { if (SystemClock.elapsedRealtime() - began >= ConnectionPolicy.HEARTBEAT_TIMEOUT_MS) attempt = 0 }
             } catch (_: InterruptedException) { if (!alive) break }
@@ -296,14 +424,17 @@ class BobConnectionService : Service() {
               catch (_: Exception) { /* No exception text, request data, URL or bearer in diagnostics. */ }
             if (!alive) break
             if (!ConnectionRuntime.current(this, config)) continue
+            if (!connectionVisible(this)) { ConnectionRuntime.fail(config, "notifications"); continue }
             ConnectionRuntime.health(config, "reconnecting")
+            if (!ConnectionRuntime.activity(this, config)) continue
             try { wake.tryAcquire(ConnectionPolicy.retryMillis(attempt, Random.nextDouble()), TimeUnit.MILLISECONDS) }
             catch (_: InterruptedException) { if (!alive) break }
             attempt = (attempt + 1).coerceAtMost(5)
         }
     }
     private fun stream(config: ConnectionConfig, heartbeat: () -> Unit) {
-        val connection = URI(config.endpoint + "/v1/chats/${config.pair.chat}/connection").toURL().openConnection() as HttpURLConnection
+        if (!ConnectionRuntime.attempt(this, config)) return
+        val connection = URI(config.endpoint + "/v1/chats/${config.pair.chat}/events?heartbeats=1&patches=1").toURL().openConnection() as HttpURLConnection
         if (!ConnectionRuntime.transport(this, config, connection)) { connection.disconnect(); return }
         try {
             connection.instanceFollowRedirects = false
@@ -318,23 +449,40 @@ class BobConnectionService : Service() {
             ConnectionPolicy.terminalHttp(status)?.let { throw ConnectionProtocolException(it) }
             if (status != 200) return
             if (connection.contentType?.substringBefore(';')?.trim()?.lowercase() != "text/event-stream") throw ConnectionProtocolException()
-            connection.inputStream.use { input ->
-                val reader = ConnectionSseReader(input) { SystemClock.elapsedRealtime() }
-                while (alive && ConnectionRuntime.current(this, config)) {
-                    val json = reader.next() ?: break
-                    ConnectionPolicy.heartbeat(json, config.pair) // Only minimal status metadata is parsed, then discarded.
-                    if (!ConnectionRuntime.current(this, config)) break
-                    reader.heartbeatReceived(); heartbeat(); ConnectionRuntime.health(config, "connected")
-                    if (!connectionVisible(this)) throw ConnectionProtocolException("notifications")
+            try {
+                connection.inputStream.use { input ->
+                    val reader = ChatSseReader(input, { SystemClock.elapsedRealtime() })
+                    var previous: String? = null; var sequence = 0L
+                    while (alive && ConnectionRuntime.current(this, config)) {
+                        val frame = reader.next() ?: break
+                        var snapshot: String? = null
+                        when (frame.event) {
+                            "snapshot" -> { ChatWire.snapshot(frame.data, config.pair); snapshot = frame.data; sequence = 0 }
+                            "snapshot-patch" -> {
+                                val patched = ChatWire.patch(previous, sequence, frame.data)
+                                ChatWire.snapshot(patched.first, config.pair); snapshot = patched.first; sequence = patched.second
+                            }
+                            "heartbeat" -> ChatWire.heartbeat(frame.data, config.pair)
+                        }
+                        if (!connectionVisible(this)) throw ConnectionProtocolException("notifications")
+                        if (!ConnectionRuntime.activity(this, config)) break
+                        if (snapshot != null) previous = snapshot
+                        // A heartbeat without a validated initial snapshot cannot make this attempt healthy.
+                        if (previous != null) { reader.received(); heartbeat(); ConnectionRuntime.received(config, snapshot) }
+                    }
                 }
+            } catch (e: ConnectionProtocolException) {
+                // A malformed frame/patch gap requires a fresh authoritative GET, not replay.
+                if (e.code == "protocol") throw ConnectionRetryException() else throw e
             }
         } finally { socket.compareAndSet(connection, null); connection.disconnect() }
     }
     override fun onDestroy() {
-        alive = false; cancelTransport(); worker?.interrupt()
+        synchronized(ConnectionRuntime.lock) {
+            alive = false; cancelTransport(); worker?.interrupt(); ConnectionRuntime.detached(this)
+        }
         networkCallback?.let { try { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } catch (_: Exception) {} }
         networkCallback = null
-        ConnectionRuntime.detached(this)
         super.onDestroy()
     }
 }

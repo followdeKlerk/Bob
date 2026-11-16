@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -77,7 +78,7 @@
       </service>
       <service android:name=".BobLocationService" android:exported="false" android:foregroundServiceType="location" />
       <service android:name=".BobConnectionService" android:exported="false" android:foregroundServiceType="specialUse">
-        <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Owner-enabled live connection to a paired private agent backend for the selected chat's continuity while Bob is backgrounded; receives minimal read-only status heartbeats, not remote agent execution or data synchronization." />
+        <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Owner-enabled continuous private chat streaming from a paired agent backend while Bob is backgrounded or the phone is locked, with timed CPU wake leases; receives read-only snapshots and heartbeats, never executes remote agent work or phone actions." />
       </service>
 
       <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">

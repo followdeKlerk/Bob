@@ -178,11 +178,13 @@ Usage measures managed cached-data bytes, not total app storage or space immedia
 
 ## Keep connected
 
-Enable **Settings → Connection → Keep connected** for a workstation to maintain a small background connection. Android shows a persistent notification with **Open** and **Turn off** controls. The full chat catches up when you reopen Bob; turning this connection off does not stop backend work.
+Enable **Settings → Connection → Keep connected** for a workstation to keep the selected chat's actual live stream running when you switch apps or lock the phone. Android shows a persistent notification with **Open** and **Turn off** controls. Returning to Bob reads the latest state already received by the native service: it does not deliberately disconnect, reload the chat or open another stream just because the app resumes. Other retained conversations use the ordinary foreground connection.
 
-This can use more battery. Android restrictions, an interrupted Tailscale connection, offline networks and force-stop can still interrupt it. Reopen Bob after a process restart. There is no guarantee of an uninterrupted connection.
+This mode keeps the CPU awake with a screen-off wake lock and uses more battery. The screen can still turn off. The service keeps a bounded latest chat state in memory, not an ever-growing backlog, and uses incremental updates and small idle heartbeats. Turning it off releases the wake lock and restores ordinary foreground streaming; it does not stop backend work. Without Keep connected, the normal connection still pauses in the background.
 
-Keep connected does not enable phone control or location access.
+Android restrictions, an interrupted Tailscale connection, offline networks and force-stop can still interrupt it. Actual connection failures reconnect and recover the authoritative chat state. Reopen Bob after a process restart. For better reliability, allow unrestricted background battery use for Bob and Tailscale. There is no guarantee of an uninterrupted connection.
+
+Keep connected does not enable phone control or location access. The streaming service only reads chat state; it never executes phone actions or sends messages.
 
 ## Phone tools
 

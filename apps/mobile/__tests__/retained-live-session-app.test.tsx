@@ -89,7 +89,7 @@ afterEach(()=>{
  for(const [name,value] of previousNative){if(value===undefined)delete NativeModules[name];else NativeModules[name]=value;}
 });
 
-async function mount({emptyA=false}:{emptyA?:boolean}={}){
+async function mount({emptyA=false,continuous=false}:{emptyA?:boolean;continuous?:boolean}={}){
  await AsyncStorage.setItem('backends',JSON.stringify([a,b]));
  await AsyncStorage.setItem('selection',JSON.stringify({backendId:a.backendId,chat:emptyA?undefined:chat}));
  await AsyncStorage.setItem('workstation-selections',JSON.stringify({[a.backendId]:emptyA?undefined:chat,[b.backendId]:chat}));
@@ -99,7 +99,17 @@ async function mount({emptyA=false}:{emptyA?:boolean}={}){
  NativeModules.BobFiles={};delete NativeModules.BobOutbox;delete NativeModules.BobPhoneLocation;
  const phone={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>true),execute:jest.fn(async(_backendId:string,_request:string)=>JSON.stringify({status:'ok',data:{sdkInt:35}})),getResult:jest.fn(async()=>null)};
  NativeModules.BobPhoneTools=phone;jest.spyOn(PermissionsAndroid,'check').mockResolvedValue(true);
- const connection={select:jest.fn(async()=>{}),start:jest.fn(async()=>{}),stop:jest.fn(async()=>{}),state:jest.fn(async()=>JSON.stringify({enabled:false,running:false,status:'off'}))};
+ let connectionEnabled=continuous;
+ let live={backendId:a.backendId,conversationId:chat,enabled:true,selected:true,status:'connected',revision:1,epoch:1,heartbeatAgeMs:0,snapshot:JSON.stringify({backendId:a.backendId,conversationId:chat,view:{entries:entries(a),docs:{},work:[]}})};
+ const connection={select:jest.fn(async()=>{}),start:jest.fn(async()=>{}),stop:jest.fn(async()=>{connectionEnabled=false;}),state:jest.fn(async()=>JSON.stringify({enabled:connectionEnabled,running:connectionEnabled,status:connectionEnabled?'connected':'off',batteryRestricted:true})),
+  ...(continuous?{readStream:jest.fn(async(_backend:string,_chat:number,_observer:string,after:number)=>JSON.stringify({...live,enabled:connectionEnabled,snapshot:after===live.revision?undefined:live.snapshot})),releaseStream:jest.fn(async()=>true)}:{})};
+ const publishNativeRaw=async(snapshot:string)=>act(async()=>{
+  live={...live,revision:live.revision+1,snapshot};DeviceEventEmitter.emit('BobConnectionStream',{backendId:a.backendId,conversationId:chat});
+ });
+ const publishNative=async(docs:Record<string,unknown>={},items:any[]=entries(a),epoch=live.epoch)=>act(async()=>{
+  live={...live,revision:live.revision+1,epoch,snapshot:JSON.stringify({backendId:a.backendId,conversationId:chat,view:{entries:items,docs,work:[]}})};
+  DeviceEventEmitter.emit('BobConnectionStream',{backendId:a.backendId,conversationId:chat});
+ });
  NativeModules.BobConnection=connection;
  const lifecycle=new Set<(state:any)=>void>(),current=jest.replaceProperty(AppState,'currentState','active');
  jest.spyOn(AppState,'addEventListener').mockImplementation((event,callback)=>{if(event==='change')lifecycle.add(callback);return{remove:()=>{lifecycle.delete(callback);}};});
@@ -132,7 +142,7 @@ async function mount({emptyA=false}:{emptyA?:boolean}={}){
   const stream=latest(backend);expect(stream?.publish).toBeDefined();
   stream.publish!({data:JSON.stringify({backendId:backend.backendId,conversationId:chat,view:{entries:items,docs,work:[]}})});
  });
- return {tree,streams,latest,publish,notifications,phone,connection,fetchMock,transition,close:async()=>act(async()=>tree.unmount())};
+ return {tree,streams,latest,publish,publishNative,publishNativeRaw,notifications,phone,connection,fetchMock,transition,close:async()=>act(async()=>tree.unmount())};
 }
 
 test('real workstation A → B → A retains both scope-keyed hosts, FlatLists, editors and open SSE instances',async()=>{
@@ -539,4 +549,57 @@ test('pending connection saves remain owned across two retained chats on the sam
   expect(draft(first).props.value).toBe('Keep first draft');expect(draft(second).props.value).toBe('Keep second draft');
   expect(list(first)).toBe(firstList);expect(first.findByType(DraftInput)).toBe(firstEditor);expect(firstStream.close).not.toHaveBeenCalled();
  }finally{if(releaseWrite)await act(async()=>releaseWrite!());await app.close();}
+});
+
+test('continuous native stream survives lock/return without a new GET or history reload and preserves the actual viewport and draft',async()=>{
+ const app=await mount({continuous:true});
+ try{
+  const first=host(app.tree,a),history=list(first),editor=draft(first);
+  await act(async()=>{editor.props.onChangeText('Keep my draft during lock');editor.props.onSelectionChange?.({nativeEvent:{selection:{start:4,end:4}}});});
+  pauseEarlier(first);
+  const streams=app.streams.length,historyReads=()=>app.fetchMock.mock.calls.filter(([url])=>String(url).includes('/history')).length,reads=historyReads();
+  const nativeReads=app.connection.readStream!.mock.calls.length;
+  await app.transition('background');
+  const items=[...entries(a),{id:4,kind:'pi.assistant',model:[{role:'assistant',content:'Received continuously while the phone is locked'}]}];
+  await app.publishNative({},items);
+  expect(app.connection.readStream).toHaveBeenCalledTimes(nativeReads);expect(app.connection.releaseStream).not.toHaveBeenCalled();expect(app.connection.stop).not.toHaveBeenCalled();
+  await app.transition('active');
+  expect(app.streams).toHaveLength(streams);expect(historyReads()).toBe(reads);
+  expect(list(first)).toBe(history);expect(draft(first)).toBe(editor);expect(editor.props.value).toBe('Keep my draft during lock');
+  expect(history.props.data.some((entry:any)=>entry.id===4)).toBe(true);expect(button(first,'Scroll to latest message')).toBeDefined();
+  expect(app.phone.execute).not.toHaveBeenCalled();expect(app.fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/messages'))).toHaveLength(0);
+ }finally{await app.close();}
+});
+test('continuous mode recovers history after a genuine native reconnect, not for a mere foreground transition',async()=>{
+ const app=await mount({continuous:true});
+ try{
+  const reads=()=>app.fetchMock.mock.calls.filter(([url])=>String(url).includes('/history')).length,before=reads();
+  await app.transition('background');await app.publishNative({},entries(a),2);await app.transition('active');
+  expect(reads()).toBe(before+1);
+  await app.transition('background');await app.transition('active');expect(reads()).toBe(before+1);
+ }finally{await app.close();}
+});
+test('notification Turn off restores foreground streaming without replacing the chat or draft',async()=>{
+ const app=await mount({continuous:true});
+ try{
+  const first=host(app.tree,a),history=list(first),editor=draft(first);await act(async()=>editor.props.onChangeText('Still here'));
+  const streams=app.streams.length;
+  await act(async()=>{await app.connection.stop();DeviceEventEmitter.emit('BobConnectionState',{backendId:a.backendId,conversationId:chat});});
+  expect(app.streams).toHaveLength(streams+1);expect(app.connection.releaseStream).toHaveBeenCalled();expect(list(first)).toBe(history);expect(draft(first)).toBe(editor);expect(editor.props.value).toBe('Still here');
+ }finally{await app.close();}
+});
+
+test.each(['identity','entries','docs','json'])('App rejects invalid continuous %s before rendering or accepting its native revision',async(kind)=>{
+ const app=await mount({continuous:true});
+ try{
+  const first=host(app.tree,a),history=list(first),editor=draft(first);
+  const payload={backendId:kind==='identity'?b.backendId:a.backendId,conversationId:chat,view:{entries:kind==='entries'?{}:[{id:999,kind:'bob.user',data:{text:'Must not appear'}}],docs:kind==='docs'?[]:{}}};
+  await app.publishNativeRaw(kind==='json'?'{broken':JSON.stringify(payload));
+  expect(list(first)).toBe(history);expect(draft(first)).toBe(editor);expect(history.props.data.some((entry:any)=>entry.id===999)).toBe(false);
+  if(kind==='identity')expect(app.connection.releaseStream).toHaveBeenCalled();
+  else{
+   expect(first.findAll(node=>node.props.children==='Connection needs attention').length).toBeGreaterThan(0);
+   await app.publishNative();expect(app.connection.readStream!.mock.calls.at(-1)![3]).toBe(1);
+  }
+ }finally{await app.close();}
 });

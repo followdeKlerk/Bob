@@ -105,6 +105,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {reuseSnapshotEntries} from './snapshot-cache';
 import {snapshotStream,type SnapshotStream,type SnapshotLifecycle} from './snapshot-stream';
+import {chatSnapshotStream,continuousSnapshotSupported,type ChatSnapshotStream} from './continuous-snapshot-stream';
 import {useStoredHistory} from './stored-history';
 import {readHistoryCache} from './history-cache';
 import {snapshotPersistence} from './snapshot-persistence';
@@ -165,6 +166,8 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
   const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
   const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
+  const continuous=active&&keepConnected.enabled&&continuousSnapshotSupported();
+  const continuousLatest=useRef(continuous);continuousLatest.current=continuous;
   const activeVisit=useRef({active});if(activeVisit.current.active!==active)activeVisit.current={active};
   const visit=activeVisit.current;
   const mounted=useRef(true);
@@ -245,7 +248,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   const selectedBackend = useRef('');
   selectedBackend.current = active?backend?.backendId??'':'';
   const identity = useRef(''),
-    stream = useRef<SnapshotStream | null>(null),
+    stream = useRef<ChatSnapshotStream | null>(null),
     draftReady = useRef(false);
   const scope = backend && chat ? `${backend.backendId}:${chat}` : '';
   const draftVisit=useRef({scope});if(draftVisit.current.scope!==scope)draftVisit.current={scope};
@@ -290,7 +293,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   const pendingOperations=useRef(new Map<string,string>());
   const parentFollow=useChatFollow<Entry>(scope,true,active),childFollow=useChatFollow<Entry>(`${scope}:child:${child}`,true,active);
   const parentList=parentFollow.list,childList=childFollow.list;
-  const parentHistory=useStoredHistory(backend?.backendId,chat,(path,signal)=>request(path,'GET',undefined,backend,signal));
+  const parentHistory=useStoredHistory(backend?.backendId,chat,(path,signal)=>request(path,'GET',undefined,backend,signal),{refreshOnForeground:!continuous});
   const historyLatest=useRef(parentHistory);historyLatest.current=parentHistory;
   const childHistory=useStoredHistory(backend?.backendId,child,(path,signal)=>request(path,'GET',undefined,backend,signal));
   useEffect(()=>{if(updatesTarget)parentFollow.resume();},[updatesTarget]);
@@ -394,19 +397,20 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
         });
         if (!credential) throw Error('Missing credential');
         if(cancelled||identity.current!==current)return;
-        const es = snapshotStream(`${b.endpoint}/v1/chats/${chat}/events`,{Authorization:'Bearer '+credential.password,'x-bob-backend':b.backendId},raw => {
+        const es = chatSnapshotStream(`${b.endpoint}/v1/chats/${chat}/events`,{Authorization:'Bearer '+credential.password,'x-bob-backend':b.backendId},{backendId:b.backendId,chat},raw => {
           if (cancelled||identity.current !== current) return;
           if(raw===lastRaw){setStatus('Connected');return;}
           const data = JSON.parse(raw);
-          if (data.backendId !== b.backendId || data.conversationId !== chat) {
+          if (data?.backendId !== b.backendId || data?.conversationId !== chat) {
             es.close();
             setStatus('Identity mismatch');
             return;
           }
+          if(!Array.isArray(data.view?.entries)||!data.view?.docs||typeof data.view.docs!=='object'||Array.isArray(data.view.docs))throw Error('Invalid snapshot shape');
           lastRaw=raw;setView(previous=>reuseSnapshotEntries(previous,data.view));
           setStatus('Connected');
           cache.push(data.view,!data.view.docs?.['pi.live']?.run);
-        },nextStatus=>{if(identity.current===current)setStatus(nextStatus);},()=>{void reconcilePending(b,chat,current).catch(()=>{});void historyLatest.current.refresh().catch(()=>{});void drainLatest.current(true,b.backendId);},snapshotLifecycle);
+        },nextStatus=>{if(identity.current===current)setStatus(nextStatus);},()=>{void reconcilePending(b,chat,current).catch(()=>{});void historyLatest.current.refresh().catch(()=>{});void drainLatest.current(true,b.backendId);},snapshotLifecycle,continuousLatest.current);
         events=es;
         if(cancelled||identity.current!==current){es.close();return;}
         stream.current=es;
@@ -417,6 +421,9 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
     })();
     return () => {cancelled=true;events?.close();cacheLifecycle.remove();void cache.close();};
   }, [scope,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']]);
+  // Switching transport does not recreate the conversation, list or draft. The
+  // native service, not AppState, owns the continuous connection's lifetime.
+  useEffect(()=>{stream.current?.setContinuous(continuous);},[continuous,scope]);
   useEffect(()=>{
     if(screen!=='Agents'||!child||!backend)return;
     setChildStatus('Connecting agent');

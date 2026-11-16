@@ -1,6 +1,6 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,NativeModules,PermissionsAndroid,Platform} from 'react-native';
+import {AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import {useKeepConnected} from '../keep-connected';
 jest.mock('react-native-keychain',()=>({getGenericPassword:jest.fn()}));
@@ -107,4 +107,15 @@ test('visible Disable wins over a pending automatic credential lookup',async()=>
 
 test('a stale settings action cannot turn on another workstation after switching',async()=>{
  states.set(one.backendId,state({enabled:true,running:true,status:'connected'}));await mount();const oldDisable=api.toggle,oldRefresh=api.refresh;await update({backend:two,chat:8});const starts=native.start.mock.calls.length;await act(async()=>{await oldDisable();await oldRefresh();});expect(native.start).toHaveBeenCalledTimes(starts);expect(native.stop).not.toHaveBeenCalled();expect(saved(two.backendId).enabled).toBe(false);expect(api.enabled).toBe(false);
+});
+
+test('native notification Stop reaches Chat without settings polling or restarting the service',async()=>{
+ states.set(one.backendId,state({enabled:true}));await mount();const starts=native.start.mock.calls.length;
+ await native.stop(one.backendId);await act(async()=>DeviceEventEmitter.emit('BobConnectionState',{backendId:one.backendId,conversationId:7}));
+ expect(api.enabled).toBe(false);expect(native.start).toHaveBeenCalledTimes(starts);
+});
+test('native state events from another backend or while backgrounded do not read or start a stream',async()=>{
+ await mount();const reads=native.state.mock.calls.length;
+ await act(async()=>DeviceEventEmitter.emit('BobConnectionState',{backendId:two.backendId,conversationId:7}));expect(native.state).toHaveBeenCalledTimes(reads);
+ await lifecycle('background');await act(async()=>DeviceEventEmitter.emit('BobConnectionState',{backendId:one.backendId,conversationId:7}));expect(native.state).toHaveBeenCalledTimes(reads);expect(native.start).not.toHaveBeenCalled();
 });

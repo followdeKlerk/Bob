@@ -74,3 +74,7 @@ test('a completed tool-calling generation is not mistaken for fresh answer strea
  expect(composerActivity(current({generation,tools:[{status:'done',entry:9}]})).phase).toBe('preparing');
  expect(composerActivity(current({generation,tools:[{status:'running'}]})).phase).toBe('working');
 });
+
+test('native stream failure stays visibly actionable rather than pretending to reconnect or work',()=>{
+ expect(composerActivity({...connected,connection:'Connection needs attention • open Connection settings'})).toEqual({phase:'connection',text:'Connection needs attention',animate:false});
+});

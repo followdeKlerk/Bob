@@ -30,9 +30,9 @@ class ConnectionWiringTest {
         assertTrue(source.contains("connection.instanceFollowRedirects = false"))
         assertTrue(source.contains("connection.readTimeout = 15_000")); assertTrue(source.contains("connection.connectTimeout = 7000"))
         assertTrue(source.contains("PhoneLocationPolicy.endpoint(endpoint, BuildConfig.DEBUG)"))
-        assertTrue(source.contains("/v1/chats/\${config.pair.chat}/connection"))
+        assertTrue(source.contains("/v1/chats/\${config.pair.chat}/events?heartbeats=1&patches=1"))
         assertTrue(source.contains("setRequestProperty(\"x-bob-backend\", config.pair.backendId)"))
-        for (bad in listOf("requestMethod = \"POST\"", "requestMethod = \"DELETE\"", "outputStream", "readLine(", "HeadlessJs", "WakeLock", "BOOT_COMPLETED", "BobPhoneTools(", "/abort", "/messages")) assertFalse(bad, source.contains(bad))
+        for (bad in listOf("requestMethod = \"POST\"", "requestMethod = \"DELETE\"", "outputStream", "readLine(", "HeadlessJs", "BOOT_COMPLETED", "BobPhoneTools(", "/abort", "/messages")) assertFalse(bad, source.contains(bad))
     }
     @Test fun startNeedsForegroundActivityAndNotificationVisibilityWithoutPermissionDialog() {
         val source = code
@@ -70,6 +70,30 @@ class ConnectionWiringTest {
         assertTrue(source.contains("if (config?.pair?.backendId == id) retireLocked() else scope.revokeStarts(id)"))
         assertTrue(source.substringAfter("@ReactMethod fun forget(").substringBefore("@ReactMethod fun state(").contains("stop(backendId, promise)"))
     }
+    @Test fun nativeObserverReadsOnlyMemoryAndPublishesSmallIdentityInvalidations() {
+        val source = code
+        assertTrue(source.contains("@ReactMethod fun readStream(backendId: String, chat: Double, observerId: String, afterRevision: Double, promise: Promise)"))
+        val read = source.substringAfter("fun readStream(context: Context").substringBefore("fun state(context: Context")
+        for (bad in listOf("openConnection", "startService", "disconnect", "cancelTransport", "stopSelf")) assertFalse(bad, read.contains(bad))
+        assertTrue(read.contains("cache.revision.toDouble() != afterRevision"))
+        val emit = source.substringAfter("private fun emit(").substringBefore("private fun notifyLocked")
+        for (bad in listOf("snapshot", "token", "endpoint")) assertFalse(bad, emit.contains(bad))
+        assertTrue(source.contains("\"BobConnectionStream\"")); assertTrue(source.contains("\"BobConnectionState\""))
+        assertTrue(source.contains("observer.lifecycle(active)")); assertTrue(source.contains("observer.take()"))
+        assertTrue(source.contains("stateInvalidation.lifecycle(active)")); assertTrue(source.contains("stateInvalidation.take()"))
+        assertTrue(source.contains("if (notificationQueued || bridge == null || !bridgeResumed) return"))
+        assertTrue(source.contains("if (recovered && status == \"connected\") changedLocked(candidate.pair, true)"))
+        assertTrue(source.contains("if (e.code == \"protocol\") throw ConnectionRetryException() else throw e"))
+    }
+    @Test fun timedCpuOnlyLeasesAreReleasedOnCancellationAndDestroyWithoutHealthySocketRotation() {
+        val source = code
+        assertTrue(File("src/main/AndroidManifest.xml").readText().contains("android.permission.WAKE_LOCK"))
+        assertTrue(source.contains("PowerManager.PARTIAL_WAKE_LOCK")); assertTrue(source.contains("setReferenceCounted(false)"))
+        assertTrue(source.contains("ConnectionWakeLease({ cpu.acquire(it) }"))
+        assertTrue(source.contains("internal fun cancelTransport() { cpuLease.clear();"))
+        assertTrue(source.contains("if (!ConnectionRuntime.activity(this, config))"))
+        for (bad in listOf("SCREEN_BRIGHT_WAKE_LOCK", "ACQUIRE_CAUSES_WAKEUP", "KEEP_SCREEN_ON", "MAX_MS", "MAX_BYTES", "responseText", "Last-Event-ID")) assertFalse(bad, source.contains(bad))
+    }
     @Test fun oneWorkerCancellableSocketAndNoStickyOrBootResume() {
         val source = code
         assertTrue(source.contains("if (worker == null) worker = Thread("))
@@ -78,7 +102,8 @@ class ConnectionWiringTest {
         assertTrue(source.contains("registerDefaultNetworkCallback(callback)"))
         assertTrue(source.contains("unregisterNetworkCallback(it)"))
         assertTrue(source.contains("return START_NOT_STICKY")); assertFalse(source.contains("return START_STICKY"))
-        assertTrue(source.contains("if (active != null) status else \"off\"")) // Persisted opt-in reopens without pretending to run.
-        assertFalse(source.contains("override fun invalidate()")) // JS teardown cannot turn off the native service.
+        assertTrue(source.contains("if (active != null) currentStatus() else \"off\"")) // Persisted opt-in reopens without pretending to run.
+        val invalidate = source.substringAfter("override fun invalidate()").substringBefore("override fun getName")
+        assertFalse(invalidate.contains("stop(")); assertFalse(invalidate.contains("retire(")) // React teardown only releases its observer.
     }
 }

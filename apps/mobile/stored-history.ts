@@ -23,7 +23,8 @@ export function mergeLatestHistory(previous:Page|undefined,page:Page):Page{
  return {...page,items,next};
 }
 /** Restore cached history immediately, then fetch the latest stored page on every conversation open. */
-export function useStoredHistory(backendId:string|undefined,conversationId:number|undefined,request:(path:string,signal?:AbortSignal)=>Promise<unknown>){
+export function useStoredHistory(backendId:string|undefined,conversationId:number|undefined,request:(path:string,signal?:AbortSignal)=>Promise<unknown>,options:{refreshOnForeground?:boolean}={}){
+ const refreshOnForeground=useRef(options.refreshOnForeground!==false);refreshOnForeground.current=options.refreshOnForeground!==false;
  const scope=backendId&&conversationId?`${backendId}:${conversationId}`:'';
  const active=useRef<Session|undefined>(undefined),requestRef=useRef(request);requestRef.current=request;
  const scopeRef=useRef(scope);scopeRef.current=scope;
@@ -69,7 +70,7 @@ export function useStoredHistory(backendId:string|undefined,conversationId:numbe
    session.ready=true;publish(session);
    await fetchPage(session).catch(()=>{});
   })();
-  const listener=AppState.addEventListener('change',state=>{clearTimeout(session.retry);session.retry=undefined;if(state==='active'&&session.ready)void fetchPage(session).catch(()=>{});});
+  const listener=AppState.addEventListener('change',state=>{clearTimeout(session.retry);session.retry=undefined;if(state==='active'&&session.ready&&(refreshOnForeground.current||session.error||!session.page))void fetchPage(session).catch(()=>{});});
   return()=>{listener.remove();clearTimeout(session.retry);session.controller?.abort();if(active.current===session)active.current=undefined;};
  },[scope]);
  const visible=state.scope===scope?state:undefined;

@@ -16,7 +16,7 @@ I use it myself, and it keeps changing as I find things I need. A guided Linux i
 
 You can switch between machines without mixing up their conversations, send files back and forth, and keep notes alongside your work. When an agent delegates a task, you can follow that agent's conversation too, including after it's finished.
 
-Optional [Keep connected](FEATURES.md#keep-connected) maintains a small native Android connection while the phone is locked, with a persistent notification and automatic reconnection. The transcript catches up when you reopen Bob; Android and network/battery restrictions still apply. It does not enable locked-phone control.
+Optional [Keep connected](FEATURES.md#keep-connected) keeps the selected chat's actual stream running while you switch apps or lock the phone. A native Android service uses a screen-off CPU wake lock and persistent notification; returning reuses the stream instead of deliberately reloading the chat. This costs more battery, and Android or network interruptions can still require reconnection. It does not enable locked-phone control.
 
 There are file, shell and web tools, native Android [phone tools](FEATURES.md#phone-tools), plus optional memory and interactive views. You choose the model and thinking level for a conversation, with favourites to save digging through the list each time.
 

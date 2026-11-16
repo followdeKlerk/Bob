@@ -9,6 +9,7 @@ export function composerActivity(input:ActivityInput):ComposerActivity{
  const {connection}=input;
  if(input.storageError)return state('connection','Device storage issue • keep Bob open',false);
  if(/pair again|identity|authorization/i.test(connection))return state('connection','Connection needs attention • pair again',false);
+ if(/connection needs attention/i.test(connection))return state('connection','Connection needs attention',false);
  if(/offline|disconnect|interrupted|reconnecting/i.test(connection))return state('connection','Reconnecting…');
  if(/connecting|cached/i.test(connection))return state('connecting','Connecting…');
  if(!input.hasConversation)return state('idle','Select a conversation',false);

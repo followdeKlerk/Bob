@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {AppState,NativeModules,PermissionsAndroid,Platform} from 'react-native';
+import {AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import * as Keychain from 'react-native-keychain';
 
 type Backend={backendId:string;endpoint:string;name:string};
@@ -8,7 +8,7 @@ type NativeConnection={select:(backendId:string,chat:number)=>Promise<void>;star
 const bridge=()=>NativeModules.BobConnection as NativeConnection|undefined;
 const available=()=>Platform.OS==='android'&&!!bridge()?.select&&!!bridge()?.start&&!!bridge()?.stop&&!!bridge()?.state;
 const initial:NativeState={enabled:false,running:false,status:'off',batteryRestricted:true};
-const errors:Record<string,string>={notifications:'Allow Bob notifications and its Keep connected channel in Android settings.',authorization:'The pairing was rejected. Pair this phone again.', 'backend-update':'This backend needs the matching Bob update before Keep connected can work.',identity:'The connection identity did not match. Turn Keep connected off and pair again.',protocol:'The backend returned an invalid connection response. Turn Keep connected off and update Bob.',start:'Android could not start Keep connected. Leave Bob open and try again.'};
+const errors:Record<string,string>={notifications:'Allow Bob notifications and its Keep connected channel in Android settings.',authorization:'The pairing was rejected. Pair this phone again.', 'backend-update':'This backend needs the matching Bob update before Keep connected can work.',identity:'The connection identity did not match. Turn Keep connected off and pair again.',protocol:'The backend returned an invalid connection response. Turn Keep connected off and update Bob.',overflow:'This conversation exceeds the continuous stream memory limit. Turn Keep connected off to use the normal foreground connection.',start:'Android could not start Keep connected. Leave Bob open and try again.'};
 function parse(raw:string):NativeState{
  const value:unknown=JSON.parse(raw);
  if(!value||typeof value!=='object')throw Error('Invalid connection state');
@@ -60,9 +60,14 @@ export function useKeepConnected(backend?:Backend,chat?:number,visible=false):Ke
   if(s)publish(s,{busy:true});
   const listener=AppState.addEventListener('change',state=>{if(!s)return;s.active=state==='active';if(s.active)void ready.then(()=>{if(!cancelled)void refreshScope(s,true);});});
   const focus=AppState.addEventListener('focus',()=>{if(s&&AppState.currentState==='active')void ready.then(()=>{if(!cancelled)void refreshScope(s,true);});});
+  // State invalidations contain no transcript and do not restart a healthy
+  // native stream. In particular, notification Turn off must reach Chat too.
+  const changes=DeviceEventEmitter.addListener('BobConnectionState',value=>{
+   if(s&&value?.backendId===s.backend.backendId&&foreground(s))void ready.then(()=>{if(!cancelled&&foreground(s))void read(s).catch(()=>{});});
+  });
   // Do not stop a native owner-enabled connection just because React unmounts.
   // A new selection explicitly retires the old socket; disabling does so below.
-  return()=>{cancelled=true;if(s)s.alive=false;listener.remove();focus.remove();};
+  return()=>{cancelled=true;if(s)s.alive=false;listener.remove();focus.remove();changes.remove();};
  },[key,supported]);
  useEffect(()=>{
   if(!visible||!supported)return;

@@ -2,6 +2,7 @@ import {cacheGeneration} from '../download-cache';
 jest.mock('../download-cache',()=>({cacheGeneration:jest.fn(()=>0)}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
+import {AppState} from 'react-native';
 import {useStoredHistory,mergeLatestHistory} from '../stored-history';
 import {readHistoryCache,writeHistoryCache} from '../history-cache';
 jest.mock('../../../src/contracts',()=>jest.requireActual('../../../packages/core/src/contracts'));
@@ -9,7 +10,7 @@ jest.mock('../history-cache',()=>({readHistoryCache:jest.fn(),writeHistoryCache:
 const backend='11111111-1111-4111-8111-111111111111';
 const page=(chat=781,ids=[2,3],next:string|undefined=undefined)=>({backendId:backend,conversationId:chat,coverage:'stored-entries' as const,items:ids.map(id=>({id,kind:'bob.user',data:{text:`Message ${id}`}})),next});
 let history!:ReturnType<typeof useStoredHistory>;
-function Harness({chat=781,request}:{chat?:number;request:(path:string)=>Promise<unknown>}){history=useStoredHistory(backend,chat,request);return null;}
+function Harness({chat=781,request,refreshOnForeground=true}:{chat?:number;request:(path:string)=>Promise<unknown>;refreshOnForeground?:boolean}){history=useStoredHistory(backend,chat,request,{refreshOnForeground});return null;}
 beforeEach(()=>{jest.clearAllMocks();(cacheGeneration as jest.Mock).mockReturnValue(0);(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
 test('opening a conversation automatically restores authoritative history even when the cache read fails',async()=>{
  (readHistoryCache as jest.Mock).mockRejectedValue(Error('Oversized cache row'));
@@ -132,4 +133,27 @@ test('reopening legacy cached image results replaces their presentation without 
  const persisted=JSON.parse((writeHistoryCache as jest.Mock).mock.calls.at(-1)[1]);
  expect(persisted.items[0].mobilePresentation.omittedToolImages).toBe(true);expect(JSON.stringify(persisted)).not.toContain('A'.repeat(1000));
  await act(async()=>tree.unmount());
+});
+
+test('continuous native streaming skips resume history reload without remounting or disabling explicit recovery',async()=>{
+ let listener!:(state:string)=>void;
+ const events=jest.spyOn(AppState,'addEventListener').mockImplementation((_event,fn)=>{listener=fn as any;return{remove:jest.fn()};});
+ const request=jest.fn().mockResolvedValue(page());let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<Harness request={request} refreshOnForeground={false}/>);});
+  const original=history.page;
+  await act(async()=>{listener('background');listener('active');});expect(request).toHaveBeenCalledTimes(1);expect(history.page).toBe(original);
+  await act(async()=>history.refresh());expect(request).toHaveBeenCalledTimes(2);
+  await act(async()=>tree.update(<Harness request={request} refreshOnForeground/>));expect(history.page).toBe(original);
+  await act(async()=>{listener('background');listener('active');});expect(request).toHaveBeenCalledTimes(3);
+ }finally{await act(async()=>tree?.unmount());events.mockRestore();}
+});
+test('continuous mode still recovers a failed initial history request when foregrounded',async()=>{
+ let listener!:(state:string)=>void;
+ const events=jest.spyOn(AppState,'addEventListener').mockImplementation((_event,fn)=>{listener=fn as any;return{remove:jest.fn()};});
+ const request=jest.fn().mockRejectedValueOnce(Object.assign(Error('Unavailable'),{httpStatus:400})).mockResolvedValue(page());let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<Harness request={request} refreshOnForeground={false}/>);});
+  await act(async()=>{listener('background');listener('active');});expect(request).toHaveBeenCalledTimes(2);expect(history.error).toBeUndefined();
+ }finally{await act(async()=>tree?.unmount());events.mockRestore();}
 });
