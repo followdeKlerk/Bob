@@ -53,7 +53,7 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
 
  expect(scroll.findAllByProps({accessibilityLabel:'Sessions'})).toHaveLength(0);
  expect(scroll.findAllByProps({accessibilityLabel:'Agents'})).toHaveLength(0);
- const destinations=['Notes','Workstations','Agents','Terminal','Settings','Chat'];
+ const destinations=['Notes','Workstations','Agents','Terminal','Tools','Settings'];
  for(const destination of destinations){
   const row=scroll.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(48);
@@ -126,7 +126,7 @@ test('hidden trigger leaves the modal and all navigation destinations available'
   expect(tree.root.findAllByProps({testID:'chat-menu-agent-badge'})).toHaveLength(0);
   const modal=tree.root.findByType(Modal);
   expect(modal.props.visible).toBe(true);
-  for(const destination of ['Notes','Workstations','Agents','Terminal','Settings','Chat']){
+  for(const destination of ['Notes','Workstations','Agents','Terminal','Tools','Settings']){
    const row=tree.root.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0];
    act(()=>row.props.onPress());expect(onSelect).toHaveBeenLastCalledWith(destination);
   }
@@ -151,16 +151,18 @@ test('read-only chat can still reach the combined session navigator without an a
  await act(async()=>tree.unmount());
 });
 
-test('menu puts the current chat first and separates workspace and app destinations with only the selected row outlined',async()=>{
+test('menu omits Chat and separates workspace/app destinations without a false selection',async()=>{
  const {Text:AppText}=require('../components/app-text');
  let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<ChatNavigation open onOpen={()=>{}} onClose={()=>{}} onSelect={()=>{}}/>);});
  const scroll=tree.root.findByType(ScrollView);
  const rows=scroll.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
- expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Chat','Agents and Sessions','Terminal','Notes','Workstations','Tools','Settings']);
+ expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Agents and Sessions','Terminal','Notes','Workstations','Tools','Settings']);
  const headers=scroll.findAllByType(Text).filter(node=>node.props.accessibilityRole==='header').map(node=>node.props.children);
  expect(headers).toEqual(['Workspace','App']);
- expect(rows[0].props.accessibilityState.selected).toBe(true);
+ expect(rows.every(row=>!row.props.accessibilityState.selected)).toBe(true);
+ expect(scroll.findAllByProps({accessibilityLabel:'Chat'})).toHaveLength(0);
+ expect(tree.root.findAllByProps({accessibilityLabel:'Back to chat'})).toHaveLength(0);
  for(const row of rows){const style=StyleSheet.flatten(row.props.style);expect(style.borderWidth).toBe(1);expect(style.borderColor==='transparent').toBe(!row.props.accessibilityState.selected);}
  expect(tree.root.findAllByType(AppText).every(node=>node.props.typography==='ui')).toBe(true);
  await act(async()=>tree.unmount());
@@ -177,18 +179,28 @@ test.each(['Notes','Workstations','Agents','Terminal','Settings'] as const)('men
 
 test.each(['light','dark'] as const)('%s selected menu row uses a quiet selected fill and complete outline without a remount',async scheme=>{
  const {ThemeContext,tokens}=require('../theme-context'),menuTheme=menuThemes[scheme];let tree!:Renderer.ReactTestRenderer;
- const onSelect=jest.fn();const render=(selected:'Chat'|'Notes')=><ThemeContext.Provider value={tokens[scheme]}><ChatNavigation open selected={selected} onOpen={jest.fn()} onClose={jest.fn()} onSelect={onSelect}/></ThemeContext.Provider>;
- await act(async()=>{tree=Renderer.create(render('Chat'));});
- const chat=tree.root.findByProps({accessibilityLabel:'Chat'}),notes=tree.root.findByProps({accessibilityLabel:'Notes'});
- expect(StyleSheet.flatten(chat.props.style)).toMatchObject({borderWidth:1,borderColor:menuTheme.colors.selectedBorder,borderRadius:16});
- expect(StyleSheet.flatten(chat.props.style).backgroundColor).toBe(menuTheme.colors.selectedSurface);
+ const onSelect=jest.fn();const render=(selected:'Tools'|'Notes')=><ThemeContext.Provider value={tokens[scheme]}><ChatNavigation open selected={selected} onOpen={jest.fn()} onClose={jest.fn()} onSelect={onSelect}/></ThemeContext.Provider>;
+ await act(async()=>{tree=Renderer.create(render('Tools'));});
+ const tools=tree.root.findByProps({accessibilityLabel:'Tools'}),notes=tree.root.findByProps({accessibilityLabel:'Notes'});
+ expect(StyleSheet.flatten(tools.props.style)).toMatchObject({borderWidth:1,borderColor:menuTheme.colors.selectedBorder,borderRadius:16});
+ expect(StyleSheet.flatten(tools.props.style).backgroundColor).toBe(menuTheme.colors.selectedSurface);
  expect(StyleSheet.flatten(notes.props.style)).toMatchObject({borderWidth:1,borderColor:'transparent'});
  act(()=>notes.props.onPress());expect(onSelect).toHaveBeenCalledWith('Notes');
  await act(async()=>tree.update(render('Notes')));
- expect(tree.root.findByProps({accessibilityLabel:'Chat'})).toBe(chat);expect(tree.root.findByProps({accessibilityLabel:'Notes'})).toBe(notes);
- expect(chat.props.accessibilityState.selected).toBe(false);expect(notes.props.accessibilityState.selected).toBe(true);
- expect(StyleSheet.flatten(chat.props.style).borderColor).toBe('transparent');
+ expect(tree.root.findByProps({accessibilityLabel:'Tools'})).toBe(tools);expect(tree.root.findByProps({accessibilityLabel:'Notes'})).toBe(notes);
+ expect(tools.props.accessibilityState.selected).toBe(false);expect(notes.props.accessibilityState.selected).toBe(true);
+ expect(StyleSheet.flatten(tools.props.style).borderColor).toBe('transparent');
  expect(StyleSheet.flatten(notes.props.style).borderColor).toBe(menuTheme.colors.selectedBorder);
  expect(StyleSheet.flatten(notes.props.style).backgroundColor).toBe(menuTheme.colors.selectedSurface);
  await act(async()=>tree.unmount());
 });
+
+ test('return to the retained chat is a footer action, never a destination row',async()=>{
+ let tree!:Renderer.ReactTestRenderer;const onSelect=jest.fn();
+ await act(async()=>{tree=Renderer.create(<ChatNavigation selected="Settings" open onOpen={()=>{}} onClose={()=>{}} onSelect={onSelect}/>);});
+ const scroll=tree.root.findByType(ScrollView);expect(scroll.findAllByProps({accessibilityLabel:'Chat'})).toHaveLength(0);
+ const footer=tree.root.findByType(SectionActions),back=footer.findByProps({accessibilityLabel:'Back to chat'});
+ expect(StyleSheet.flatten(back.props.style)).toMatchObject({minWidth:48,minHeight:48});
+ act(()=>back.props.onPress());expect(onSelect).toHaveBeenCalledWith('Chat');
+ await act(async()=>tree.unmount());
+ });

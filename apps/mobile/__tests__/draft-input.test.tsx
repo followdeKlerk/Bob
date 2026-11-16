@@ -46,7 +46,7 @@ test('zero and invalid content measurements do not collapse the draft',async()=>
 test('keyboard-hidden composer is one compact row; opening it preserves the native input and draft',async()=>{
  let tree!:Renderer.ReactTestRenderer;const value='A retained draft\nwith more than one line';const editor=(compact:boolean)=><DraftInput scope="chat" value={value} onChangeText={()=>{}} compact={compact} leading={<View testID="plus-control"/>} trailing={<View testID="send-control"/>}/>;
  await act(async()=>{tree=Renderer.create(editor(true));});const input=tree.root.findAllByType(TextInput).find(node=>node.props.accessibilityLabel==='Message draft')!;
- act(()=>input.props.onContentSizeChange({nativeEvent:{contentSize:{height:180}}}));expect(StyleSheet.flatten(input.props.style).height).toBe(48);expect(StyleSheet.flatten(input.props.style).marginHorizontal).toBe(44);expect(tree.root.findAllByProps({accessibilityLabel:'Expand message editor'})).toHaveLength(0);
+ act(()=>input.props.onContentSizeChange({nativeEvent:{contentSize:{height:180}}}));expect(StyleSheet.flatten(input.props.style).height).toBe(48);expect(StyleSheet.flatten(input.props.style)).toMatchObject({marginLeft:56,marginRight:56});expect(tree.root.findAllByProps({accessibilityLabel:'Expand message editor'})).toHaveLength(0);
  const controls=tree.root.findByProps({testID:'composer-controls'});expect(StyleSheet.flatten(controls.props.style).position).toBe('absolute');expect(controls.props.pointerEvents).toBe('box-none');expect(controls.findByProps({testID:'plus-control'})).toBeDefined();expect(controls.findByProps({testID:'send-control'})).toBeDefined();
  await act(async()=>tree.update(editor(false)));expect(tree.root.findAllByType(TextInput).find(node=>node.props.accessibilityLabel==='Message draft')!).toBe(input);expect(input.props.value).toBe(value);expect(StyleSheet.flatten(input.props.style).height).toBe(180);expect(StyleSheet.flatten(input.props.style).marginHorizontal).toBeUndefined();expect(StyleSheet.flatten(controls.props.style).position).toBeUndefined();expect(controls.findByProps({accessibilityLabel:'Expand message editor'})).toBeDefined();
  await act(async()=>tree.update(editor(true)));expect(tree.root.findAllByType(TextInput).find(node=>node.props.accessibilityLabel==='Message draft')!).toBe(input);expect(input.props.value).toBe(value);expect(StyleSheet.flatten(input.props.style).height).toBe(48);await act(async()=>tree.unmount());
@@ -70,4 +70,16 @@ test('composer resizing uses a short native layout transition with system reduce
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<DraftInput scope="chat" value="Draft" onChangeText={()=>{}}/>);});
  expect(tree.root.findByProps({testID:'draft-editor'}).props.layout).toMatchObject({duration:180,reduceMotion:'system'});
  expect(tree.root.findByProps({testID:'composer-controls'}).props.layout).toMatchObject({duration:180,reduceMotion:'system'});await act(async()=>tree.unmount());
+});
+
+test.each([337,361])('two 48dp trailing actions reserve their full width at %sdp without replacing the input',async width=>{
+ let tree!:Renderer.ReactTestRenderer;const change=jest.fn();
+ const editor=(compact:boolean)=><View style={{width}}><DraftInput scope="same" value="Unsent edited draft" onChangeText={change} compact={compact} trailingWidth={104} leading={<View style={{width:48}}/>} trailing={<><View testID="voice" style={{width:48,height:48}}/><View testID="send" style={{width:48,height:48}}/></>}/></View>;
+ await act(async()=>{tree=Renderer.create(editor(true));});const input=tree.root.findByType(TextInput),style=StyleSheet.flatten(input.props.style);
+ expect(style.marginLeft).toBe(56);expect(style.marginRight).toBe(112);expect(width-26-style.marginLeft-style.marginRight).toBeGreaterThan(100);
+ const controls=tree.root.findByProps({testID:'composer-controls'});expect(StyleSheet.flatten(controls.props.style).gap).toBe(8);
+ for(const id of ['voice','send'])expect(StyleSheet.flatten(controls.findByProps({testID:id}).props.style)).toMatchObject({width:48,height:48});
+ await act(async()=>tree.update(editor(false)));expect(tree.root.findByType(TextInput)).toBe(input);expect(input.props.value).toBe('Unsent edited draft');
+ expect(StyleSheet.flatten(input.props.style).marginRight).toBeUndefined();expect(change).not.toHaveBeenCalled();
+ await act(async()=>tree.unmount());
 });

@@ -21,7 +21,7 @@ import './global.css';
 import Animated from 'react-native-reanimated';
 import {Button as KitButton} from './components/ui/button';
 import {Text as KitText} from './components/ui/text';
-import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, X} from 'lucide-react-native';
+import {Plus, ArrowUp, ArrowDown, Square, ChevronRight, ChevronDown, Paperclip, X, RefreshCw} from 'lucide-react-native';
 import {menuRadii,themed,useTheme,useThemedValue} from './theme';
 import {surfaceAnchors} from './surface-placement';
 import {replyOutputPlacement,replyOutputRows,type ReplyEntry} from './chat-replies';
@@ -40,13 +40,15 @@ import {CacheSettings} from './components/cache-settings';
 import {ToolsScreen} from './components/tools-screen';
 import {LibraryCard,SkillLibraryList} from './components/library-sections';
 import {cacheGeneration,readChatListCache,writeChatListCache} from './download-cache';
-import {SettingsHome,SETTINGS_PAGES} from './components/settings-home';
+import {SettingsHome} from './components/settings-home';
 import {SettingsGroup,SettingsRow,SectionHeading,SectionActions,SectionBody,RoundAction} from './components/section-ui';
 import {Bell,Clock3,Volume2,MapPin,SlidersHorizontal,Download,Stethoscope,Users,BookOpen,FileText,Library,Settings as SettingsIcon} from 'lucide-react-native';
 import {AgentsScreen} from './components/agents-screen';
 import {type BottomDestination} from './components/bottom-tabs';
 import {ChatNavigation} from './components/chat-navigation';
 import {menuDestination} from './menu-navigation';
+import {MenuReadCache} from './menu-read-cache';
+import {VoiceInputButton} from './components/voice-input-button';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {workstationLabel,cleanWorkstationAlias} from './workstation-label';
 import {WorkstationAliasEditor} from './components/workstation-alias-editor';
@@ -162,7 +164,7 @@ function textOf(value: unknown): string {
       .join('\n');
   return JSON.stringify(value);
 }
-function SessionMain({target,active,command,destination,shell,onUpdates,onUpdatesVisible}:{target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
+function SessionMain({target,active,command,destination,shell,menuReads,onUpdates,onUpdatesVisible}:{menuReads:MenuReadCache;target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
   const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
   const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
   const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
@@ -184,6 +186,9 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
   const [visualWidth,setVisualWidth] = useState(0);
   const [sectionLoading,setSectionLoading]=useState(false),[sectionError,setSectionError]=useState(''),[modelLoading,setModelLoading]=useState(false);
   const sectionRequest=useRef(0);
+  const sectionTransport=JSON.stringify([backend?.backendId,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']??0]);
+  const sectionOwner=useRef(sectionTransport);sectionOwner.current=sectionTransport;
+  const [library,setLibrary]=useScopedSnapshot<any>(sectionTransport);
   const [chatListBackend,setChatListBackend]=useState('');
   const [actionsMore,setActionsMore]=useState(false);
   const [attachmentPicker,setAttachmentPicker]=useState<{scope:string;tab:'gallery'|'files';limit:number}>();
@@ -211,7 +216,6 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
     [welcomeHelp, setWelcomeHelp] = useState(false),
     [welcomeManual, setWelcomeManual] = useState(false),
     [screen, setScreen] = useState('Chat'),
-    [library, setLibrary] = useState<any>(),
     [instructions, setInstructions] = useState(''),
     [skillName, setSkillName] = useState(''),
     [skillText, setSkillText] = useState(''),
@@ -239,6 +243,9 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
   // Keep the host mounted, but never inherit another destination's offset.
   useLayoutEffect(()=>{sectionScroll.current?.scrollTo({y:0,animated:false});},[screen]);
   const sendReady=!backgroundOutbox||backgroundReady.includes(backend?.backendId??'');
+  const [draftExpanded,setDraftExpanded]=useState(false);
+  const [foreground,setForeground]=useState(snapshotLifecycle.active);
+  useEffect(()=>{const listener=AppState.addEventListener('change',state=>setForeground(state==='active'));return()=>listener.remove();},[]);
   const [draftFocused,setDraftFocused]=useState(false),[slashDismissed,setSlashDismissed]=useState(false);
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
@@ -283,6 +290,19 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
   const latestDraft=useRef(draft);latestDraft.current=draft;
   const [modelPickerTarget,setModelPickerTarget]=useState<{backend:Backend;chat:number;scope:string}>();
   const [modelChoice,setModelChoice]=useState<ModelChoice>({});
+  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget;
+  const voiceTransport=JSON.stringify([backend?.backendId,backend?.endpoint,chat??null,shell.connectionRevisions[backend?.backendId??'']??0]);
+  const voiceVisit=useRef({transport:voiceTransport,active:voiceActive,generation:0});
+  if(voiceVisit.current.transport!==voiceTransport||voiceVisit.current.active!==voiceActive)voiceVisit.current={transport:voiceTransport,active:voiceActive,generation:voiceVisit.current.generation+1};
+  const voiceScope=JSON.stringify([voiceTransport,voiceVisit.current.generation]);
+  const voiceOwner=useRef({scope:voiceScope,active:voiceActive,visit:currentDraftVisit});voiceOwner.current={scope:voiceScope,active:voiceActive,visit:currentDraftVisit};
+  const acceptTranscript=(text:string)=>{
+    const value=text.trim();
+    if(!value||!voiceOwner.current.active||voiceOwner.current.scope!==voiceScope||voiceOwner.current.visit!==currentDraftVisit||!snapshotLifecycle.active()||!canWriteConversation())return;
+    setDraft(previous=>previous+(/\s$/.test(previous)||!previous?'':' ')+value);
+  };
+  const modelRequest=useRef(0);
+  useEffect(()=>{modelRequest.current++;},[scope,active,backend?.endpoint]);
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
   useEffect(()=>{if(!ordinaryChat){setModelPickerTarget(undefined);setDrawingEditor(false);setAttachmentPicker(undefined);setActions(false);}},[ordinaryChat]);
   useEffect(()=>{if(!actions)setActionsMore(false);},[actions]);
@@ -313,7 +333,14 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
     setChats(previous=>{const items=previous.map(item=>item.id===Number(id)?preserveReadOnlyProfile(item,{...item,meta:result.meta}):item);void writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);return items;});
     if(action==='delete'&&chat===Number(id)){const next=chats.find(item=>item.id!==Number(id)&&!item.meta?.trashed&&!item.meta?.archived);setChat(next?.id);}
   }
-  const request=(path:string,method='GET',body?:unknown,b=backend,signal?:AbortSignal)=>requestBackend(path,method,body,b,signal);
+  const menuReadScope=(b:Backend)=>JSON.stringify([b.backendId,b.endpoint,shell.connectionRevisions[b.backendId]??0]);
+  const request=async(path:string,method='GET',body?:unknown,b=backend,signal?:AbortSignal)=>{
+    const resource=path==='library'?'library':path==='models'?'models':undefined;
+    if(b&&method==='GET'&&resource&&!signal)return menuReads.read(menuReadScope(b),resource,()=>requestBackend(path,method,body,b));
+    const invalidated=path==='library'||path==='skills'||path.startsWith('skills/')?'library':path==='provider'?'models':undefined;
+    const settle=b&&method!=='GET'&&invalidated?menuReads.beginMutation(menuReadScope(b),invalidated):undefined;
+    try{return await requestBackend(path,method,body,b,signal);}finally{settle?.();}
+  };
   const run=(f:()=>Promise<void>)=>{if(isVisible())void f().catch(e=>{if(isVisible())Alert.alert('Bob',String(e.message??e));});};
   async function reconcilePending(b=backend,id=chat,current=scope) {
     if(!b||!id)return;
@@ -361,7 +388,7 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
       }catch{if(!cancelled)setStatus('Offline • cached history');}
     })();
     return()=>{cancelled=true;};
-  }, [backend?.backendId]);
+  }, [backend?.backendId,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']]);
   useEffect(() => {
     let cancelled=false,events:SnapshotStream|undefined,lastRaw:string|undefined;
     stream.current?.close();
@@ -647,10 +674,11 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
   async function openModelPicker(){
     const b=backend,id=chat,current=scope;if(!b||!id)throw Error('Open a conversation first');
     if(!canWriteConversation())throw Error('This conversation is read-only.');
-    setActions(false);setModelLoading(true);setModelPickerTarget({backend:b,chat:id,scope:current});
+    const ticket=++modelRequest.current;
+    setActions(false);setModelLoading(true);setModels(menuReads.peek(menuReadScope(b),'models')??[]);setModelChoice({});setModelPickerTarget({backend:b,chat:id,scope:current});
     try{const [listed,configured]=await Promise.all([request('models','GET',undefined,b),request(`chats/${id}/configure`,'GET',undefined,b)]);
-    if(!canWriteConversation(current))return;setModels(listed);setModelChoice({model:configured.model,thinkingLevel:configured.thinkingLevel});}
-    finally{if(identity.current===current)setModelLoading(false);}
+    if(!canWriteConversation(current)||modelRequest.current!==ticket)return;setModels(listed);setModelChoice({model:configured.model,thinkingLevel:configured.thinkingLevel});}
+    finally{if(identity.current===current&&modelRequest.current===ticket)setModelLoading(false);}
   }
   async function applyModelChoice(choice:Required<ModelChoice>){
     const target=modelPickerTarget;if(!target||!canWriteConversation(target.scope))throw Error('Conversation changed; reopen model selection');
@@ -677,21 +705,24 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
     if(parent==='Chat'){showChat();return;}
     run(()=>openSection(parent,false));
   }
-  async function openSection(name: string,remember=true) {
+  async function openSection(name: string,remember=true,refresh=false) {
     if(remember&&name!==screen)sectionTrail.current.push(screen);
-    const selected = backend?.backendId;
-    const current = scope;
-    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(name==='Skills'||name==='Prompts'||(name!=='Settings'&&name!=='Notes'&&name!=='Tools'&&name!=='Schedules'&&!SETTINGS_PAGES.includes(name)));
+    const b=backend,transport=sectionTransport;
+    const needsLibrary=name==='Skills'||name==='Prompts';
+    if(refresh&&b&&needsLibrary)menuReads.invalidate(menuReadScope(b),'library');
+    const cached=b&&needsLibrary?menuReads.peek(menuReadScope(b),'library'):undefined;
+    const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(needsLibrary&&!cached);
+    if(cached){setLibrary(cached);setInstructions(cached.instructions);} // Local reopen paints without a loading frame.
     setScreen(name);setDrawer(false);if(name==='Skills')setSkillEditing(false);
     try{
     if (name === 'Prompts' || name === 'Skills') {
-      const l = await request('library');
-      if (selectedBackend.current !== selected||sectionRequest.current!==ticket) return;
+      const l = await request('library','GET',undefined,b);
+      if (!isVisible()||sectionOwner.current!==transport||sectionRequest.current!==ticket) return;
       setLibrary(l);
       setInstructions(l.instructions);
     }
-    }catch(e){if(sectionRequest.current===ticket)setSectionError(String((e as Error).message??e));}
-    finally{if(sectionRequest.current===ticket)setSectionLoading(false);}
+    }catch(e){if(isVisible()&&sectionOwner.current===transport&&sectionRequest.current===ticket)setSectionError(String((e as Error).message??e));}
+    finally{if(isVisible()&&sectionOwner.current===transport&&sectionRequest.current===ticket)setSectionLoading(false);}
   }
   async function loadConversationSettings():Promise<SavedConversationSettings>{
     const b=backend,id=chat,current=scope,ticket=sectionRequest.current;
@@ -942,10 +973,10 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
               </ScrollView>}
-              <DraftInput scope={scope} editable={active&&composerReady&&ordinaryChat} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0}
+              <DraftInput scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={104}
                 maxHeight={Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
-                trailing={<IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/>}
+                trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
               />
             </Animated.View>
 
@@ -967,11 +998,11 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
       {screen!=='Terminal'&&screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <MenuTheme><MotionSurface transitionKey={screen} testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:menuColors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>
           <SectionHeading title={screen==='Storage & cache'?'Caching':screen==='Prompts'?'Instructions & templates':screen}/>
-          <SectionBody footer={<SectionActions overlay menu={sectionMenu} onBack={screen!=='Settings'||sectionTrail.current.length>0?backSection:undefined}/>}>{clearance=>
+          <SectionBody footer={<SectionActions overlay menu={sectionMenu} onBack={backSection}>{(screen==='Skills'||screen==='Prompts')&&<RoundAction label="Refresh library" icon={RefreshCw} disabled={sectionLoading} onPress={()=>run(()=>openSection(screen,false,true))}/>}</SectionActions>}>{clearance=>
           <ScrollView ref={sectionScroll} testID="section-body" style={{flex:1}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[menuStyles.messages,{paddingTop:16,paddingHorizontal:16,paddingBottom:clearance+24,gap:16}]}>
 
           {sectionLoading?<View testID="section-loading-overlay" style={{minHeight:160,alignItems:'center',justifyContent:'center',gap:12}}><ActivityIndicator color={menuColors.accent}/><Text typography="ui" style={menuStyles.caption}>Loading {screen.toLowerCase()}…</Text></View>:<>
-          {!!sectionError&&<View style={{gap:8}}><Text typography="ui" style={menuStyles.caption}>{sectionError}</Text><Button menu label="Retry loading" onPress={()=>run(()=>openSection(screen))}/></View>}
+          {!!sectionError&&<View style={{gap:8}}><Text typography="ui" style={menuStyles.caption}>{sectionError}</Text><Button menu label="Retry loading" onPress={()=>run(()=>openSection(screen,false,true))}/></View>}
           {screen === 'Todos' && <View>
             {(view?.docs['bob.todos']?.items ?? []).map((item: any, index: number) => <View key={index}>
               <Button menu label={`${item.done ? '✓' : '○'} ${item.text}`} onPress={() => run(async () => { const items = [...view!.docs['bob.todos'].items]; items[index] = { ...item, done: !item.done }; await request(`chats/${chat}/todos`, 'PUT', { items }); })} />
@@ -1239,7 +1270,7 @@ function SessionMain({target,active,command,destination,shell,onUpdates,onUpdate
         const current=attachmentPicker.scope;
         setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),...files]}));setAttachmentPicker(undefined);
       }}/>}
-            <ModelPicker loading={modelLoading} visible={active&&ordinaryChat&&!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>setModelPickerTarget(undefined)} onApply={applyModelChoice}/>
+            <ModelPicker loading={modelLoading} visible={active&&ordinaryChat&&!!modelPickerTarget} models={models} current={modelChoice} onClose={()=>{modelRequest.current++;setModelPickerTarget(undefined);}} onApply={applyModelChoice}/>
       {active&&aliasTarget&&<WorkstationAliasEditor key={'alias:'+aliasTarget.backendId} workstation={aliasTarget} onClose={()=>setAliasTarget(undefined)} onSave={value=>saveWorkstationAlias(aliasTarget.backendId,value)}/>}
       {screen==='Workstations'&&<SideDrawer menu={sectionMenu} key={screen+':'+(backend?.backendId??'')} embedded mode="workstations" workspaceLabel={backend?workstationLabel(backend,backends):undefined} visible onClose={()=>showChat()} disabled={!backend}
         onNew={()=>run(newChat)}
@@ -1281,6 +1312,7 @@ function WorkstationNotes({backend,shell,active}:{backend:Backend;shell:SessionS
 }
 function RetainedSessionApp(){
   const shell=useSessionShell(),{selection}=shell;
+  const [menuReads]=useState(()=>new MenuReadCache());
   const backend=shell.backends.find(item=>item.backendId===shell.current?.backendId);
   const build=useBuildStatus(backend);
   const keyboardInset=useKeyboardInset();
@@ -1292,13 +1324,13 @@ function RetainedSessionApp(){
   const chatUpdatesVisible=updateSurface?.scope===selection.deck.active&&updateSurface.visible;
   const openUpdates=()=>{if(backend)setManagement(updateScope);};
   if(!shell.ready)return <View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator accessibilityLabel="Opening Bob"/></View>;
-  if(!shell.backends.length)return <SessionMain active command={0} destination="Chat" shell={shell}/>;
+  if(!shell.backends.length)return <SessionMain menuReads={menuReads} active command={0} destination="Chat" shell={shell}/>;
   return <View style={{flex:1}}>{selection.deck.targets.map(target=>{
     const key=sessionKey(target),active=key===selection.deck.active;
     // Keep identical native viewport geometry while hidden. Visibility belongs
     // to a non-animated host, never to a native-driver opacity animation.
     return <View key={key} testID={`session-host:${key}`} collapsable={false} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?1:0}]}>
-      <AppMotionProvider active={active}><SessionMain target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
+      <AppMotionProvider active={active}><SessionMain menuReads={menuReads} target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
     </View>;
   })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}
     {backend&&<BuildCard backend={backend} state={build.state} error={build.error} focus={manage} active={!!chatUpdatesVisible||manage} keyboardInset={keyboardInset} onDismiss={()=>setManagement(undefined)} onRefresh={build.refresh}/>}

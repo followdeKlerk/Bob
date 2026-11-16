@@ -5,14 +5,13 @@ import {menuButtonChrome} from '../menu-button-style';
 import React from 'react';
 import {Modal,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Menu as NavigationMenu,SquareTerminal,NotebookPen,Monitor,Users,Wrench,Settings,MessageCircle,Check,X,type LucideIcon} from 'lucide-react-native';
+import {Menu as NavigationMenu,SquareTerminal,NotebookPen,Monitor,Users,Wrench,Settings,ArrowLeft,Check,X,type LucideIcon} from 'lucide-react-native';
 import {Text} from './app-text';
 import type {BottomDestination} from './bottom-tabs';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
 import {SectionHeading,SectionActions,SectionBody,RoundAction} from './section-ui';
 
 const destinations:{id:BottomDestination;label?:string;icon:LucideIcon}[]=[
- {id:'Chat',icon:MessageCircle},
  {id:'Agents',label:'Agents and Sessions',icon:Users},
  {id:'Terminal',icon:SquareTerminal},
  {id:'Notes',icon:NotebookPen},
@@ -38,7 +37,7 @@ export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,
     <TouchTarget haptic={false} accessibilityRole="button" accessibilityLabel="Dismiss navigation menu" onPress={onClose} style={StyleSheet.absoluteFill}/>
     <SafeAreaView edges={['left','right','bottom']} testID="chat-navigation-sheet" accessibilityViewIsModal onAccessibilityEscape={onClose} style={s.sheet}><MotionSurface active={open} style={{flexShrink:1}}>
      <SectionHeading title="Menu"/>
-     <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/>}/>}>{clearance=>
+     <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>{selected!=='Chat'&&<RoundAction label="Back to chat" onPress={()=>onSelect('Chat')} icon={ArrowLeft}/>}<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/></View>}/>}>{clearance=>
      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content,{paddingBottom:clearance+12}]} style={s.scroll}>
       {destinations.map(({id,label=id,icon:Icon})=><View key={id}>{id==='Agents'&&<Text typography="ui" accessibilityRole="header" style={s.group}>Workspace</Text>}{id==='Settings'&&<Text typography="ui" accessibilityRole="header" style={s.group}>App</Text>}<TouchTarget key={id} accessibilityRole="button" accessibilityLabel={label} accessibilityValue={id==='Agents'?{text:agentActivity}:undefined} accessibilityState={{selected:id===selected}} onPress={()=>onSelect(id)} style={[s.row,id===selected&&s.current]}>
        <Icon size={23} color={colors.foreground}/>

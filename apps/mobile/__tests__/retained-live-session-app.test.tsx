@@ -4,6 +4,9 @@ import Renderer,{act} from 'react-test-renderer';
 import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View,Modal} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
+import {VoiceInputButton} from '../components/voice-input-button';
+import {ModelPicker} from '../components/model-picker';
+import {SettingsHome} from '../components/settings-home';
 import {DraftInput} from '../components/draft-input';
 import {ChatNavigation} from '../components/chat-navigation';
 import {NotesScreen} from '../components/notes-screen';
@@ -55,8 +58,9 @@ function toolHeader(root:Renderer.ReactTestInstance){return root.findAll(node=>n
 async function navigateTo(tree:Renderer.ReactTestRenderer,destination:'Chat'|'Notes'|'Workstations'|'Tools'|'Settings'){
  const notes=tree.root.findAll(node=>node.type===View&&typeof node.props.testID==='string'&&node.props.testID.startsWith('workspace-notes:')&&node.props.pointerEvents==='auto')[0];
  const root=notes??activeHost(tree),navigation=root.findAllByType(ChatNavigation).find(node=>node.props.showTrigger!==false)!;
+ if(destination==='Chat'&&(!navigation.props.selected||navigation.props.selected==='Chat'))return;
  if(!navigation.props.open)await act(async()=>button(root,'Menu').props.onPress());
- await act(async()=>button(root.findByProps({testID:'chat-navigation-sheet'}),destination).props.onPress());
+ await act(async()=>button(root.findByProps({testID:'chat-navigation-sheet'}),destination==='Chat'?'Back to chat':destination).props.onPress());
 }
 async function switchBackend(tree:Renderer.ReactTestRenderer,backend:Backend){
  await navigateTo(tree,'Workstations');
@@ -641,5 +645,110 @@ test('one update owner survives empty/live and retained-chat switches without re
   expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
   expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();expect(popup().props.visible).toBe(false);
   expect(app.fetchMock.mock.calls.filter(([,init])=>init?.method==='POST'&&String(init?.body).includes('app-'))).toHaveLength(0);
+ }finally{await app.close();}
+});
+
+// Real section navigation, transport and cache: request totals, not a timing proxy.
+test('library reopen/sibling routes reuse one read; mutation and explicit refresh each force authoritative readback',async()=>{
+ const app=await mount();
+ try{
+  const fetch=app.fetchMock.getMockImplementation()!,requests:string[]=[];let saved={instructions:'Synthetic defaults',templates:{},skills:{}};
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{if(String(input).endsWith('/library')){requests.push(init.method);if(init.method==='PUT')saved={...saved,...JSON.parse(init.body)};return{ok:true,status:200,json:async()=>saved} as Response;}return fetch(input,init);});
+  const root=activeHost(app.tree),editor=draft(root),history=list(root),stream=app.latest(a);
+  await act(async()=>editor.props.onChangeText('Keep my composer'));
+  await navigateTo(app.tree,'Settings');
+  expect(root.findAllByType(SettingsHome)).toHaveLength(1);expect(root.findAllByProps({testID:'update-indicator-anchor'})).toHaveLength(0);
+  expect(root.findAllByProps({accessibilityLabel:'App update status'})).toHaveLength(0);
+  await act(async()=>button(root,'Instructions & templates').props.onPress());
+  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Synthetic defaults');
+  await act(async()=>button(root,'Back to previous menu').props.onPress());
+  await act(async()=>button(root,'Skills').props.onPress());expect(requests).toEqual(['GET']);
+  await act(async()=>button(root,'Back to previous menu').props.onPress());
+  await act(async()=>button(root,'Instructions & templates').props.onPress());expect(requests).toEqual(['GET']);
+  expect(root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
+  await act(async()=>root.findByProps({accessibilityLabel:'Backend default instructions'}).props.onChangeText('Updated defaults'));
+  await act(async()=>button(root,'Save instructions').props.onPress());expect(requests).toEqual(['GET','PUT','GET']);
+  await act(async()=>button(root,'Back to previous menu').props.onPress());await act(async()=>button(root,'Instructions & templates').props.onPress());
+  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Updated defaults');expect(requests).toEqual(['GET','PUT','GET']);
+  await act(async()=>button(root,'Refresh library').props.onPress());expect(requests).toEqual(['GET','PUT','GET','GET']);
+  await navigateTo(app.tree,'Chat');expect(draft(root)).toBe(editor);expect(editor.props.value).toBe('Keep my composer');expect(list(root)).toBe(history);expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
+ }finally{await app.close();}
+});
+
+test('library in-flight dedup survives route races, offline retry and backend switches without cross-backend content',async()=>{
+ const app=await mount();let release:((value:Response)=>void)|undefined;
+ try{
+  const fetch=app.fetchMock.getMockImplementation()!,reads={a:0,b:0};let offline=true;
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{
+   if(String(input).endsWith('/library')){const current=String(input).startsWith(a.endpoint)?'a':'b';reads[current]++;
+    if(current==='b')return{ok:true,status:200,json:async()=>({instructions:'B only',templates:{},skills:{}})} as Response;
+    if(offline)throw Error('Synthetic library offline');
+    return new Promise<Response>(resolve=>{release=resolve;});
+   }return fetch(input,init);
+  });
+  const first=activeHost(app.tree);await navigateTo(app.tree,'Settings');await act(async()=>button(first,'Instructions & templates').props.onPress());
+  expect(reads.a).toBe(1);expect(button(first,'Retry loading')).toBeDefined();offline=false;
+  await act(async()=>button(first,'Retry loading').props.onPress());expect(reads.a).toBe(2);
+  expect(first.findAllByProps({testID:'section-loading-overlay'}).length).toBeGreaterThan(0);
+  await act(async()=>button(first,'Back to previous menu').props.onPress());await act(async()=>button(first,'Skills').props.onPress());expect(reads.a).toBe(2);
+  await switchBackend(app.tree,b);const second=activeHost(app.tree);await navigateTo(app.tree,'Settings');await act(async()=>button(second,'Instructions & templates').props.onPress());
+  expect(reads.b).toBe(1);expect(second.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('B only');
+  await act(async()=>release!({ok:true,status:200,json:async()=>({instructions:'A only',templates:{},skills:{}})} as Response));release=undefined;
+  expect(activeHost(app.tree)).toBe(second);expect(second.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('B only');
+  await switchBackend(app.tree,a);await navigateTo(app.tree,'Settings');await act(async()=>button(first,'Instructions & templates').props.onPress());
+  expect(reads.a).toBe(2);expect(first.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('A only');
+ }finally{if(release)await act(async()=>release!({ok:true,status:200,json:async()=>({instructions:'cleanup',templates:{},skills:{}})} as Response));await app.close();}
+});
+
+test('model catalog reopens without another read while conversation config is always fresh, including after Apply',async()=>{
+ const app=await mount();
+ try{
+  const fetch=app.fetchMock.getMockImplementation()!;let catalogs=0,configReads=0;let configured={instructions:null,cwd:'/example',model:{provider:'example',modelId:'fast'},thinkingLevel:'medium'};
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{const url=String(input);
+   if(url.endsWith('/models')){catalogs++;return{ok:true,status:200,json:async()=>[{provider:'example',modelId:'fast',name:'Synthetic fast',thinkingLevels:['medium','high']}]} as Response;}
+   if(url.endsWith('/configure')){if(init.method==='GET')configReads++;else configured={...configured,...JSON.parse(init.body)};return{ok:true,status:200,json:async()=>configured} as Response;}
+   return fetch(input,init);
+  });
+  const root=activeHost(app.tree);const open=async()=>{await act(async()=>button(root,'Chat actions').props.onPress());await act(async()=>button(root,'Model & thinking').props.onPress());};
+  await open();expect(catalogs).toBe(1);expect(configReads).toBe(1);expect(root.findByType(VoiceInputButton).props.active).toBe(false);
+  await act(async()=>root.findByType(ModelPicker).props.onClose());await open();expect(catalogs).toBe(1);expect(configReads).toBe(2);
+  await act(async()=>button(root,'Select Synthetic fast (example)').props.onPress());await act(async()=>button(root,'High thinking').props.onPress());await act(async()=>button(root,'Apply model selection').props.onPress());
+  expect(configured.thinkingLevel).toBe('high');expect(configReads).toBe(3);await open();expect(configReads).toBe(4);expect(catalogs).toBe(1);
+  await act(async()=>root.findByType(ModelPicker).props.onClose());
+  await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Advanced').props.onPress());await act(async()=>button(root,'Provider connection').props.onPress());await act(async()=>button(root,'Configure backend provider').props.onPress());
+  await navigateTo(app.tree,'Chat');await open();expect(catalogs).toBe(2);expect(configReads).toBe(5);
+ }finally{await app.close();}
+});
+
+test('dictation appends to the latest functional draft without sending, rejects old visible visits and hides outside foreground ordinary Chat',async()=>{
+ const app=await mount();
+ try{
+  const root=activeHost(app.tree),editor=draft(root),voice=root.findByType(VoiceInputButton);
+  expect(voice.props.active).toBe(true);expect(voice.props.scope).toContain(a.backendId);expect(voice.props.scope).toContain(a.endpoint);
+  const old=voice.props.onTranscript;await act(async()=>editor.props.onChangeText('Typed while listening'));
+  await act(async()=>old('one final utterance'));expect(editor.props.value).toBe('Typed while listening one final utterance');
+  expect(app.fetchMock.mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
+  await navigateTo(app.tree,'Settings');expect(voice.props.active).toBe(false);await act(async()=>old('stale result'));expect(editor.props.value).not.toContain('stale');
+  await navigateTo(app.tree,'Chat');expect(voice.props.active).toBe(true);await act(async()=>old('stale after return'));expect(editor.props.value).not.toContain('stale');
+  const beforeBackground=voice.props.onTranscript;await app.transition('background');expect(voice.props.active).toBe(false);await app.transition('active');expect(voice.props.active).toBe(true);
+  await act(async()=>beforeBackground('late background result'));expect(editor.props.value).not.toContain('late');
+  const beforeSwitch=voice.props.onTranscript;await switchBackend(app.tree,b);const next=activeHost(app.tree);expect(root.findByType(VoiceInputButton).props.active).toBe(false);expect(next.findByType(VoiceInputButton).props.scope).not.toBe(voice.props.scope);
+  await act(async()=>beforeSwitch('wrong chat'));expect(draft(next).props.value).toBe('');expect(editor.props.value).not.toContain('wrong');
+ }finally{await app.close();}
+});
+
+test('expanded editor and library/Settings Back preserve draft and deactivate dictation until the source composer is visible again',async()=>{
+ const app=await mount();
+ try{
+  const root=activeHost(app.tree),editor=draft(root),voice=root.findByType(VoiceInputButton),history=list(root);
+  await act(async()=>editor.props.onChangeText('Editable long draft\nwith selection left to native input'));
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:300}));
+  act(()=>editor.props.onContentSizeChange({nativeEvent:{contentSize:{height:100}}}));
+  await act(async()=>button(root,'Expand message editor').props.onPress());expect(voice.props.active).toBe(false);
+  await act(async()=>button(root,'Collapse message editor').props.onPress());expect(voice.props.active).toBe(true);
+  await navigateTo(app.tree,'Settings');expect(voice.props.active).toBe(false);
+  await act(async()=>button(root,'Appearance').props.onPress());await act(async()=>button(root,'Back to previous menu').props.onPress());expect(root.findAllByType(SettingsHome)).toHaveLength(1);
+  await act(async()=>button(root,'Back to previous menu').props.onPress());expect(voice.props.active).toBe(true);
+  expect(draft(root)).toBe(editor);expect(list(root)).toBe(history);expect(editor.props.value).toContain('Editable long draft');
  }finally{await app.close();}
 });
