@@ -15,9 +15,9 @@ test.each([
  [message([{type:'thinking',thinking:''}]),'waiting','Waiting for model…'],
  [message([{type:'text',text:'   '}]),'waiting','Waiting for model…'],
  [message([{type:'future-type',secret:'secret'}]),'waiting','Waiting for model…'],
- [message([{type:'text',text:'Earlier commentary'},{type:'toolCall',name:'read',arguments:{path:'secret'}}]),'preparing','Preparing response…'],
- [current({tools:[{status:'running',name:'bash',output:'private command output'}]}),'working','Working…'],
- [current({nestedTools:[{status:'pending',name:'read',arguments:{path:'private'}}]}),'working','Working…'],
+ [message([{type:'text',text:'Earlier commentary'},{type:'toolCall',name:'read',arguments:{path:'secret'}}]),'preparing','Preparing tool call…'],
+ [current({tools:[{status:'running',name:'bash',output:'private command output'}]}),'working','Running tools…'],
+ [current({nestedTools:[{status:'pending',name:'read',arguments:{path:'private'}}]}),'preparing','Preparing tools…'],
  [current({run:{taskId:7,afterRun:{tasks:[99]}}}),'finishing','Finishing up…'],
  [{...connected,live:{compactions:[{taskId:1}] }},'compaction','Condensing conversation…'],
  [{...connected,live:{compactions:[{retry:{error:'secret',at:1}}]}},'compaction','Retrying summary…'],
@@ -57,7 +57,7 @@ test.each([undefined,null,[],{},'private-invalid'])('unknown and retained idle d
 
 test('tool arguments, names, helper counts, progress percentages and private content never enter the animation',()=>{
  const input=current({tools:[{status:'running',name:'DO_NOT_DISPLAY',arguments:{private:'DO_NOT_DISPLAY'},output:'DO_NOT_DISPLAY'}],nestedTools:[{status:'running',name:'DO_NOT_DISPLAY'}]});
- const before=JSON.stringify(input);expect(composerActivity(input)).toEqual({phase:'working',text:'Working…',animate:true});expect(JSON.stringify(input)).toBe(before);
+ const before=JSON.stringify(input);expect(composerActivity(input)).toEqual({phase:'working',text:'Running tools…',animate:true});expect(JSON.stringify(input)).toBe(before);
 });
 
 
@@ -77,4 +77,12 @@ test('a completed tool-calling generation is not mistaken for fresh answer strea
 
 test('native stream failure stays visibly actionable rather than pretending to reconnect or work',()=>{
  expect(composerActivity({...connected,connection:'Connection needs attention • open Connection settings'})).toEqual({phase:'connection',text:'Connection needs attention',animate:false});
+});
+
+
+test('tool progress explains observed preparation/execution, never tool payloads or invented thoughts',()=>{
+ expect(composerActivity(current({tools:[{status:'pending',name:'DO_NOT_DISPLAY'}]}))).toMatchObject({phase:'preparing',text:'Preparing tools…'});
+ expect(composerActivity(current({tools:[{status:'pending'}],nestedTools:[{status:'running',output:'DO_NOT_DISPLAY'}]}))).toMatchObject({phase:'working',text:'Running tools…'});
+ expect(composerActivity(message([{type:'toolCall',arguments:{private:'DO_NOT_DISPLAY'}}]))).toMatchObject({phase:'preparing',text:'Preparing tool call…'});
+ expect(composerActivity(current({tools:[{status:'done'}],nestedTools:[{status:'failed'}]}))).toMatchObject({phase:'waiting',text:'Waiting for model…'});
 });

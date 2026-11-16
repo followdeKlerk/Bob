@@ -26,45 +26,30 @@ beforeEach(()=>{
  jest.spyOn(AccessibilityInfo,'addEventListener').mockImplementation((event,callback)=>{if(event==='reduceMotionChanged')reduceChange=callback;return {remove:jest.fn()};});
 });
 afterEach(()=>{jest.clearAllTimers();jest.useRealTimers();jest.restoreAllMocks();if(currentState)Object.defineProperty(AppState,'currentState',currentState);});
-const edgeOpacity=(tree:Renderer.ReactTestRenderer)=>StyleSheet.flatten(tree.root.findByProps({testID:'streaming-text-edge'}).props.style).opacity;
 const advance=async(ms:number)=>{await act(async()=>jest.advanceTimersByTime(ms));};
 
-test('actual suffix opacity progresses numerically to opaque without reparsing Markdown or delaying text',async()=>{
+test('progressive text and finalization stay immediate, selectable and keyed without timer-driven reparses',async()=>{
  const parse=jest.spyOn(MarkdownIt.prototype,'parse');
  let tree!:Renderer.ReactTestRenderer;
  const render=(text:string,streaming=true)=><ChatMotionProvider active><ChatMarkdown text={text} streaming={streaming}/></ChatMotionProvider>;
  await act(async()=>{tree=Renderer.create(render('Hello'));});
- expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);
- expect(jest.getTimerCount()).toBe(0);
  const originalLeaf=tree.root.findByType(StreamingText),textGroup=tree.root.findAllByType(Text).find(node=>node.props.selectable);
- await act(async()=>tree.update(render('Hello world')));
- expect(tree.root.findByType(StreamingText)).toBe(originalLeaf);
- expect(tree.root.findAllByType(Text).find(node=>node.props.selectable)).toBe(textGroup);
- expect(originalLeaf.props.start).toBe(5);
- expect(flatten(tree.root.findByProps({testID:'streaming-text-edge'}).props.children)).toBe(' world');
- expect(flatten(tree.toJSON())).toBe('Hello world');
- // Prefix/paragraph remain unstyled; only the appended suffix has opacity.
- expect(StyleSheet.flatten(textGroup!.props.style).opacity).toBeUndefined();
- expect(edgeOpacity(tree)).toBe(.78);expect(jest.getTimerCount()).toBe(2);
+ for(const text of ['Hello world','Hello world, all here','Hello world, all here immediately']){
+  await act(async()=>tree.update(render(text)));
+  expect(tree.root.findByType(StreamingText)===originalLeaf).toBe(true);
+  expect(tree.root.findAllByType(Text).find(node=>node.props.selectable)===textGroup).toBe(true);
+  expect(flatten(tree.toJSON())).toBe(text);
+  expect(StyleSheet.flatten(textGroup!.props.style).opacity).toBeUndefined();
+  expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);
+  expect(jest.getTimerCount()).toBe(0);
+ }
  const parses=parse.mock.calls.length;
- await advance(69);expect(edgeOpacity(tree)).toBe(.78);
- await advance(1);expect(edgeOpacity(tree)).toBe(.91);expect(jest.getTimerCount()).toBe(1);
- await advance(70);expect(edgeOpacity(tree)).toBe(1);expect(jest.getTimerCount()).toBe(0);
- expect(parse).toHaveBeenCalledTimes(parses);
- expect(flatten(tree.toJSON())).toBe('Hello world');
- await act(async()=>tree.update(render('Hello world, all here')));
- expect(edgeOpacity(tree)).toBe(.78);expect(jest.getTimerCount()).toBe(2);
- await advance(35);
- await act(async()=>tree.update(render('Hello world, all here immediately')));
- expect(tree.root.findByType(StreamingText).props.start).toBe(21);
- expect(flatten(tree.root.findByProps({testID:'streaming-text-edge'}).props.children)).toBe(' immediately');
- expect(edgeOpacity(tree)).toBe(.78);expect(jest.getTimerCount()).toBe(2); // Replaces, never queues.
- await act(async()=>tree.update(render('Hello world, all here immediately!',false)));
- expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);
- expect(flatten(tree.toJSON())).toBe('Hello world, all here immediately!');
- expect(jest.getTimerCount()).toBe(0);
- await advance(1000);expect(flatten(tree.toJSON())).toBe('Hello world, all here immediately!');
- await act(async()=>tree.unmount());
+ await advance(1000);expect(parse).toHaveBeenCalledTimes(parses);
+ await act(async()=>tree.update(render('Hello world, all here immediately',false)));
+ expect(parse).toHaveBeenCalledTimes(parses); // No parse on streaming -> done alone.
+ expect(tree.root.findByType(StreamingText)===originalLeaf).toBe(true);
+ expect(flatten(tree.toJSON())).toBe('Hello world, all here immediately');
+ await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
 });
 test('replacement, partial syntax completion and fast whole-answer completion never replay old prose',async()=>{
  let tree!:Renderer.ReactTestRenderer;
@@ -78,25 +63,20 @@ test('replacement, partial syntax completion and fast whole-answer completion ne
  expect(jest.getTimerCount()).toBe(0);
  await act(async()=>tree.unmount());
 });
-test('opacity cancels on reduced motion/background/hidden and remains opaque without replay on resume',async()=>{
+test('reduced motion/background/hidden changes never fade, queue or replay already received text',async()=>{
  let tree!:Renderer.ReactTestRenderer;
  const render=(text:string,active=true)=><ChatMotionProvider active={active}><ChatMarkdown streaming text={text}/></ChatMotionProvider>;
- const cancelled=()=>{expect(jest.getTimerCount()).toBe(0);expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);};
- const resumed=()=>{expect(jest.getTimerCount()).toBe(0);expect(edgeOpacity(tree)).toBe(1);};
+ const stable=()=>{expect(jest.getTimerCount()).toBe(0);expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);};
  await act(async()=>{tree=Renderer.create(render('First'));});
- await act(async()=>tree.update(render('First append')));expect(edgeOpacity(tree)).toBe(.78);
- await act(async()=>reduceChange(true));cancelled();
- await advance(200);
- await act(async()=>reduceChange(false));resumed();
- await act(async()=>tree.update(render('First append more')));expect(edgeOpacity(tree)).toBe(.78);
- await advance(70);expect(edgeOpacity(tree)).toBe(.91);
- await act(async()=>appChange('background'));cancelled();
- await advance(200);
- await act(async()=>appChange('active'));resumed();
- await act(async()=>tree.update(render('First append more now')));expect(edgeOpacity(tree)).toBe(.78);
- await act(async()=>tree.update(render('First append more now',false)));cancelled();
- await advance(200);
- await act(async()=>tree.update(render('First append more now')));resumed();
+ await act(async()=>tree.update(render('First append')));stable();
+ await act(async()=>reduceChange(true));stable();
+ await act(async()=>reduceChange(false));stable();
+ await act(async()=>tree.update(render('First append more')));stable();
+ await act(async()=>appChange('background'));stable();
+ await act(async()=>appChange('active'));stable();
+ await act(async()=>tree.update(render('First append more now',false)));stable();
+ await act(async()=>tree.update(render('First append more now')));stable();
+ expect(flatten(tree.toJSON())).toBe('First append more now');
  await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
 });
 test('screen-reader appends render all text immediately without opacity timers',async()=>{
@@ -109,18 +89,16 @@ test('screen-reader appends render all text immediately without opacity timers',
  expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);expect(jest.getTimerCount()).toBe(0);
  await act(async()=>tree.unmount());
 });
-test('unmount and replacement cancel pending suffix updates; a stalled midpoint goes straight to opaque',async()=>{
+test('same-length correction, scope replacement and unmount have no stale suffix work to complete',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- const render=(text:string)=><ChatMotionProvider active><ChatMarkdown streaming text={text}/></ChatMotionProvider>;
+ const render=(text:string,scope='first')=><ChatMotionProvider active><ChatMarkdown key={scope} streaming text={text}/></ChatMotionProvider>;
  await act(async()=>{tree=Renderer.create(render('Start'));});
- await act(async()=>tree.update(render('Start append')));expect(edgeOpacity(tree)).toBe(.78);
- jest.setSystemTime(Date.now()+200);
- await advance(70);expect(edgeOpacity(tree)).toBe(1);
- await advance(70);expect(edgeOpacity(tree)).toBe(1);expect(jest.getTimerCount()).toBe(0);
- await act(async()=>tree.update(render('Start append again')));expect(jest.getTimerCount()).toBe(2);
- await act(async()=>tree.update(render('Entirely replaced')));
- expect(jest.getTimerCount()).toBe(0);expect(flatten(tree.toJSON())).toBe('Entirely replaced');
- await act(async()=>tree.update(render('Entirely replaced suffix')));expect(jest.getTimerCount()).toBe(2);
+ for(const text of ['Start append','Start amend!','Entirely replaced','Entirely replaced 👩🏽‍💻']){
+  await act(async()=>tree.update(render(text)));
+  expect(flatten(tree.toJSON())).toBe(text);expect(jest.getTimerCount()).toBe(0);
+ }
+ await act(async()=>tree.update(render('New scope','second')));
+ await advance(1000);expect(flatten(tree.toJSON())).toBe('New scope');
  await act(async()=>tree.unmount());expect(jest.getTimerCount()).toBe(0);
  await advance(1000);expect(jest.getTimerCount()).toBe(0);
 });

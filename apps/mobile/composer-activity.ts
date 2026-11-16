@@ -1,7 +1,7 @@
 type ActivityInput={connection:string;hasConversation:boolean;storageError?:boolean;sending?:boolean;waitingForAnswer?:boolean;live?:unknown;work?:unknown};
 export type ComposerActivity={phase:'idle'|'connecting'|'connection'|'sending'|'stopping'|'question'|'compaction'|'retry'|'waiting'|'thinking'|'writing'|'working'|'preparing'|'finishing';text:string;animate:boolean};
 const object=(value:unknown):Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
-const activeTool=(value:unknown)=>['pending','running'].includes(String(object(value).status));
+const toolStatus=(value:unknown)=>object(value).status;
 /** A coarse response lifecycle, NOT a second tool feed. Never use tool names,
  * arguments, output, reasoning text or provider errors as a status label. */
 export function composerActivity(input:ActivityInput):ComposerActivity{
@@ -27,9 +27,11 @@ export function composerActivity(input:ActivityInput):ComposerActivity{
   if(generation.deferred)return state('waiting','Waiting for model…');
   // Tool details already live in their exact transcript slots. Include nested
   // activity only to avoid calling an executing script 'Thinking' or 'Writing'.
-  if([live.tools,live.nestedTools].some(tools=>Array.isArray(tools)&&tools.some(activeTool)))return state('working','Working…');
+  const hasToolStatus=(status:string)=>[live.tools,live.nestedTools].some(tools=>Array.isArray(tools)&&tools.some(tool=>toolStatus(tool)===status));
+  if(hasToolStatus('running'))return state('working','Running tools…');
+  if(hasToolStatus('pending'))return state('preparing','Preparing tools…');
   const message=object(generation.message),content=Array.isArray(message.content)?message.content:[],last=object(content.at(-1));
-  if(message.stopReason==='toolUse'||last.type==='toolCall')return state('preparing','Preparing response…');
+  if(message.stopReason==='toolUse'||last.type==='toolCall')return state('preparing','Preparing tool call…');
   if(last.type==='text'&&typeof last.text==='string'&&last.text.trim())return state('writing','Writing response…');
   if(last.type==='thinking'&&last.redacted!==true&&typeof last.thinking==='string'&&last.thinking.trim())return state('thinking','Thinking…');
   if(live.generation)return state('waiting','Waiting for model…');

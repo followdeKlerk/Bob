@@ -48,36 +48,39 @@ test('signal glide keeps full literal text and scalable natural layout from the 
  noTimers();await act(async()=>tree.unmount());expect(loops[0].stop).toHaveBeenCalledTimes(1);expect(subscriptions.every(remove=>remove.mock.calls.length===1)).toBe(true);noTimers();
 });
 
-test('a real label change fades/slides out then in, without restarting the rail',async()=>{
+test('a real label change is immediate, with one bounded readable entrance and no rail restart',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
  const status=tree.root.findByProps({testID:'connection-status'});
  await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));
- expect(visible(tree)).toBe('Connected');expect(status.props.accessibilityLabel).toBe('Reconnecting…');
- expect(phase(90).map(m=>m.config.toValue)).toEqual([0,-3]);expect(phase(170)).toHaveLength(0);
- finish(phase(90));expect(visible(tree)).toBe('Reconnecting…');expect(phase(170).map(m=>m.config.toValue)).toEqual([1,0]);finish(phase(170));
- expect(tree.root.findByProps({testID:'connection-status'})).toBe(status);expect(loops).toHaveLength(1);
+ expect(visible(tree)).toBe('Reconnecting…');expect(status.props.accessibilityLabel).toBe('Reconnecting…');
+ expect(phase(90)).toHaveLength(0);expect(phase(160).map(m=>m.config.toValue)).toEqual([1,0]);
+ const transition=tree.root.findByProps({testID:'status-label-transition'});
+ expect(StyleSheet.flatten(transition.props.style).opacity.__getValue()).toBe(.86);
+ finish(phase(160));
+ expect(tree.root.findByProps({testID:'connection-status'})===status).toBe(true);expect(loops).toHaveLength(1);
  for(const motion of motions)expect(motion.config).toMatchObject({useNativeDriver:true,isInteraction:false});
- await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));expect(phase(90)).toHaveLength(2);expect(visible(tree)).toBe('Reconnecting…');
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));expect(phase(160)).toHaveLength(2);expect(visible(tree)).toBe('Reconnecting…');
  await act(async()=>tree.unmount());noTimers();
 });
 
-test('rapid changes discard cancelled completions and transition only to the latest phase',async()=>{
+test('rapid changes show only the latest phase; cancelled completions cannot restore stale words',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Waiting for model…"/>);});
- await act(async()=>tree.update(<ComposerStatus text="Thinking…"/>));const stale=phase(90).slice();
+ await act(async()=>tree.update(<ComposerStatus text="Thinking…"/>));const stale=phase(160).slice();
+ expect(visible(tree)).toBe('Thinking…');
  await act(async()=>tree.update(<ComposerStatus text="Writing response…"/>));
- act(()=>stale.forEach(m=>m.lateFinish()));expect(visible(tree)).toBe('Waiting for model…');expect(phase(170)).toHaveLength(0);
- finish(phase(90).slice(2));expect(visible(tree)).toBe('Writing response…');const oldIncoming=phase(170).slice();
- await act(async()=>tree.update(<ComposerStatus text="Working…"/>));expect(oldIncoming.every(m=>m.stop.mock.calls.length>0)).toBe(true);
- finish(phase(90).slice(4));finish(phase(170).slice(2));expect(visible(tree)).toBe('Working…');expect(loops).toHaveLength(1);
+ expect(stale.every(m=>m.stop.mock.calls.length>0)).toBe(true);
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(visible(tree)).toBe('Writing response…');
+ await act(async()=>tree.update(<ComposerStatus text="Running tools…"/>));
+ expect(visible(tree)).toBe('Running tools…');finish(phase(160).slice(-2));expect(loops).toHaveLength(1);
  await act(async()=>tree.unmount());act(()=>motions.forEach(m=>m.lateFinish()));noTimers();
 });
 
 test.each(['reduceMotionChanged','screenReaderChanged'])('%s cancels both animations and renders the latest complete literal status',async(event)=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
- await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(90).slice();
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(160).slice();
  act(()=>preferences.get(event)!(true));expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Reconnecting…');expect(loops[0].stop).toHaveBeenCalledTimes(1);expect(tree.root.findAllByProps({testID:'status-animated-text'})).toHaveLength(0);
- act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(170)).toHaveLength(0);noTimers();
- act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('Reconnecting…');expect(loops).toHaveLength(2);expect(phase(90)).toHaveLength(2);
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(160)).toHaveLength(2);noTimers();
+ act(()=>preferences.get(event)!(false));expect(visible(tree)).toBe('Reconnecting…');expect(loops).toHaveLength(2);expect(phase(160)).toHaveLength(2);
  await act(async()=>tree.unmount());noTimers();
 });
 
@@ -85,19 +88,19 @@ test('background and off-chat animate=false stop motion immediately; return does
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
  act(()=>lifecycle('background'));expect(loops[0].stop).toHaveBeenCalledTimes(1);
  await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Reconnecting…');
- act(()=>lifecycle('active'));expect(visible(tree)).toBe('Reconnecting…');expect(phase(90)).toHaveLength(0);
+ act(()=>lifecycle('active'));expect(visible(tree)).toBe('Reconnecting…');expect(phase(160)).toHaveLength(0);
  await act(async()=>tree.update(<ComposerStatus text="Thinking…"/>));
  await act(async()=>tree.update(<ComposerStatus text="Writing response…" animate={false}/>));expect(loops[1].stop).toHaveBeenCalledTimes(1);expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe('Writing response…');
- await act(async()=>tree.update(<ComposerStatus text="Writing response…"/>));expect(visible(tree)).toBe('Writing response…');expect(phase(90)).toHaveLength(2);
+ await act(async()=>tree.update(<ComposerStatus text="Writing response…"/>));expect(visible(tree)).toBe('Writing response…');expect(phase(160)).toHaveLength(2);
  await act(async()=>tree.unmount());noTimers();
 });
 
 test('actionable static labels bypass any pending transition and never acquire decorative punctuation',async()=>{
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ComposerStatus text="Connected"/>);});
- await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(90).slice();
+ await act(async()=>tree.update(<ComposerStatus text="Reconnecting…"/>));const stale=phase(160).slice();
  const error='Device storage issue • keep Bob open';await act(async()=>tree.update(<ComposerStatus text={error} animate={false}/>));
  expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(error);expect(tree.root.findByProps({testID:'connection-status'}).props.accessibilityLabel).toBe(error);
- act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(170)).toHaveLength(0);expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(error);
+ act(()=>stale.forEach(m=>m.lateFinish()));expect(phase(160)).toHaveLength(2);expect(tree.root.findByProps({testID:'status-static-text'}).props.children).toBe(error);
  await act(async()=>tree.unmount());noTimers();
 });
 
