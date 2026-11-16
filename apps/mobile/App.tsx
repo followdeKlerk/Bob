@@ -290,12 +290,20 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const latestDraft=useRef(draft);latestDraft.current=draft;
   const [modelPickerTarget,setModelPickerTarget]=useState<{backend:Backend;chat:number;scope:string}>();
   const [modelChoice,setModelChoice]=useState<ModelChoice>({});
-  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen;
+  const skillPickerVisible=!!(active&&backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen);
+  const [voiceAdmissionEpoch,setVoiceAdmissionEpoch]=useState(0);
+  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen&&!skillPickerVisible;
   const voiceTransport=JSON.stringify([backend?.backendId,backend?.endpoint,chat??null,shell.connectionRevisions[backend?.backendId??'']??0]);
   const voiceVisit=useRef({transport:voiceTransport,active:voiceActive,generation:0});
   if(voiceVisit.current.transport!==voiceTransport||voiceVisit.current.active!==voiceActive)voiceVisit.current={transport:voiceTransport,active:voiceActive,generation:voiceVisit.current.generation+1};
-  const voiceScope=JSON.stringify([voiceTransport,voiceVisit.current.generation]);
+  const voiceScope=JSON.stringify([voiceTransport,voiceVisit.current.generation,voiceAdmissionEpoch]);
   const voiceOwner=useRef({scope:voiceScope,active:voiceActive,visit:currentDraftVisit});voiceOwner.current={scope:voiceScope,active:voiceActive,visit:currentDraftVisit};
+  const revokeVoiceVisit=()=>{
+    // Fence same-turn callbacks before React can configure/cancel the native child.
+    voiceOwner.current.active=false;
+    // Persist retirement across fast outbox admission/settlement, not a sending flag.
+    setVoiceAdmissionEpoch(previous=>previous+1);
+  };
   const acceptTranscript=(text:string)=>{
     const value=text.trim();
     if(!value||!voiceOwner.current.active||voiceOwner.current.scope!==voiceScope||voiceOwner.current.visit!==currentDraftVisit||!snapshotLifecycle.active()||!canWriteConversation())return;
@@ -579,11 +587,13 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
       if(!composerReady||!canWriteConversation()||!backend||!chat)return;
       if(attachments.length)throw Error('/btw is text-only. Remove attachments before opening a side question.');
       if(side.length>4000)throw Error('Keep side questions under 4,000 characters.');
+      revokeVoiceVisit();
       Keyboard.dismiss();setActions(false);setNavigationOpen(false);setSlashDismissed(true);
       setBtwIntent({scope,id:uuid(),text:side});setBtwOpen(true);setDraft('');return;
     }
     if (!composerReady || !sendReady || !canWriteConversation() || !backend || !chat || (!answer&&!hasDraft) || pending || pendingOperations.current.has(scope)) return;
     if(answer&&(view?.docs['bob.questions']?.pending?.id!==answer.questionId||outbox.items.some(item=>item.scope===scope&&item.message.questionId===answer.questionId&&(!item.rejected||item.admitted))))return;
+    revokeVoiceVisit();
     parentFollow.resume();
     const current=scope,files=answer?[]:attachments,op=uuid();
     const foregroundOnly=files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
@@ -985,7 +995,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
       </>
       {backend&&chat&&ordinaryChat&&<BtwSheet key={'btw:'+scope} visible={btwOpen&&btwIntent?.scope===scope&&screen==='Chat'} active={active} conversationId={chat} initial={btwIntent?.scope===scope?btwIntent:undefined} request={(path,method,body)=>request(path,method,body,backend)} onClose={()=>setBtwOpen(false)}/>}
       <DrawingEditor visible={active&&drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={addDrawing}/>
-      {active&&backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen&&<SkillPicker key={scope} scope={scope} query={slashQuery}
+      {skillPickerVisible&&<SkillPicker key={scope} scope={scope} query={slashQuery!}
         loadLibrary={()=>request('library','GET',undefined,backend)}
         bottom={Math.max(0,keyboardInset-insets.bottom)+composerHeight+6}
         maxHeight={skillPopupHeight}

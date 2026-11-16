@@ -11,11 +11,11 @@ beforeEach(()=>{jest.useFakeTimers();jest.mocked(Text).mockClear();});
 afterEach(()=>jest.useRealTimers());
 
 test('bounded render-work sample: one changed span among 64 unchanged styled spans',async()=>{
- const sample=(tail:string,start:number|null)=> <>{Array.from({length:64},(_,index)=><StreamingText key={index} text={index===63?tail:`Stable ${index}`} start={index===63?start:null} style={[{color:'#222'},{fontSize:15,lineHeight:25}]}/>)}</>;
+ const sample=(tail:string)=> <>{Array.from({length:64},(_,index)=><StreamingText key={index} text={index===63?tail:`Stable ${index}`} style={[{color:'#222'},{fontSize:15,lineHeight:25}]}/>)}</>;
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(sample('Growing',null));});
+ await act(async()=>{tree=Renderer.create(sample('Growing'));});
  jest.mocked(Text).mockClear();
- await act(async()=>tree.update(sample('Growing tail',7)));
+ await act(async()=>tree.update(sample('Growing tail')));
  const immediate=jest.mocked(Text).mock.calls.length;
  await act(async()=>{jest.advanceTimersByTime(70);});
  await act(async()=>{jest.advanceTimersByTime(70);});
@@ -28,14 +28,14 @@ test('bounded render-work sample: one changed span among 64 unchanged styled spa
 
 test('every burst, same-length correction, Unicode and finalization is present immediately with stable native identity',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<StreamingText text="Start" start={null}/>);});
+ await act(async()=>{tree=Renderer.create(<StreamingText text="Start"/>);});
  const native=tree.root.findByType(NativeText);
  for(const text of ['Start 👩🏽‍💻','Start 👩🏽‍💻 e\u0301','Same length A','Same length B','短い','']){
-  await act(async()=>tree.update(<StreamingText text={text} start={1}/>));
+  await act(async()=>tree.update(<StreamingText text={text}/>));
   expect(flatten(tree.toJSON())).toBe(text);
   expect(tree.root.findByType(NativeText)===native).toBe(true);
  }
- await act(async()=>tree.update(<StreamingText text="Final 🇳🇿 answer" start={null}/>));
+ await act(async()=>tree.update(<StreamingText text="Final 🇳🇿 answer"/>));
  expect(flatten(tree.toJSON())).toBe('Final 🇳🇿 answer');
  jest.runAllTicks();expect(jest.getTimerCount()).toBe(0);
  await act(async()=>tree.unmount());
@@ -43,8 +43,8 @@ test('every burst, same-length correction, Unicode and finalization is present i
 
 test('equivalent recreated styles do not suppress a genuine font/color change',async()=>{
  let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<StreamingText text="Stable" start={null} style={{color:'#222',fontSize:15}}/>);});
- await act(async()=>tree.update(<StreamingText text="Stable" start={null} style={[{color:'#eee'},{fontSize:23}]}/>));
+ await act(async()=>{tree=Renderer.create(<StreamingText text="Stable" style={{color:'#222',fontSize:15}}/>);});
+ await act(async()=>tree.update(<StreamingText text="Stable" style={[{color:'#eee'},{fontSize:23}]}/>));
  expect(StyleSheet.flatten(tree.root.findByType(NativeText).props.style)).toMatchObject({color:'#eee',fontSize:23});
  await act(async()=>tree.unmount());
 });

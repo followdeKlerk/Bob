@@ -755,7 +755,7 @@ test('expanded editor and library/Settings Back preserve draft and deactivate di
 
 
 test('update indicator and management revoke native capture; late finals cannot enter this or a retained replacement chat',async()=>{
- const native={availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),finish:jest.fn(async(_id:string)=>{}),cancel:jest.fn(async(id:string)=>{
+ const native={windowFocused:jest.fn(async()=>true),availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),finish:jest.fn(async(_id:string)=>{}),cancel:jest.fn(async(id:string)=>{
   // Native may synchronously flush a final while cancellation is being delivered.
   DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Final during cancel must be ignored'});
  }),addListener:jest.fn(),removeListeners:jest.fn()};
@@ -805,5 +805,74 @@ test('update indicator and management revoke native capture; late finals cannot 
   await final(resumedId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(voice.props.active).toBe(true);expect(editor.props.value).toBe('Keep typed edits fresh final');
   expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
   expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();expect(app.fetchMock.mock.calls.some(([,init])=>init?.method==='POST'&&String(init?.body).includes('app-'))).toBe(false);
+ }finally{await app.close();}
+});
+
+
+test.each(['listening','availability','permission','focus','speech'] as const)('Send retires %s dictation before any await and across fast settlement',async phase=>{
+ let release!:()=>void;
+ const blocked=new Promise<void>(resolve=>{release=resolve;});
+ const native={windowFocused:jest.fn(async()=>{if(phase==='focus')await blocked;return true;}),availability:jest.fn(async()=>{if(phase==='availability')await blocked;return 'onDevice';}),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),finish:jest.fn(async()=>{}),cancel:jest.fn(async(id:string)=>{
+  DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Final flushed by cancel'});
+ }),addListener:jest.fn(),removeListeners:jest.fn()};
+ NativeModules.BobVoiceInput=native;
+ NativeModules.BobSpeech={stop:jest.fn(async()=>{if(phase==='speech')await blocked;}),addListener:jest.fn(),removeListeners:jest.fn()};
+ jest.spyOn(PermissionsAndroid,'request').mockImplementation(async()=>{if(phase==='permission')await blocked;return PermissionsAndroid.RESULTS.GRANTED;});
+ const app=await mount();
+ try{
+  const root=activeHost(app.tree),editor=draft(root),history=list(root),stream=app.latest(a),voice=root.findByType(VoiceInputButton);
+  await act(async()=>editor.props.onChangeText('Typed to send'));
+  const oldScope=voice.props.scope,oldTranscript=voice.props.onTranscript;
+  await act(async()=>button(root,'Dictate message').props.onPress());
+  if(phase==='listening')act(()=>DeviceEventEmitter.emit('BobVoiceInputState',{id:native.start.mock.calls[0][0],state:'listening'}));
+  else{expect(native.start).not.toHaveBeenCalled();expect(button(root,'Cancel dictation setup')).toBeDefined();}
+  await act(async()=>{
+   button(root,'Send message').props.onPress();
+   // Same JS turn, before React can propagate a new scope to the voice child.
+   oldTranscript('Synchronous final after Send admission');
+  });
+  expect(editor.props.value).toBe('');expect(native.cancel).toHaveBeenCalledTimes(1);
+  const id=native.cancel.mock.calls[0][0];
+  expect(voice.props.scope).not.toBe(oldScope);expect(voice.props.active).toBe(true);
+  await act(async()=>{release();});
+  await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Words after Send'});oldTranscript('Late parent final after settlement');});
+  expect(editor.props.value).toBe('');expect(native.start).toHaveBeenCalledTimes(phase==='listening'?1:0);
+  expect(button(root,'Dictate message')).toBeDefined();
+  const messages=app.fetchMock.mock.calls.filter(([url,init])=>String(url).endsWith('/messages')&&init?.method==='POST');
+  expect(messages).toHaveLength(1);expect(JSON.parse(messages[0][1]!.body as string)).toMatchObject({text:'Typed to send',requestId:expect.any(String)});
+  const sentScope=voice.props.scope;
+  // Returning to this retained chat must not resurrect pre-send parent ownership.
+  await openNotification(a,8);await openNotification(a,chat);
+  await act(async()=>oldTranscript('Stale final after retained return'));
+  expect(draft(root)).toBe(editor);expect(editor.props.value).toBe('');expect(list(root)).toBe(history);expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
+  expect(voice.props.scope).not.toBe(sentScope);expect(native.start).toHaveBeenCalledTimes(phase==='listening'?1:0);
+ }finally{release();await app.close();}
+});
+
+test('actual command suggestions cancel capture, fence old generations and never restart on dismissal or retained return',async()=>{
+ const native={windowFocused:jest.fn(async()=>true),availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),finish:jest.fn(async()=>{}),cancel:jest.fn(async(id:string)=>{
+  DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Final flushed by suggestions cancel'});
+ }),addListener:jest.fn(),removeListeners:jest.fn()};
+ NativeModules.BobVoiceInput=native;delete NativeModules.BobSpeech;
+ jest.spyOn(PermissionsAndroid,'request').mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
+ const app=await mount();
+ try{
+  const root=activeHost(app.tree),editor=draft(root),history=list(root),stream=app.latest(a),voice=root.findByType(VoiceInputButton);
+  const listen=async()=>{await act(async()=>button(root,'Dictate message').props.onPress());const id=native.start.mock.calls.at(-1)![0];act(()=>DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'listening'}));return id;};
+  await act(async()=>editor.props.onFocus());const old=voice.props.onTranscript,oldScope=voice.props.scope,id=await listen();
+  await act(async()=>editor.props.onChangeText('/'));
+  expect(root.findAllByProps({testID:'skill-picker'}).length).toBeGreaterThan(0);expect(voice.props.active).toBe(false);expect(native.cancel).toHaveBeenCalledWith(id);expect(voice.props.scope).not.toBe(oldScope);
+  await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Late slash final'});old('Old parent final');});expect(editor.props.value).toBe('/');
+  await act(async()=>button(root,'Dismiss command suggestions').props.onPress());expect(root.findAllByProps({testID:'skill-picker'})).toHaveLength(0);expect(voice.props.active).toBe(true);expect(native.start).toHaveBeenCalledTimes(1);
+  await act(async()=>old('Late after dismiss'));expect(editor.props.value).toBe('/');
+  const fresh=await listen();await act(async()=>DeviceEventEmitter.emit('BobVoiceInputState',{id:fresh,state:'final',text:'fresh utterance'}));expect(editor.props.value).toBe('/ fresh utterance');
+  await act(async()=>editor.props.onChangeText('ordinary draft'));const beforeReturn=voice.props.onTranscript,returnId=await listen();
+  await act(async()=>editor.props.onChangeText('/next'));expect(voice.props.active).toBe(false);expect(native.cancel).toHaveBeenCalledWith(returnId);
+  await openNotification(a,8);const other=activeHost(app.tree);expect(other.findByType(VoiceInputButton).props.active).toBe(true);
+  await act(async()=>{beforeReturn('Wrong retained chat');DeviceEventEmitter.emit('BobVoiceInputState',{id:returnId,state:'final',text:'Wrong retained native final'});});expect(draft(other).props.value).toBe('');
+  await openNotification(a,chat);expect(activeHost(app.tree)).toBe(root);expect(voice.props.active).toBe(false);
+  await act(async()=>button(root,'Dismiss command suggestions').props.onPress());expect(voice.props.active).toBe(true);
+  await act(async()=>{old('Retired original visit');beforeReturn('Retired return visit');});expect(editor.props.value).toBe('/next');expect(native.start).toHaveBeenCalledTimes(3);
+  expect(draft(root)).toBe(editor);expect(list(root)).toBe(history);expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();expect(app.fetchMock.mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
  }finally{await app.close();}
 });

@@ -1,13 +1,13 @@
 import {APP_FONT_FAMILY,APP_MONO_FONT_FAMILY} from '../typography';
 import {Text} from './app-text';
-import React,{memo,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import React,{memo,useMemo,useState} from 'react';
 import {Linking,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import Markdown,{type ASTNode,type RenderRules} from 'react-native-markdown-display';
 import {themed,useThemedValue} from '../theme';
 import {markdownTableWidths,markdownCodeLanguage} from '../markdown-layout';
 import {CopyAction} from './message-actions';
 
-import {createStreamingMarkdownParser,proseText,arrivingTextStart} from '../streaming-markdown';
+import {createStreamingMarkdownParser} from '../streaming-markdown';
 import {markdownLinks,safeHttpDestination} from '../markdown-links';
 import {StreamingText} from './streaming-text';
 import {LinkPreviewFooter} from './link-preview-footer';
@@ -28,25 +28,11 @@ function CodeBlock({content,info}:{content:string;info?:unknown}) {
  </View>;
 }
 // Native rendering only: never execute code/HTML or load remote images.
-export const ChatMarkdown=memo(function ChatMarkdown({text,streaming=false,linkPreviews=false}:{text:string;streaming?:boolean;linkPreviews?:boolean}) {
+export const ChatMarkdown=memo(function ChatMarkdown({text,linkPreviews=false}:{text:string;streaming?:boolean;linkPreviews?:boolean}) {
  const layout=useThemedValue(layoutTheme);
  const styles=useThemedValue(stylesTheme);
  const [parser]=useState(createStreamingMarkdownParser);
  const ast=useMemo(()=>parser.parse(text),[parser,text]);
- const prose=useMemo(()=>proseText(ast),[ast]);
- const previous=useRef<{source:string;prose:string;streaming:boolean}|null>(null);
- const start=arrivingTextStart(previous.current,text,prose,streaming);
- const edges=useMemo(()=>{
-  const result=new Map<string,number>();let offset=0;
-  const visit=(nodes:ASTNode[])=>nodes.forEach(node=>{
-   if(node.type==='text'){
-    if(start!==null&&offset+node.content.length>start)result.set(node.key,Math.max(0,start-offset));
-    offset+=node.content.length;
-   }else visit(node.children);
-  });
-  visit(ast);return result;
- },[ast,start]);
- useLayoutEffect(()=>{previous.current={source:text,prose,streaming};},[text,prose,streaming]);
  const links=useMemo(()=>linkPreviews?markdownLinks(ast):[],[ast,linkPreviews]);
  const window=useWindowDimensions(),[measured,setMeasured]=useState(0);
  const width=measured||Math.max(1,window.width-48);
@@ -66,7 +52,7 @@ export const ChatMarkdown=memo(function ChatMarkdown({text,streaming=false,linkP
    // stable root/AST path keeps existing native text mounted during appends.
    body:(_node,children,_parents,style)=><View key="markdown-body" style={style._VIEW_SAFE_body}>{children}</View>,
    text:(node,_children,_parents,style,inherited)=>
-    <StreamingText key={node.key} text={node.content} start={edges.get(node.key)??null} style={[inherited,style.text]}/>,
+    <StreamingText key={node.key} text={node.content} style={[inherited,style.text]}/>,
    textgroup:(node,children,parents,style)=>{
     const alignment=parents.find(parent=>parent.type==='th'||parent.type==='td')?.attributes.style;
     const textAlign=typeof alignment==='string'&&alignment.includes('center')?'center':typeof alignment==='string'&&alignment.includes('right')?'right':'left';
@@ -93,7 +79,7 @@ export const ChatMarkdown=memo(function ChatMarkdown({text,streaming=false,linkP
    th:(node,children,parents)=>cell(node,children,parents,true),
    td:(node,children,parents)=>cell(node,children,parents,false),
   };
- },[width,window.fontScale,layout,styles,edges]);
+ },[width,window.fontScale,layout,styles]);
  return <View testID="markdown-content" style={layout.root} onLayout={event=>{const next=event.nativeEvent.layout.width;if(Number.isFinite(next)&&next>0)setMeasured(previous=>Math.abs(previous-next)>.5?next:previous);}}>
   <Markdown markdownit={parser.markdownit} style={styles} mergeStyle rules={rules} onLinkPress={openLink}>{ast as any}</Markdown>
   {linkPreviews&&<LinkPreviewFooter links={links}/>}

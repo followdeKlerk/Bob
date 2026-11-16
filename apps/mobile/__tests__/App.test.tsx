@@ -243,6 +243,9 @@ test.each(['no conversation','opening','offline'])('Chat menu stays available wi
 });
 
 test.each([true,false])('menus and background/foreground preserve the native list and viewport (reading earlier: %s)',async(readingEarlier)=>{
+ // This original 48dp compact fixture is 1×; large-font layout has separate coverage.
+ const dimensions=require('react-native').useWindowDimensions;
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockImplementation(()=>({...dimensions(),fontScale:1}));
  const ime=new Set<(event:any)=>void>();jest.replaceProperty(Platform,'OS','android');
  const add=DeviceEventEmitter.addListener.bind(DeviceEventEmitter);jest.spyOn(DeviceEventEmitter,'addListener').mockImplementation((event,callback)=>{if(event!=='BobKeyboardInset')return add(event,callback);ime.add(callback);return{remove:()=>{ime.delete(callback);}};});
  const lifecycle=new Set<(state:any)=>void>(),current=jest.replaceProperty(AppState,'currentState','active');

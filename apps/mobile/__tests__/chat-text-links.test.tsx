@@ -33,12 +33,15 @@ test('progressive text and finalization stay immediate, selectable and keyed wit
  let tree!:Renderer.ReactTestRenderer;
  const render=(text:string,streaming=true)=><ChatMotionProvider active><ChatMarkdown text={text} streaming={streaming}/></ChatMotionProvider>;
  await act(async()=>{tree=Renderer.create(render('Hello'));});
+ const markdown=()=>tree.root.find(node=>!!node.props.markdownit&&!!node.props.rules);
+ const rules=markdown().props.rules;
  const originalLeaf=tree.root.findByType(StreamingText),textGroup=tree.root.findAllByType(Text).find(node=>node.props.selectable);
  for(const text of ['Hello world','Hello world, all here','Hello world, all here immediately']){
   await act(async()=>tree.update(render(text)));
   expect(tree.root.findByType(StreamingText)===originalLeaf).toBe(true);
   expect(tree.root.findAllByType(Text).find(node=>node.props.selectable)===textGroup).toBe(true);
   expect(flatten(tree.toJSON())).toBe(text);
+  expect(markdown().props.rules).toBe(rules);
   expect(StyleSheet.flatten(textGroup!.props.style).opacity).toBeUndefined();
   expect(tree.root.findAllByProps({testID:'streaming-text-edge'})).toHaveLength(0);
   expect(jest.getTimerCount()).toBe(0);

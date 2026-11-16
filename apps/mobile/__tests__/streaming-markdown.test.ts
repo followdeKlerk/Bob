@@ -1,4 +1,4 @@
-import {createStreamingMarkdownParser,arrivingTextStart,proseText} from '../streaming-markdown';
+import {createStreamingMarkdownParser} from '../streaming-markdown';
 
 const fixtures=[
  'Intro with **bold**, *italic*, `inline`, ~~removed~~ and a [link](https://example.com).\n\nNext paragraph.',
@@ -31,17 +31,6 @@ test('unchanged inline blocks are cached; changed references invalidate them',()
  const changed=cached.parse('[Docs][ref]\n\n[ref]: https://two.example');
  expect(parse).toHaveBeenCalledTimes(1);expect(JSON.stringify(changed)).toContain('https://two.example');
 });
-test('only an append of rendered prose is an arrival; syntax rewrites and replacements never replay old text',()=>{
- const parser=createStreamingMarkdownParser();
- const previous={source:'Hello',prose:'Hello',streaming:true};
- expect(arrivingTextStart(previous,'Hello world','Hello world',true)).toBe(5);
- for(const [source,prose,streaming] of [['Hello','Hello',true],['Replacement','Replacement',true],['Hello world','Hello world',false]] as const)
-  expect(arrivingTextStart(previous,source,prose,streaming)).toBeNull();
- expect(arrivingTextStart({source:'**Hello',prose:proseText(parser.parse('**Hello')),streaming:true},'**Hello**',proseText(parser.parse('**Hello**')),true)).toBeNull();
- expect(arrivingTextStart(null,'Fresh answer','Fresh answer',true)).toBeNull();
- expect(arrivingTextStart({...previous,streaming:false},'Hello world','Hello world',true)).toBeNull();
-});
-
 test('same-length corrections and shrinking bursts match fresh Markdown without stale final content',()=>{
  const cached=createStreamingMarkdownParser();
  for(const text of ['Start **one**','Start **two**','Start `two`','Start 👩🏽‍💻','Start 👩🏽‍🔬','Short','| A | B |\n| - | - |\n| 1 | 2 |','```js\nconst n=1','```js\nconst n=2\n```','Final answer',''])

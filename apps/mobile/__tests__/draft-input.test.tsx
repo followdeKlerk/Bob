@@ -3,11 +3,16 @@ import React,{useState} from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {Keyboard,Modal,StyleSheet,TextInput,View} from 'react-native';
 import {DraftInput} from '../components/draft-input';
+import {ThemeContext,tokens} from '../theme-context';
 import {useKeyboardInset} from '../keyboard-inset';
 jest.mock('../keyboard-inset',()=>({useKeyboardInset:jest.fn(()=>0)}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({bottom:0})}));
 jest.mock('lucide-react-native',()=>({Maximize2:require('react-native').View,Minimize2:require('react-native').View}));
-beforeEach(()=>jest.mocked(useKeyboardInset).mockReturnValue(0));
+beforeEach(()=>{
+ jest.mocked(useKeyboardInset).mockReturnValue(0);
+ // Compact-layout fixtures are explicitly normal-size; scale coverage is below.
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:361,height:754,scale:1,fontScale:1});
+});
 afterEach(()=>jest.restoreAllMocks());
 test('overflow opens a full editor sharing the same draft; collapsing never clears it',async()=>{
  function Harness({scope}:{scope:string}){const [value,setValue]=useState('hello');return <DraftInput scope={scope} value={value} onChangeText={setValue}/>;}
@@ -82,4 +87,34 @@ test.each([337,361])('two 48dp trailing actions reserve their full width at %sdp
  await act(async()=>tree.update(editor(false)));expect(tree.root.findByType(TextInput)).toBe(input);expect(input.props.value).toBe('Unsent edited draft');
  expect(StyleSheet.flatten(input.props.style).marginRight).toBeUndefined();expect(change).not.toHaveBeenCalled();
  await act(async()=>tree.unmount());
+});
+
+
+test.each([337,361].flatMap(width=>[1,2].flatMap(fontScale=>[false,true].flatMap(keyboardOpen=>(['dark','light'] as const).map(theme=>({width,fontScale,keyboardOpen,theme}))))))(
+ 'composer preserves its input and one-line font fit at $width dp / $fontScale× / $theme / keyboard=$keyboardOpen',async({width,fontScale,keyboardOpen,theme})=>{
+ const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale});
+ jest.mocked(useKeyboardInset).mockReturnValue(keyboardOpen?280:0);
+ const change=jest.fn(),value='Retained draft';
+ const control=(id:string)=><View testID={id} style={{width:48,height:48}}/>;
+ const editor=(compact:boolean)=><ThemeContext.Provider value={tokens[theme]}><View style={{width:width-26}}><DraftInput scope="same" value={value} onChangeText={change} compact={compact} maxHeight={48} trailingWidth={104} leading={control('plus')} trailing={<>{control('voice')}{control('send')}</>}/></View></ThemeContext.Provider>;
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(editor(!keyboardOpen));});
+ try{
+  const input=tree.root.findByType(TextInput),controls=tree.root.findByProps({testID:'composer-controls'});
+  const style=StyleSheet.flatten(input.props.style),row=StyleSheet.flatten(controls.props.style);
+  expect(style.height).toBeGreaterThanOrEqual(style.lineHeight*fontScale+2*style.paddingVertical);
+  for(const id of ['plus','voice','send'])expect(StyleSheet.flatten(controls.findByProps({testID:id}).props.style)).toMatchObject({width:48,height:48});
+  if(fontScale===2||keyboardOpen){expect(row.position).toBeUndefined();expect(style.marginLeft).toBeUndefined();expect(style.marginRight).toBeUndefined();}
+  else{expect(row.position).toBe('absolute');expect(style.marginLeft).toBe(56);expect(style.marginRight).toBe(112);}
+  // Three actions plus expansion and the flexible spacer fit in the stacked row.
+  expect(4*48+4*row.gap).toBeLessThanOrEqual(width-26);
+  act(()=>input.props.onContentSizeChange({nativeEvent:{contentSize:{height:160}}}));
+  if(fontScale===2||keyboardOpen){
+   act(()=>controls.findByProps({accessibilityLabel:'Expand message editor'}).props.onPress());
+   expect(tree.root.findByProps({accessibilityLabel:'Expanded message draft'}).props.value).toBe(value);
+   act(()=>tree.root.findByProps({accessibilityLabel:'Collapse message editor'}).props.onPress());
+  }
+  await act(async()=>tree.update(editor(keyboardOpen)));expect(tree.root.findByType(TextInput)).toBe(input);expect(input.props.value).toBe(value);expect(change).not.toHaveBeenCalled();
+  dimensions.mockReturnValue({width,height:754,scale:1,fontScale:fontScale===2?1:2});
+  await act(async()=>tree.update(editor(!keyboardOpen)));expect(tree.root.findByType(TextInput)).toBe(input);expect(input.props.value).toBe(value);
+ }finally{await act(async()=>tree.unmount());}
 });
