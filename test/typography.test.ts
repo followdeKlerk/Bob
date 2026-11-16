@@ -52,7 +52,8 @@ test('compact utility type scale is one point smaller without shrinking line hei
  assert.match(markdown,/heading1:\{[^}]*fontSize:24,lineHeight:33/);
  const composer=readFileSync(join(mobile,'components/draft-input.tsx'),'utf8');
  assert.match(composer,/fontSize:17,lineHeight:26,minHeight:48/);
- assert.match(composer,/compactInput:\{marginHorizontal:44,fontSize:15,lineHeight:24/);
+ // Input/action reservations are checked by the component geometry regressions.
+ assert.match(composer,/compactInput:\{fontSize:15,lineHeight:24/);
 });
 
 

@@ -86,7 +86,10 @@ test.each(['dark','light'] as const)('app-owned popups use the resolved %s palet
   const nav=tree.root.findByType(ChatNavigation),trigger=nav.findByProps({accessibilityLabel:'Menu'});
   expect(trigger.findAll(node=>node.props.color===tokens[scheme].colors.foreground).length).toBeGreaterThan(0);
   const sheet=nav.findByProps({testID:'chat-navigation-sheet'}),scroll=sheet.findByType(ScrollView);
-  expect(StyleSheet.flatten(scroll.findAllByType(Text)[0].props.style).color).toBe(menuTheme.colors.foreground);
+  const destination=scroll.findAllByType(Text).find(node=>node.props.children==='Notes')!;
+  const heading=scroll.findAllByType(Text).find(node=>node.props.children==='Workspace')!;
+  expect(StyleSheet.flatten(destination.props.style).color).toBe(menuTheme.colors.foreground);
+  expect(StyleSheet.flatten(heading.props.style).color).toBe(menuTheme.colors.muted);
   for(const stop of sheet.findAllByType('Stop' as any))expect(stop.props.stopColor).toBe(tokens[scheme].colors.background);
  }finally{await act(async()=>tree.unmount());}
 });
