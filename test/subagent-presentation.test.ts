@@ -14,7 +14,7 @@ import {defineTask,LiveDoc,type Harness,type TaskId,type EntryRecord} from '@ear
 import {presentSubagentReports} from '../src/subagent-presentation.js';
 import {SubagentTools as NativeSubagentTools} from '@bob-local/subagents';
 
-test('host display adapter retains native task schemas, delivery phase, tools and abort semantics',()=>{
+test('host report adapter retains native task schemas, tools and abort semantics',()=>{
  const original=NativeSubagentTools.tasks!,adapted=SubagentTools.tasks!;
  assert.equal(adapted.length,original.length);assert.equal(SubagentTools.tools,NativeSubagentTools.tools);
  for(let index=0;index<original.length;index++){
@@ -22,7 +22,7 @@ test('host display adapter retains native task schemas, delivery phase, tools an
   assert.equal(host.name,native.name);assert.equal(host.version,native.version);
   assert.equal(host.initial,native.initial);assert.equal(host.abort,native.abort);assert.equal(host.migrate,native.migrate);
   assert.deepEqual(Object.keys(host.phases),Object.keys(native.phases));
-  if(native.name==='app.subagent-reporter')assert.equal(host.phases.deliver,native.phases.deliver);
+  if(native.name==='app.subagent-reporter')assert.notEqual(host.phases.deliver,native.phases.deliver,'host augments only failure checkpoint decisions');
   else assert.equal(adapted[index],original[index]);
  }
 });
@@ -174,12 +174,13 @@ test('a forged or mismatched passive receipt cannot suppress the real model repo
  }
 });
 
-test('an interrupted native reporter replays after display admission without a second card or model input',{timeout:15000},async()=>{
+test('interrupted native success/failure reporters replay after display admission without a second card or model input',{timeout:15000},async()=>{
+ for(const outcome of ['success','failure'] as const){
  const state=new State(mkdtempSync(join(process.env.TMPDIR!,'bob-report-interrupted-'))),models=createModels(),faux=fauxProvider({tokensPerSecond:100000});models.setProvider(faux.provider);
  faux.setResponses(Array.from({length:30},()=>context=>{
   const last=context.messages.at(-1);
   if(last?.role==='user'&&last.content==='interrupt fixture')return fauxAssistantMessage(fauxToolCall('subagent',{action:'spawn',name:'Recovery helper',message:'child recovery fixture'}),{stopReason:'toolUse'});
-  return fauxAssistantMessage(last?.role==='user'&&last.content==='child recovery fixture'?'Recovered evidence.':'Parent response.');
+  return last?.role==='user'&&last.content==='child recovery fixture'&&outcome==='failure'?fauxAssistantMessage('',{stopReason:'error',errorMessage:'private fixture error'}):fauxAssistantMessage(last?.role==='user'&&last.content==='child recovery fixture'?'Recovered evidence.':'Parent response.');
  }));
  let runtime=await openRuntime(state,models),paused=false;
  try{
@@ -215,11 +216,12 @@ test('an interrupted native reporter replays after display admission without a s
   assert.deepEqual(after.display,before.display);assert.equal(after.input?.status,'done');
   const restored=(await runtime.harness.conversation(chat.id,ctx))!,entries=(await restored.entries({},100,undefined,ctx)).items;
   assert.equal(entries.filter(entry=>entry.kind===SUBAGENT_REPORT_KIND).length,1);
-  const delivered=entries.filter(entry=>entry.kind==='pi.user'&&typeof entry.model?.[0]?.content==='string'&&entry.model[0].content.startsWith('[subagent Recovery helper answered, no reply needed]'));
-  assert.equal(delivered.length,1);assert.match(String(delivered[0].model?.[0]?.content),/Recovered evidence/);
+  const delivered=entries.filter(entry=>entry.kind==='pi.user'&&typeof entry.model?.[0]?.content==='string'&&entry.model[0].content.startsWith(outcome==='success'?'[subagent Recovery helper answered, no reply needed]':'[subagent Recovery helper failed: model_error]'));
+  assert.equal(delivered.length,1);assert.match(String(delivered[0].model?.[0]?.content),outcome==='success'?/Recovered evidence/:/Partial work may remain/);assert.doesNotMatch(String(delivered[0].model?.[0]?.content),/private fixture/);
   const projected=await presentSubagentReports(runtime.harness,chat.id,entries);assert.equal(projected.filter(entry=>entry.kind==='bob.subagent-report').length,1);
   assert.equal(projected.find(entry=>entry.kind==='bob.subagent-report')?.id,before.display.entry);
  }finally{await runtime.close();state.close();}
+ }
 });
 
 test('queued reset ordering and parent abort retain the display write but withdraw the report input',{timeout:15000},async()=>{
