@@ -162,7 +162,7 @@ function textOf(value: unknown): string {
       .join('\n');
   return JSON.stringify(value);
 }
-function SessionMain({target,active,command,destination,shell}:{target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell}) {
+function SessionMain({target,active,command,destination,shell,onUpdates,onUpdatesVisible}:{target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
   const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
   const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
   const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
@@ -182,7 +182,6 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   const insets = useSafeAreaInsets();
   const windowSize = useWindowDimensions();
   const [visualWidth,setVisualWidth] = useState(0);
-  const [updatesTarget,setUpdatesTarget]=useState<Backend>();
   const [sectionLoading,setSectionLoading]=useState(false),[sectionError,setSectionError]=useState(''),[modelLoading,setModelLoading]=useState(false);
   const sectionRequest=useRef(0);
   const [chatListBackend,setChatListBackend]=useState('');
@@ -244,7 +243,6 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   useEffect(()=>setSlashDismissed(false),[draft,backend?.backendId,chat]);
   const slashQuery=skillQuery(draft);
   const skillPopupHeight=Math.max(0,Math.min(320,windowSize.height-keyboardInset-insets.top-insets.bottom-composerHeight-16));
-  const build=useBuildStatus(active?backend:undefined);
   const selectedBackend = useRef('');
   selectedBackend.current = active?backend?.backendId??'':'';
   const identity = useRef(''),
@@ -276,7 +274,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   useEffect(()=>{
     if(!active)return;
     setNavigationOpen(false);setActions(false);setDrawer(false);
-    if(destination==='Chat'||destination==='Updates'){showChat();if(destination==='Updates')setUpdatesTarget(backend);return;}
+    if(destination==='Chat'||destination==='Updates'){showChat();if(destination==='Updates')onUpdates?.();return;}
     if(destination==='Notes'||destination==='Settings'||destination==='Tools'){run(()=>openSection(destination,false));return;}
     setScreen(destination==='Sessions'?'Agents':destination);
   },[active,command]);
@@ -289,14 +287,12 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
   useEffect(()=>{if(!ordinaryChat){setModelPickerTarget(undefined);setDrawingEditor(false);setAttachmentPicker(undefined);setActions(false);}},[ordinaryChat]);
   useEffect(()=>{if(!actions)setActionsMore(false);},[actions]);
   useEffect(()=>setNavigationOpen(false),[scope,screen]);
-  useEffect(()=>{if(updatesTarget&&active){showChat();setDrawer(false);}},[updatesTarget]);
   const pendingOperations=useRef(new Map<string,string>());
   const parentFollow=useChatFollow<Entry>(scope,true,active),childFollow=useChatFollow<Entry>(`${scope}:child:${child}`,true,active);
   const parentList=parentFollow.list,childList=childFollow.list;
   const parentHistory=useStoredHistory(backend?.backendId,chat,(path,signal)=>request(path,'GET',undefined,backend,signal),{refreshOnForeground:!continuous});
   const historyLatest=useRef(parentHistory);historyLatest.current=parentHistory;
   const childHistory=useStoredHistory(backend?.backendId,child,(path,signal)=>request(path,'GET',undefined,backend,signal));
-  useEffect(()=>{if(updatesTarget)parentFollow.resume();},[updatesTarget]);
   useEffect(()=>{skillEditorEpoch.current++;},[scope,screen]);
   useBackNavigation(()=>{
     if(navigationOpen){setNavigationOpen(false);return true;}
@@ -730,6 +726,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
     { conversationId: number; status?:string },
   ][],[ordinaryChat,agentRegistry]);
   const activeAgents=agents.filter(([,agent])=>isActiveSubagent(agent.status));
+  useEffect(()=>{if(active)onUpdatesVisible?.({scope:target?sessionKey(target):'',visible:screen==='Chat'&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen});},[active,command,scope,screen,navigationOpen,actions,drawer,drawingEditor,btwOpen]);
   useEffect(()=>{if(active)shell.reportVisible({scope:target?sessionKey(target):'',screen,drawer,ordinaryChat,child,activeAgentCount:activeAgents.length,requests:view?.docs['bob.phone-tools']?.requests});},[active,command,scope,screen,drawer,ordinaryChat,child,activeAgents.length,view?.docs['bob.phone-tools']?.requests]);
   // Only the overview establishes parent/child membership. A live registry may
   // supply newer statuses, but must not reintroduce missing or wrong-parent IDs.
@@ -849,7 +846,6 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
           {/* Native generation rows retain their list identity when committed.
               Older servers without a task identity keep the bounded legacy slot. */}
           {linked.legacyLive && v?.docs['pi.live']?.generation?.message && <ModelContent bubbleText streaming speakable={false} showTools={false} value={v.docs['pi.live'].generation.message.content} results={linked.results}/>}
-          {!isChild&&backend&&<BuildCard key={backend.backendId} backend={backend} state={build.state} error={build.error} focus={updatesTarget?.backendId===backend.backendId} onDismiss={()=>setUpdatesTarget(undefined)} onRefresh={build.refresh}/>}
           {!isChild&&((v?.docs['bob.diagnostics']?.requests??[]) as DiagnosticRequest[]).filter(item=>['pending','approved'].includes(item.status)).map(item=><DiagnosticCard key={`${scope}:${item.id}`} request={item} respond={value=>request(`chats/${chat}/diagnostics`,'POST',value,backend!)}/>)}
           {!isChild&&waitingForAnswer&&v?.docs['bob.questions']?.pending&&<QuestionCard key={`${scope}:${v.docs['bob.questions'].pending.id}`} question={v.docs['bob.questions'].pending as Question} disabled={!ordinaryChat||!!pending} onAnswer={text=>submit('steer',{questionId:v.docs['bob.questions'].pending.id,text})}/>}
           {/* Inverted header is the physical bottom of the chat. Keep live
@@ -921,7 +917,6 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
                 <Text style={styles.caption}>
                   {backend?'Choose a conversation from Agents and Sessions or start a new one.':'Pair your backend to begin. Your machine owns the work.'}
                 </Text>
-                {backend&&<BuildCard key={backend.backendId} backend={backend} state={build.state} error={build.error} focus={updatesTarget?.backendId===backend.backendId} onDismiss={()=>setUpdatesTarget(undefined)} onRefresh={build.refresh}/>}
                 {backend && (
                   <Button
                     label="New conversation"
@@ -1141,7 +1136,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
           {screen === 'Storage & cache' && <CacheSettings active={active}/>}
           {screen === 'App & updates' && <>
 <SettingsGroup title="App">
-                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setUpdatesTarget(backend);navigate('Chat');}}/>
+                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>onUpdates?.()}/>
                 <SettingsRow title="Copy app diagnostics" icon={Stethoscope} onPress={()=>run(async()=>{await copyAppDiagnostics();Alert.alert('Diagnostics copied','Paste the report into this chat. It contains sanitized lifecycle, exit and workload metadata, not chat text, credentials, URLs or location.');})}/>
                 <Disclosure menu label="About diagnostics"><Text typography="ui" style={menuStyles.caption}>If Bob closes unexpectedly, reopen it and copy this report. It includes bounded crash types and code positions, not exception messages or chat content. Workload samples are recorded about every 10 seconds while open. Reports stay on this phone until you share them.</Text></Disclosure>
               </SettingsGroup>
@@ -1228,7 +1223,7 @@ function SessionMain({target,active,command,destination,shell}:{target?:SessionT
                 </Disclosure>}
               </SettingsGroup>
               <SettingsGroup title="App maintenance">
-                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);setUpdatesTarget(backend);}}/>
+                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);onUpdates?.();}}/>
               </SettingsGroup>
               {(busy||activeAgents.length>0)&&<SettingsGroup title="Stop running work">
                 <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
@@ -1286,6 +1281,16 @@ function WorkstationNotes({backend,shell,active}:{backend:Backend;shell:SessionS
 }
 function RetainedSessionApp(){
   const shell=useSessionShell(),{selection}=shell;
+  const backend=shell.backends.find(item=>item.backendId===shell.current?.backendId);
+  const build=useBuildStatus(backend);
+  const keyboardInset=useKeyboardInset();
+  const [updateSurface,setUpdateSurface]=useState<{scope:string;visible:boolean}>();
+  const [management,setManagement]=useState<string>();
+  const updateScope=backend?JSON.stringify([backend.backendId,backend.endpoint]):'';
+  useLayoutEffect(()=>setManagement(undefined),[updateScope]);
+  const manage=management===updateScope;
+  const chatUpdatesVisible=updateSurface?.scope===selection.deck.active&&updateSurface.visible;
+  const openUpdates=()=>{if(backend)setManagement(updateScope);};
   if(!shell.ready)return <View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator accessibilityLabel="Opening Bob"/></View>;
   if(!shell.backends.length)return <SessionMain active command={0} destination="Chat" shell={shell}/>;
   return <View style={{flex:1}}>{selection.deck.targets.map(target=>{
@@ -1293,9 +1298,11 @@ function RetainedSessionApp(){
     // Keep identical native viewport geometry while hidden. Visibility belongs
     // to a non-animated host, never to a native-driver opacity animation.
     return <View key={key} testID={`session-host:${key}`} collapsable={false} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?1:0}]}>
-      <AppMotionProvider active={active}><SessionMain target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell}/></AppMotionProvider>
+      <AppMotionProvider active={active}><SessionMain target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
     </View>;
-  })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}</View>;
+  })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}
+    {backend&&<BuildCard backend={backend} state={build.state} error={build.error} focus={manage} active={!!chatUpdatesVisible||manage} keyboardInset={keyboardInset} onDismiss={()=>setManagement(undefined)} onRefresh={build.refresh}/>}
+  </View>;
 }
 export default function App() {
   return (

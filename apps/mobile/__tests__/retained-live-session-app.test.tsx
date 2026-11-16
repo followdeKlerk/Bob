@@ -1,7 +1,7 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View} from 'react-native';
+import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View,Modal} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import {DraftInput} from '../components/draft-input';
@@ -9,6 +9,9 @@ import {ChatNavigation} from '../components/chat-navigation';
 import {NotesScreen} from '../components/notes-screen';
 import {ToolsScreen} from '../components/tools-screen';
 import App from '../App';
+import {BuildCard} from '../components/build-card';
+import {UpdatePopover} from '../components/update-popover';
+import type {BuildState} from '../use-build-status';
 import {DEFAULT_CACHE_PREFERENCES,getCacheUsage,updateCachePreferences} from '../download-cache';
 
 // Mock platform boundaries only: App, shell, runtime, histories and delivery are real.
@@ -89,14 +92,14 @@ afterEach(()=>{
  for(const [name,value] of previousNative){if(value===undefined)delete NativeModules[name];else NativeModules[name]=value;}
 });
 
-async function mount({emptyA=false,continuous=false}:{emptyA?:boolean;continuous?:boolean}={}){
+async function mount({emptyA=false,continuous=false,updates={enabled:false}}:{emptyA?:boolean;continuous?:boolean;updates?:BuildState}={}){
  await AsyncStorage.setItem('backends',JSON.stringify([a,b]));
  await AsyncStorage.setItem('selection',JSON.stringify({backendId:a.backendId,chat:emptyA?undefined:chat}));
  await AsyncStorage.setItem('workstation-selections',JSON.stringify({[a.backendId]:emptyA?undefined:chat,[b.backendId]:chat}));
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'synthetic-device',password:'synthetic-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
  const notifications={setAppContext:jest.fn(),setReplyNotifications:jest.fn()};NativeModules.BobNotifications=notifications;
- NativeModules.BobFiles={};delete NativeModules.BobOutbox;delete NativeModules.BobPhoneLocation;
+ NativeModules.BobFiles={versionCode:1,versionName:'1.0',getUpdateStatus:jest.fn(async()=>({state:'downloading'})),installUpdate:jest.fn()};delete NativeModules.BobOutbox;delete NativeModules.BobPhoneLocation;
  const phone={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>true),execute:jest.fn(async(_backendId:string,_request:string)=>JSON.stringify({status:'ok',data:{sdkInt:35}})),getResult:jest.fn(async()=>null)};
  NativeModules.BobPhoneTools=phone;jest.spyOn(PermissionsAndroid,'check').mockResolvedValue(true);
  let connectionEnabled=continuous;
@@ -126,7 +129,7 @@ async function mount({emptyA=false,continuous=false}:{emptyA?:boolean;continuous
   const data=url.includes('/history')?{backendId:backend.backendId,conversationId:id,coverage:'stored-entries',items:entries(backend)}
    :url.endsWith('/chats')?{items:[{id:chat,meta:{title:`Synthetic ${backend.alias}`}}]}
    :url.endsWith('/configure')?{instructions:null,cwd:'/example'}
-   :url.endsWith('/updates')?{enabled:false}
+   :url.endsWith('/updates')?updates
    :url.endsWith('/phone-tools/availability')?{enabled:JSON.parse(init.body).enabled}
    :url.endsWith('/phone-tools')?JSON.parse(init.body).action==='claim'?{execute:true,status:'executing'}:{accepted:true,status:'completed'}
    :url.includes('/operations/')?{}
@@ -601,5 +604,42 @@ test.each(['identity','entries','docs','json'])('App rejects invalid continuous 
    expect(first.findAll(node=>node.props.children==='Connection needs attention').length).toBeGreaterThan(0);
    await app.publishNative();expect(app.connection.readStream!.mock.calls.at(-1)![3]).toBe(1);
   }
+ }finally{await app.close();}
+});
+
+test('one update owner survives empty/live and retained-chat switches without reopening reads or duplicating download',async()=>{
+ const updates:BuildState={enabled:true,jobs:[],apk:{releaseId:'example-release',sha256:'a'.repeat(64),size:1000,versionCode:2,versionName:'2.0'}};
+ const app=await mount({emptyA:true,updates});
+ try{
+  await navigateTo(app.tree,'Chat');
+  const owner=app.tree.root.findByType(BuildCard),reads=app.fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/updates')).length;
+  const popup=()=>app.tree.root.findByType(UpdatePopover);
+  expect(popup().props.visible).toBe(false);
+  await act(async()=>button(app.tree.root,'App update status').props.onPress());
+  expect(popup().props.visible).toBe(true);
+  act(()=>popup().findByType(Modal).props.onRequestClose());
+  await openNotification(a,chat);
+  const first=host(app.tree,a),history=list(first),editor=draft(first),stream=app.latest(a);
+  pauseEarlier(first);const scroll=jest.spyOn(history.instance,'scrollToOffset').mockImplementation(()=>{});
+  await act(async()=>editor.props.onChangeText('Keep this update-time draft'));
+  act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280}));
+  for(let i=0;i<3;i++){
+   await act(async()=>button(app.tree.root,'App update status').props.onPress());
+   await act(async()=>button(app.tree.root,'Close updates').props.onPress());
+  }
+  await navigateTo(app.tree,'Settings');
+  await act(async()=>button(first,'App & updates').props.onPress());
+  await act(async()=>button(first,'Build & install').props.onPress());
+  expect(popup().props.visible).toBe(true);expect(button(app.tree.root,'Build app')).toBeDefined();
+  await act(async()=>button(app.tree.root,'Close updates').props.onPress());
+  await navigateTo(app.tree,'Chat');
+  await openNotification(a,8);await openNotification(a,chat);
+  expect(app.tree.root.findAllByType(BuildCard)).toHaveLength(1);expect(app.tree.root.findByType(BuildCard)).toBe(owner);
+  expect(app.fetchMock.mock.calls.filter(([url])=>String(url).endsWith('/updates'))).toHaveLength(reads);
+  expect(draft(first)).toBe(editor);expect(editor.props.value).toBe('Keep this update-time draft');expect(list(first)).toBe(history);
+  expect(history.props.maintainVisibleContentPosition).toEqual({minIndexForVisible:0});expect(scroll).not.toHaveBeenCalled();
+  expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
+  expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();expect(popup().props.visible).toBe(false);
+  expect(app.fetchMock.mock.calls.filter(([,init])=>init?.method==='POST'&&String(init?.body).includes('app-'))).toHaveLength(0);
  }finally{await app.close();}
 });
