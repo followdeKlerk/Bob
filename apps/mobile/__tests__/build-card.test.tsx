@@ -251,3 +251,25 @@ test('a newer build failure is not hidden by an unacknowledged successful instal
  expect(await AsyncStorage.getItem('build-dismissed:backend-id')).toBe('failed:new-failure');
  expect(await AsyncStorage.getItem('pending-install:backend-id')).toBe('2');
 });
+
+
+test('actual indicator, close, management and transport lifetime report presentation without admitting mutations',async()=>{
+ const visibility=jest.fn(),fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true} as Response);
+ await act(async()=>{tree=Renderer.create(render(ready,false,{onVisibilityChange:visibility}));});
+ expect(visibility.mock.calls.map(([visible])=>visible)).toEqual([false]);expect(popup().props.visible).toBe(false);
+ const owner=tree!.root.findByType(BuildCard),reads=native().getUpdateStatus.mock.calls.length;
+ await act(async()=>button('App update status').props.onPress());expect(popup().props.visible).toBe(true);expect(visibility).toHaveBeenLastCalledWith(true);
+ await act(async()=>button('Close updates').props.onPress());expect(visibility).toHaveBeenLastCalledWith(false);
+ expect(native().getUpdateStatus).toHaveBeenCalledTimes(reads);
+ await update(ready,true,{onVisibilityChange:visibility});expect(popup().props.visible).toBe(true);expect(visibility).toHaveBeenLastCalledWith(true);
+ await update(ready,true,{active:false,onVisibilityChange:visibility});expect(popup().props.visible).toBe(false);expect(visibility).toHaveBeenLastCalledWith(false);
+ await update(ready,false,{onVisibilityChange:visibility});await act(async()=>button('App update status').props.onPress());
+ expect(visibility).toHaveBeenLastCalledWith(true);
+ for(const next of [{...backend,endpoint:'https://other.example.invalid'},{...backend,backendId:'other-backend'}]){
+  await update(ready,false,{backend:next,onVisibilityChange:visibility});expect(tree!.root.findByType(BuildCard)).toBe(owner);expect(popup().props.visible).toBe(false);expect(visibility).toHaveBeenLastCalledWith(false);
+  await act(async()=>button('App update status').props.onPress());expect(visibility).toHaveBeenLastCalledWith(true);
+ }
+ await act(async()=>tree!.unmount());tree=undefined;expect(visibility).toHaveBeenLastCalledWith(false);
+ expect(fetch).not.toHaveBeenCalled();expect(native().installUpdate).not.toHaveBeenCalled();
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();expect(await AsyncStorage.getItem('build-dismissed:backend-id')).toBeNull();
+});

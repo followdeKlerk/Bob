@@ -82,7 +82,7 @@ function pauseEarlier(root:Renderer.ReactTestInstance){
  expect(button(root,'Scroll to latest message')).toBeDefined();
 }
 
-const nativeNames=['BobPlatform','BobNotifications','BobFiles','BobOutbox','BobPhoneTools','BobConnection','BobPhoneLocation'];
+const nativeNames=['BobPlatform','BobNotifications','BobFiles','BobOutbox','BobPhoneTools','BobConnection','BobPhoneLocation','BobVoiceInput','BobSpeech'];
 let previousNative:Map<string,unknown>;
 beforeEach(async()=>{
  await AsyncStorage.clear();jest.clearAllMocks();
@@ -750,5 +750,60 @@ test('expanded editor and library/Settings Back preserve draft and deactivate di
   await act(async()=>button(root,'Appearance').props.onPress());await act(async()=>button(root,'Back to previous menu').props.onPress());expect(root.findAllByType(SettingsHome)).toHaveLength(1);
   await act(async()=>button(root,'Back to previous menu').props.onPress());expect(voice.props.active).toBe(true);
   expect(draft(root)).toBe(editor);expect(list(root)).toBe(history);expect(editor.props.value).toContain('Editable long draft');
+ }finally{await app.close();}
+});
+
+
+test('update indicator and management revoke native capture; late finals cannot enter this or a retained replacement chat',async()=>{
+ const native={availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),finish:jest.fn(async(_id:string)=>{}),cancel:jest.fn(async(id:string)=>{
+  // Native may synchronously flush a final while cancellation is being delivered.
+  DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text:'Final during cancel must be ignored'});
+ }),addListener:jest.fn(),removeListeners:jest.fn()};
+ NativeModules.BobVoiceInput=native;delete NativeModules.BobSpeech;
+ jest.spyOn(PermissionsAndroid,'request').mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
+ const app=await mount({updates:{enabled:false}});
+ const popup=()=>app.tree.root.findByType(UpdatePopover);
+ const listen=async()=>{await act(async()=>button(activeHost(app.tree),'Dictate message').props.onPress());const id=native.start.mock.calls.at(-1)![0];act(()=>DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'listening'}));return id;};
+ const final=async(id:string,text='Old final must be ignored')=>act(async()=>DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'final',text}));
+ try{
+  const first=activeHost(app.tree),editor=draft(first),history=list(first),voice=first.findByType(VoiceInputButton),owner=app.tree.root.findByType(BuildCard),stream=app.latest(a);
+  await act(async()=>editor.props.onChangeText('Keep typed edits'));const stale=voice.props.onTranscript,retiredVisibility=owner.props.onVisibilityChange;
+  const id=await listen();expect(button(first,'Finish dictation')).toBeDefined();
+  await act(async()=>button(app.tree.root,'App update status').props.onPress());expect(popup().props.visible).toBe(true);expect(voice.props.active).toBe(false);expect(native.cancel).toHaveBeenCalledWith(id);
+  await final(id);await act(async()=>stale('Stale parent result'));expect(editor.props.value).toBe('Keep typed edits');
+  await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(popup().props.visible).toBe(false);expect(voice.props.active).toBe(true);
+  await final(id);await act(async()=>stale('Stale result after close'));expect(editor.props.value).toBe('Keep typed edits');expect(native.start).toHaveBeenCalledTimes(1);
+  const fresh=await listen();await final(fresh,'fresh final');await final(fresh,'duplicate final');expect(editor.props.value).toBe('Keep typed edits fresh final');
+  // The existing Chat actions management route must also cancel a live microphone.
+  const managementId=await listen();await act(async()=>button(first,'Chat actions').props.onPress());expect(native.cancel).toHaveBeenCalledWith(managementId);
+  await act(async()=>button(first,'More').props.onPress());await act(async()=>button(first,'Build & install').props.onPress());
+  expect(popup().props.visible).toBe(true);expect(button(app.tree.root,'Build app')).toBeDefined();expect(voice.props.active).toBe(false);
+  await final(managementId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(voice.props.active).toBe(true);
+  // Explicit Settings management stays open across a same-chat notification.
+  await navigateTo(app.tree,'Settings');await act(async()=>button(first,'App & updates').props.onPress());await act(async()=>button(first,'Build & install').props.onPress());
+  await openNotification(a,chat);expect(activeHost(app.tree)).toBe(first);expect(popup().props.visible).toBe(true);expect(voice.props.active).toBe(false);
+  await final(managementId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(voice.props.active).toBe(true);
+  // A notification can select a retained chat while presentation owns the overlay.
+  await act(async()=>button(app.tree.root,'App update status').props.onPress());
+  await openNotification(a,8);const second=activeHost(app.tree);expect(second).not.toBe(first);
+  expect(first.findByType(VoiceInputButton).props.active).toBe(false);
+  if(popup().props.visible){expect(second.findByType(VoiceInputButton).props.active).toBe(false);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());}
+  expect(second.findByType(VoiceInputButton).props.active).toBe(true);expect(app.tree.root.findByType(BuildCard)).toBe(owner);
+  await final(id);expect(draft(second).props.value).toBe('');
+  const secondId=await listen();await act(async()=>button(app.tree.root,'App update status').props.onPress());expect(native.cancel).toHaveBeenCalledWith(secondId);
+  // Make the original one of the two retained slots before selecting a third chat.
+  await openNotification(a,chat);expect(activeHost(app.tree)).toBe(first);
+  await openNotification(b,chat);const other=activeHost(app.tree);expect(popup().props.visible).toBe(false);expect(other.findByType(VoiceInputButton).props.active).toBe(true);
+  await final(secondId);expect(draft(other).props.value).toBe('');
+  const otherId=await listen();await act(async()=>button(app.tree.root,'App update status').props.onPress());expect(native.cancel).toHaveBeenCalledWith(otherId);
+  await act(async()=>retiredVisibility(false));expect(popup().props.visible).toBe(true);expect(other.findByType(VoiceInputButton).props.active).toBe(false);
+  await final(otherId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());
+  await act(async()=>retiredVisibility(true));expect(popup().props.visible).toBe(false);expect(other.findByType(VoiceInputButton).props.active).toBe(true);expect(draft(other).props.value).toBe('');
+  await openNotification(a,chat);expect(activeHost(app.tree)).toBe(first);expect(draft(first)).toBe(editor);expect(list(first)).toBe(history);expect(editor.props.value).toBe('Keep typed edits fresh final');
+  const resumedId=await listen();await act(async()=>button(app.tree.root,'App update status').props.onPress());expect(native.cancel).toHaveBeenCalledWith(resumedId);
+  await act(async()=>retiredVisibility(false));expect(popup().props.visible).toBe(true);expect(voice.props.active).toBe(false); // A→B→A retires the old callback too.
+  await final(resumedId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(voice.props.active).toBe(true);expect(editor.props.value).toBe('Keep typed edits fresh final');
+  expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
+  expect(NativeModules.BobFiles.installUpdate).not.toHaveBeenCalled();expect(app.fetchMock.mock.calls.some(([,init])=>init?.method==='POST'&&String(init?.body).includes('app-'))).toBe(false);
  }finally{await app.close();}
 });

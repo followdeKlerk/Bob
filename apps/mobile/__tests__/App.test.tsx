@@ -17,6 +17,7 @@ import {MessageOutbox} from '../message-outbox';
 import {DraftInput} from '../components/draft-input';
 import {EdgeFade} from '../components/edge-fade';
 import {InlineSurface} from '../components/inline-surface';
+import {forgetInlineHeight} from '../inline-visual-policy';
 import {BottomTabs,type BottomDestination} from '../components/bottom-tabs';
 import {ChatNavigation} from '../components/chat-navigation';
 import {SkillPicker} from '../components/skill-picker';
@@ -51,8 +52,9 @@ function activeMenuRoot(tree:Renderer.ReactTestRenderer){return tree.root.findAl
 function visibleNavigation(tree:Renderer.ReactTestRenderer){return activeMenuRoot(tree).findAllByType(ChatNavigation).find(node=>node.props.showTrigger!==false)!;}
 async function navigateTo(tree:Renderer.ReactTestRenderer,destination:BottomDestination){
  if(destination==='Sessions')destination='Agents';
+ if(destination==='Chat'&&(!visibleNavigation(tree).props.selected||visibleNavigation(tree).props.selected==='Chat'))return;
  if(!visibleNavigation(tree).props.open)await act(async()=>activeMenuRoot(tree).findByProps({accessibilityLabel:'Menu'}).props.onPress());
- await act(async()=>activeMenuRoot(tree).findByProps({testID:'chat-navigation-sheet'}).findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0].props.onPress());
+ await act(async()=>activeMenuRoot(tree).findByProps({testID:'chat-navigation-sheet'}).findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination==='Chat'?'Back to chat':destination)&&typeof node.props.onPress==='function')[0].props.onPress());
 }
 test('unpaired app mounts the real screen and history/navigation hooks without a blank screen',async()=>{
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};NativeModules.BobNotifications={};
@@ -256,7 +258,11 @@ test.each([true,false])('menus and background/foreground preserve the native lis
   const url=String(input);if(url.endsWith('/configure')&&options?.method==='PUT')conversationConfiguration={...conversationConfiguration,...JSON.parse(options.body)};const data=url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'toolCall',id:'visual-call',name:'render_visual',arguments:{title:'Solar system',html:'<p>Solar system</p>'}}]}]},{id:2,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'visual-call',toolName:'render_visual',content:[{type:'text',text:`Isolated visual ${surface.id}: Solar system. Open from the conversation’s interactive surfaces.`}]}]},{id:3,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'This is a newer reply, after the illustration.'}]}]}]}:url.endsWith('/ui')?[surface]:url.endsWith('/updates')?{enabled:false}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Test chat'}}]}:url.endsWith('/peers')?{inbound:[],outbound:[]}:url.endsWith('/library')?{instructions:'',templates:{},skills:{'minimal-skill-authoring':{description:'Author minimal skills',enabled:true},bro:{description:'Simplify the last answer',enabled:true}},commands:[{name:'delegation',description:'Choose models or profiles for subagents.'}]}:url.endsWith('/models')?[]:url.endsWith('/configure')?conversationConfiguration:[];
   return {ok:true,status:200,json:async()=>data} as Response;
  });
- let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
+ const heightScope={backendId:backend.backendId,conversationId:7,id:surface.id};
+ forgetInlineHeight(heightScope);
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+ await act(async()=>{tree=Renderer.create(<App/>);});
  const draft=activeRoot(tree).findByProps({accessibilityLabel:'Message draft'});expect(activeRoot(tree).findByType(DraftInput).props.compact).toBe(true);expect(StyleSheet.flatten(draft.props.style).height).toBe(48);
  act(()=>{draft.props.onChangeText('A retained draft while toggling the keyboard.');for(const callback of ime)callback({imeBottom:280});});expect(activeRoot(tree).findByType(DraftInput).props.compact).toBe(false);expect(activeRoot(tree).findAllByType(BottomTabs)).toHaveLength(0);expect(activeRoot(tree).findByProps({accessibilityLabel:'Message draft'})).toBe(draft);
  act(()=>draft.props.onContentSizeChange({nativeEvent:{contentSize:{height:126}}}));expect(StyleSheet.flatten(draft.props.style).height).toBe(126);
@@ -403,7 +409,8 @@ test.each([true,false])('menus and background/foreground preserve the native lis
  expect(activeRoot(tree).findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
  expect(activeRoot(tree).findByType(InlineSurface).findByProps({accessibilityLabel:'Expand visual: Solar system'})).toBeDefined();
  expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('prepared-visual');
- if(readingEarlier)expect(activeRoot(tree).findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();await act(async()=>tree.unmount());
+ if(readingEarlier)expect(activeRoot(tree).findByProps({accessibilityLabel:'Scroll to latest message'})).toBeDefined();
+ }finally{if(tree)await act(async()=>tree.unmount());forgetInlineHeight(heightScope);}
 });
 
 test('cold launch, session switches, and reopening from cache start with the newest row already at index zero',async()=>{

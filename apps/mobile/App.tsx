@@ -82,7 +82,7 @@ import {useTranscriptLiveTools} from './transcript-live-tools';
 import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -164,7 +164,7 @@ function textOf(value: unknown): string {
       .join('\n');
   return JSON.stringify(value);
 }
-function SessionMain({target,active,command,destination,shell,menuReads,onUpdates,onUpdatesVisible}:{menuReads:MenuReadCache;target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
+function SessionMain({target,active,command,destination,shell,menuReads,updatesOpen=false,onUpdates,onUpdatesVisible}:{updatesOpen?:boolean;menuReads:MenuReadCache;target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
   const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
   const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
   const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
@@ -290,7 +290,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,onUpdate
   const latestDraft=useRef(draft);latestDraft.current=draft;
   const [modelPickerTarget,setModelPickerTarget]=useState<{backend:Backend;chat:number;scope:string}>();
   const [modelChoice,setModelChoice]=useState<ModelChoice>({});
-  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget;
+  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen;
   const voiceTransport=JSON.stringify([backend?.backendId,backend?.endpoint,chat??null,shell.connectionRevisions[backend?.backendId??'']??0]);
   const voiceVisit=useRef({transport:voiceTransport,active:voiceActive,generation:0});
   if(voiceVisit.current.transport!==voiceTransport||voiceVisit.current.active!==voiceActive)voiceVisit.current={transport:voiceTransport,active:voiceActive,generation:voiceVisit.current.generation+1};
@@ -1318,9 +1318,19 @@ function RetainedSessionApp(){
   const keyboardInset=useKeyboardInset();
   const [updateSurface,setUpdateSurface]=useState<{scope:string;visible:boolean}>();
   const [management,setManagement]=useState<string>();
+  const [updatePresentation,setUpdatePresentation]=useState<{scope:string;visible:boolean}>();
   const updateScope=backend?JSON.stringify([backend.backendId,backend.endpoint]):'';
+  const updateIdentity=useRef({scope:updateScope});if(updateIdentity.current.scope!==updateScope)updateIdentity.current={scope:updateScope};
+  const updateVisit=updateIdentity.current;
   useLayoutEffect(()=>setManagement(undefined),[updateScope]);
   const manage=management===updateScope;
+  const updatesOpen=manage||(updatePresentation?.scope===updateScope&&updatePresentation.visible);
+  const onUpdateVisibility=useCallback((visible:boolean)=>{
+    setUpdatePresentation(previous=>{
+      if(updateIdentity.current!==updateVisit)return previous;
+      return previous?.scope===updateScope&&previous.visible===visible?previous:{scope:updateScope,visible};
+    });
+  },[updateScope,updateVisit]);
   const chatUpdatesVisible=updateSurface?.scope===selection.deck.active&&updateSurface.visible;
   const openUpdates=()=>{if(backend)setManagement(updateScope);};
   if(!shell.ready)return <View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator accessibilityLabel="Opening Bob"/></View>;
@@ -1330,10 +1340,10 @@ function RetainedSessionApp(){
     // Keep identical native viewport geometry while hidden. Visibility belongs
     // to a non-animated host, never to a native-driver opacity animation.
     return <View key={key} testID={`session-host:${key}`} collapsable={false} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?1:0}]}>
-      <AppMotionProvider active={active}><SessionMain menuReads={menuReads} target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
+      <AppMotionProvider active={active}><SessionMain updatesOpen={updatesOpen} menuReads={menuReads} target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
     </View>;
   })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}
-    {backend&&<BuildCard backend={backend} state={build.state} error={build.error} focus={manage} active={!!chatUpdatesVisible||manage} keyboardInset={keyboardInset} onDismiss={()=>setManagement(undefined)} onRefresh={build.refresh}/>}
+    {backend&&<BuildCard onVisibilityChange={onUpdateVisibility} backend={backend} state={build.state} error={build.error} focus={manage} active={!!chatUpdatesVisible||manage} keyboardInset={keyboardInset} onDismiss={()=>setManagement(undefined)} onRefresh={build.refresh}/>}
   </View>;
 }
 export default function App() {

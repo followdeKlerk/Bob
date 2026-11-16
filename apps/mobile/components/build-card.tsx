@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {ActivityIndicator,AppState,NativeModules,Pressable,StyleSheet,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
@@ -11,14 +11,14 @@ import {Text} from './app-text';
 import {UpdatePopover} from './update-popover';
 
 type Request={id:string;action:'update'|'build'|'rollback';target:'android'|'all'|'backend'};
-type Props={backend:BuildBackend;state?:BuildState;error?:string;focus?:boolean;active?:boolean;keyboardInset?:number;onDismiss:()=>void;onRefresh:()=>void};
+type Props={backend:BuildBackend;state?:BuildState;error?:string;focus?:boolean;active?:boolean;keyboardInset?:number;onDismiss:()=>void;onRefresh:()=>void;onVisibilityChange?:(visible:boolean)=>void};
 const retryable=(request:Request)=>request.action!=='rollback'&&request.target!=='backend';
 const foreground=()=>AppState.currentState!=='background'&&AppState.currentState!=='inactive';
 
 // One app-wide owner, outside retained transcripts. A transport identity change
 // retires all async ownership; persisted uncertain requests retain their IDs.
 export function BuildCard(props:Props){return <UpdateController key={JSON.stringify([props.backend.backendId,props.backend.endpoint])} {...props}/>;}
-function UpdateController({backend,state,error,focus=false,active=true,keyboardInset=0,onDismiss,onRefresh}:Props){
+function UpdateController({backend,state,error,focus=false,active=true,keyboardInset=0,onDismiss,onRefresh,onVisibilityChange}:Props){
  const {colors}=useTheme(),s=useThemedValue(styles),insets=useSafeAreaInsets();
  const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[failure,setFailure]=useState('');
  const [request,setRequest]=useState<Request>(),[installVersion,setInstallVersion]=useState<number>(),[dismissed,setDismissed]=useState(''),[loaded,setLoaded]=useState(false);
@@ -39,6 +39,11 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
  const downloading=['downloading','busy','verifying'].includes(downloadState);
  capability.current={install:serviceAvailable&&newer&&!job&&!request,queue:canBuild&&!job&&!downloading};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;pollReceipt.current++;epoch.current++;};},[]);
+ // Report presentation only. App uses this to revoke microphone admission, not
+ // to drive this controller's active/open state (which would form a feedback loop).
+ const popoverVisible=open&&active;
+ useLayoutEffect(()=>{onVisibilityChange?.(popoverVisible);},[popoverVisible,onVisibilityChange]);
+ useLayoutEffect(()=>()=>onVisibilityChange?.(false),[onVisibilityChange]);
  useEffect(()=>{if(focus)setOpen(true);},[focus]);
  useEffect(()=>{if(!active)setOpen(false);},[active]);
  useEffect(()=>{
@@ -149,7 +154,7 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
  const attention=!!unavailable||versionUnavailable||!!failed||downloadState==='failed'||downloadState==='unknown'||!!request;
  return <>
   {visible&&<View pointerEvents="box-none" testID="update-indicator-anchor" style={[s.anchor,{top:insets.top+4,right:insets.right+8}]}><Pressable accessibilityRole="button" accessibilityLabel="App update status" accessibilityHint="Open update details" accessibilityValue={{text:status}} accessibilityState={{expanded:open&&active}} onPress={()=>setOpen(true)} style={s.hitTarget}><View accessible={false} importantForAccessibility="no-hide-descendants" style={s.circle}>{working?<ActivityIndicator size="small" color={colors.accent}/>:installedNotice?<Check size={14} color={colors.accent}/>:attention?<AlertCircle size={14} color={colors.foreground}/>:<Download size={14} color={colors.foreground}/>}</View></Pressable></View>}
-  <UpdatePopover visible={open&&active} status={status} onClose={close} keyboardInset={keyboardInset} acknowledge={!working&&terminal&&identity?{label:installedNotice?'Acknowledge update':'Dismiss update',onPress:dismiss}:undefined}>
+  <UpdatePopover visible={popoverVisible} status={status} onClose={close} keyboardInset={keyboardInset} acknowledge={!working&&terminal&&identity?{label:installedNotice?'Acknowledge update':'Dismiss update',onPress:dismiss}:undefined}>
    {!!unavailable&&<Text style={s.text}>{state?.enabled===false?'Set up supervised updates on the backend with bob updates install --help.':state?.supervisorOnline===false&&!error?'Check the backend update service. Build and install are paused.':'Last known status may be stale. Check again before building or installing.'}</Text>}
    {!unavailable&&versionUnavailable&&<Text style={s.text}>Fully close and reopen Bob to read the installed app version. Installation is paused.</Text>}
    {!unavailable&&!!stageDetail&&<Text style={s.text}>{stageDetail}</Text>}
