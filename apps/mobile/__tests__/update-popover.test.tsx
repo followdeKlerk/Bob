@@ -38,3 +38,31 @@ test.each(['light','dark'] as const)('popover retains %s chat palette and readab
   expect(typeof tree.root.findByType(Modal).props.onShow).toBe('function');expect(focus).not.toHaveBeenCalled();
  }finally{await act(async()=>tree.unmount());}
 });
+
+test.each([0,120,280])('native dialog resize of %s dp is not charged again as keyboard clearance',async(resize)=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:361,height:754,fontScale:2,scale:1});
+ let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<UpdatePopover visible status="Update queued" keyboardInset={280} onClose={()=>{}}>{null}</UpdatePopover>);});
+ try{
+  const viewport=tree.root.findByProps({testID:'update-popover-viewport'});
+  act(()=>viewport.props.onLayout({nativeEvent:{layout:{width:361,height:754-resize}}}));
+  const frame=StyleSheet.flatten(viewport.props.style),bubble=StyleSheet.flatten(tree.root.findByProps({testID:'update-popover'}).props.style);
+  expect(frame.paddingBottom).toBe(Math.max(16,280-resize)+12);
+  expect(bubble.maxHeight+frame.paddingTop+frame.paddingBottom).toBe(754-resize);
+  // A resized dialog must not lose another full IME-height of usable space.
+  expect(bubble.maxHeight).toBeGreaterThanOrEqual(370);
+  expect(tree.root.findByType(Modal).props.statusBarTranslucent).toBe(true);
+  expect(tree.root.findByType(Modal).props.navigationBarTranslucent).toBe(true);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('terminal acknowledgement replaces the duplicate Close action without changing outside or Back dismissal',async()=>{
+ const close=jest.fn(),acknowledge=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<UpdatePopover visible status="App 2.0 installed" onClose={close} acknowledge={{label:'Acknowledge update',onPress:acknowledge}}>{null}</UpdatePopover>);});
+ try{
+  expect(tree.root.findAllByProps({accessibilityLabel:'Close updates'})).toHaveLength(0);
+  expect(tree.root.findAllByType(NativeText).filter(node=>node.props.children==='Done')).toHaveLength(1);
+  act(()=>tree.root.findByType(Modal).props.onRequestClose());expect(close).toHaveBeenCalledTimes(1);expect(acknowledge).not.toHaveBeenCalled();
+  act(()=>tree.root.findByProps({accessibilityLabel:'Acknowledge update'}).props.onPress());expect(acknowledge).toHaveBeenCalledTimes(1);
+ }finally{await act(async()=>tree.unmount());}
+});

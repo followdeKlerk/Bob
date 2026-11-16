@@ -225,3 +225,29 @@ test('a new explicit download attempt retires dismissal of the previous failure'
   expect(button('App update status').props.accessibilityValue.text).toBe('Download needs attention');expect(popup().props.visible).toBe(false);
  }finally{if(tree)await act(async()=>tree!.unmount());tree=undefined;jest.useRealTimers();}
 });
+
+test.each(['idle','ready'])('the %s popup shows the app version once, with a concise action',async(state)=>{
+ native().getUpdateStatus.mockResolvedValue({state});await mount();
+ const NativeText=require('react-native').Text;
+ const labels=tree!.root.findByType(UpdatePopover).findAllByType(NativeText).map(node=>React.Children.toArray(node.props.children).join(''));
+ expect(labels.filter(label=>label.includes('2.0'))).toHaveLength(1);
+ expect(labels).toContain(state==='ready'?'Install':'Download');
+ expect(button(state==='ready'?'Install 2.0':'Download 2.0')).toBeDefined();
+});
+
+test.each([['queued','Queued'],['building','Building update…'],['activating','Activating update']])('generic %s build phase is not repeated as a second status line',async(status,stage)=>{
+ await mount({enabled:true,jobs:[{id:'current',status,stage}]});
+ const NativeText=require('react-native').Text;
+ const labels=tree!.root.findByType(UpdatePopover).findAllByType(NativeText).map(node=>React.Children.toArray(node.props.children).join(''));
+ expect(labels).toHaveLength(2); // Current phase, then Close.
+});
+
+test('a newer build failure is not hidden by an unacknowledged successful install',async()=>{
+ native().versionCode=2;native().versionName='2.0';await AsyncStorage.setItem('pending-install:backend-id','2');
+ await mount({...ready,jobs:[{id:'new-failure',status:'failed',stage:'Build stopped',error:'Checks failed'}]});
+ expect(button('App update status').props.accessibilityValue.text).toBe('Build needs attention');
+ expect(text()).not.toContain('2.0 installed');expect(tree!.root.findAllByProps({accessibilityLabel:'Acknowledge update'})).toHaveLength(0);
+ await act(async()=>button('Dismiss update').props.onPress());
+ expect(await AsyncStorage.getItem('build-dismissed:backend-id')).toBe('failed:new-failure');
+ expect(await AsyncStorage.getItem('pending-install:backend-id')).toBe('2');
+});

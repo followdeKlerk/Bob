@@ -112,15 +112,16 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
   }catch{if(current())setFailure(persisted?'':'Could not save the build request. No build was sent.');}
   finally{clearTimeout(timeout);admission.current=false;if(mounted.current)setBusy(false);}
  }
- const showBuildFailure=!!failed&&!job&&!request&&!success&&(!newer||!['downloading','verifying','busy','ready'].includes(downloadState));
+ const showBuildFailure=!!failed&&!job&&!request&&(!newer||!['downloading','verifying','busy','ready'].includes(downloadState));
+ const installedNotice=success&&!showBuildFailure&&!unavailable&&!job&&!request;
  const status=(()=>{
   if(unavailable)return unavailable;
   if(job)return job.status==='queued'?'Update queued':job.status==='activating'?'Activating update…':'Building update…';
   if(request)return 'Build result not confirmed';
   if(busy)return 'Starting update…';
-  if(success)return `App ${NativeModules.BobFiles?.versionName??''} installed`;
-  if(versionUnavailable)return 'Installed app version unavailable';
   if(showBuildFailure)return 'Build needs attention';
+  if(installedNotice)return `App ${NativeModules.BobFiles?.versionName??''} installed`;
+  if(versionUnavailable)return 'Installed app version unavailable';
   if(newer){
    if(downloadState==='busy')return 'Another update is downloading';
    if(downloadState==='downloading')return 'Downloading & verifying…';
@@ -132,38 +133,38 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
   }
   return state?.androidBuild?.configured===false?'App builds not configured':'No app update available';
  })();
- const identity=success?`installed:${installVersion}`:unavailable?`unavailable:${unavailable}`:versionUnavailable?'version-unavailable':showBuildFailure?`failed:${failed!.id}`:newer?`${artifactScope}:${downloadState}`:'';
+ const identity=unavailable?`unavailable:${unavailable}`:showBuildFailure?`failed:${failed!.id}`:installedNotice?`installed:${installVersion}`:versionUnavailable?'version-unavailable':newer?`${artifactScope}:${downloadState}`:'';
  const working=!!job||!!request||busy||downloading;
  // Dismissal belongs to the terminal receipt, not to a later explicit attempt.
  useEffect(()=>{if(working&&dismissed){setDismissed('');void AsyncStorage.removeItem(`build-dismissed:${backend.backendId}`).catch(()=>{});}},[working,dismissed,backend.backendId]);
  const restoringDismissedArtifact=!working&&downloadState==='checking'&&dismissed.startsWith(`${artifactScope}:`);
  const visible=active&&loaded&&!restoringDismissedArtifact&&(working||!!focus||((!!unavailable||newer||success||!!failed||versionUnavailable)&&dismissed!==identity));
  const close=()=>{setOpen(false);onDismiss();};
- const dismiss=()=>{if(working)return;setDismissed(identity);void AsyncStorage.setItem(`build-dismissed:${backend.backendId}`,identity).catch(()=>{});if(success)void AsyncStorage.removeItem(`pending-install:${backend.backendId}`).catch(()=>{});close();};
- function action(label:string,onPress:()=>void,disabled=false,primary=false){return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.action,primary&&s.primary,disabled&&s.disabled]}><Text style={[s.text,primary&&s.primaryText]}>{label}</Text></Pressable>;}
+ const dismiss=()=>{if(working)return;setDismissed(identity);void AsyncStorage.setItem(`build-dismissed:${backend.backendId}`,identity).catch(()=>{});if(installedNotice)void AsyncStorage.removeItem(`pending-install:${backend.backendId}`).catch(()=>{});close();};
+ function action(label:string,onPress:()=>void,disabled=false,primary=false,caption=label){return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.action,primary&&s.primary,disabled&&s.disabled]}><Text style={[s.text,primary&&s.primaryText]}>{caption}</Text></Pressable>;}
  const installable=newer&&!unavailable&&!job&&!request&&!versionUnavailable&&(!showBuildFailure||focus);
- const terminal=success||!!unavailable||versionUnavailable||showBuildFailure||['failed','unknown'].includes(downloadState);
+ const terminal=installedNotice||!!unavailable||versionUnavailable||showBuildFailure||['failed','unknown'].includes(downloadState);
+ const phase=(value:string)=>value.toLowerCase().replace(/\b(?:app|update)\b/g,'').replace(/[^a-z0-9]/g,'');
+ const stage=job?.stage.trim(),stageDetail=stage&&phase(stage)!==phase(status)?stage:undefined;
  const attention=!!unavailable||versionUnavailable||!!failed||downloadState==='failed'||downloadState==='unknown'||!!request;
  return <>
-  {visible&&<View pointerEvents="box-none" testID="update-indicator-anchor" style={[s.anchor,{top:insets.top+4,right:insets.right+8}]}><Pressable accessibilityRole="button" accessibilityLabel="App update status" accessibilityHint="Open update details" accessibilityValue={{text:status}} accessibilityState={{expanded:open&&active}} onPress={()=>setOpen(true)} style={s.hitTarget}><View accessible={false} importantForAccessibility="no-hide-descendants" style={s.circle}>{working?<ActivityIndicator size="small" color={colors.accent}/>:success?<Check size={14} color={colors.accent}/>:attention?<AlertCircle size={14} color={colors.foreground}/>:<Download size={14} color={colors.foreground}/>}</View></Pressable></View>}
-  <UpdatePopover visible={open&&active} status={status} onClose={close} keyboardInset={keyboardInset}>
+  {visible&&<View pointerEvents="box-none" testID="update-indicator-anchor" style={[s.anchor,{top:insets.top+4,right:insets.right+8}]}><Pressable accessibilityRole="button" accessibilityLabel="App update status" accessibilityHint="Open update details" accessibilityValue={{text:status}} accessibilityState={{expanded:open&&active}} onPress={()=>setOpen(true)} style={s.hitTarget}><View accessible={false} importantForAccessibility="no-hide-descendants" style={s.circle}>{working?<ActivityIndicator size="small" color={colors.accent}/>:installedNotice?<Check size={14} color={colors.accent}/>:attention?<AlertCircle size={14} color={colors.foreground}/>:<Download size={14} color={colors.foreground}/>}</View></Pressable></View>}
+  <UpdatePopover visible={open&&active} status={status} onClose={close} keyboardInset={keyboardInset} acknowledge={!working&&terminal&&identity?{label:installedNotice?'Acknowledge update':'Dismiss update',onPress:dismiss}:undefined}>
    {!!unavailable&&<Text style={s.text}>{state?.enabled===false?'Set up supervised updates on the backend with bob updates install --help.':state?.supervisorOnline===false&&!error?'Check the backend update service. Build and install are paused.':'Last known status may be stale. Check again before building or installing.'}</Text>}
    {!unavailable&&versionUnavailable&&<Text style={s.text}>Fully close and reopen Bob to read the installed app version. Installation is paused.</Text>}
-   {!unavailable&&!!job&&<Text style={s.text}>{job.stage}</Text>}
+   {!unavailable&&!!stageDetail&&<Text style={s.text}>{stageDetail}</Text>}
    {!unavailable&&!!request&&<Text style={s.text}>{retryable(request)?'Check for the recorded result first. Retry only resends this same request ID.':'This request is retained and will not be resent here. Check its recorded result.'}</Text>}
    {!unavailable&&showBuildFailure&&<Text style={s.text}>{(failed!.error??failed!.stage).slice(0,260)}</Text>}
    {!unavailable&&!job&&!request&&!showBuildFailure&&newer&&downloadState==='failed'&&<Text style={s.text}>Download or verification stopped. Nothing was installed; no automatic retry.</Text>}
    {!unavailable&&!job&&!request&&!showBuildFailure&&newer&&['checking','unknown'].includes(downloadState)&&<Text style={s.text}>Downloaded update status is not confirmed. Check again; nothing will be downloaded automatically.</Text>}
-   {!unavailable&&!job&&!request&&!showBuildFailure&&newer&&downloading&&<Text style={s.text}>You can close this bubble. The background download is not cancelled.</Text>}
-   {!unavailable&&!job&&!request&&!showBuildFailure&&newer&&downloadState==='ready'&&<Text style={s.text}>Verified download. Android still asks you to approve installation.</Text>}
+
    {!!failure&&failure!==status&&<Text accessibilityRole="alert" style={s.text}>{failure}</Text>}
-   {installable&&['idle','ready','failed'].includes(downloadState)&&action(downloadState==='ready'?`Install ${apk!.versionName}`:downloadState==='failed'?'Retry download':`Download ${apk!.versionName}`,()=>void install(),busy||downloading,true)}
+   {installable&&['idle','ready','failed'].includes(downloadState)&&action(downloadState==='ready'?`Install ${apk!.versionName}`:downloadState==='failed'?'Retry download':`Download ${apk!.versionName}`,()=>void install(),busy||downloading,true,downloadState==='ready'?'Install':downloadState==='failed'?'Retry download':'Download')}
    {(!!unavailable||!!request||showBuildFailure||!job&&!request&&newer&&['checking','unknown'].includes(downloadState))&&action('Check status',onRefresh,busy)}
    {focus&&<>
     {state?.androidBuild?.configured===false&&<Text style={s.text}>App build/signing prerequisites are not configured on this backend.</Text>}
     {request?action('Retry same build request',()=>void queue('android'),!loaded||!canBuild||busy||downloading||!!job||!retryable(request)): <>{action('Build app',()=>void queue('android'),!loaded||!canBuild||busy||downloading||!!job)}{action('Build app and backend',()=>void queue('all'),!loaded||!canBuild||busy||downloading||!!job)}</>}
    </>}
-   {!working&&terminal&&!!identity&&action(success?'Acknowledge update':'Dismiss update',dismiss)}
   </UpdatePopover>
  </>;
 }

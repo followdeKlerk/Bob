@@ -1,25 +1,29 @@
-import React,{useRef} from 'react';
+import React,{useRef,useState} from 'react';
 import {AccessibilityInfo,findNodeHandle,Modal,Pressable,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Text} from './app-text';
 import {themed,useThemedValue} from '../theme';
 
-/** A native modal isolates TalkBack and Back handling without touching the chat
- * tree, keyboard, draft focus or scroll position. Only its content scrolls. */
-export function UpdatePopover({visible,status,children,onClose,keyboardInset=0}:{visible:boolean;status:string;children:React.ReactNode;onClose:()=>void;keyboardInset?:number}){
+/** The dialog owns Back/accessibility isolation, not the underlying chat tree.
+ * Measure its viewport: Android Modal can resize for the IME even when the
+ * Activity does not. Reserve only keyboard occlusion not already removed. */
+export function UpdatePopover({visible,status,children,onClose,keyboardInset=0,acknowledge}:{visible:boolean;status:string;children:React.ReactNode;onClose:()=>void;keyboardInset?:number;acknowledge?:{label:string;onPress:()=>void}}){
  const s=useThemedValue(styles),insets=useSafeAreaInsets(),window=useWindowDimensions();
  const heading=useRef<React.ComponentRef<typeof Text>>(null);
- const bottom=Math.max(insets.bottom,keyboardInset)+12;
- const available=Math.max(0,window.height-insets.top-bottom);
+ const [viewport,setViewport]=useState<{width:number;height:number}>();
+ const width=Math.min(window.width,viewport?.width??window.width),height=Math.min(window.height,viewport?.height??window.height);
+ const occlusion=Math.max(0,keyboardInset-Math.max(0,window.height-height));
+ const bottom=Math.max(insets.bottom,occlusion)+12;
+ const available=Math.max(0,height-insets.top-bottom);
  const top=insets.top+Math.min(52,Math.max(0,available-96));
- return <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} onShow={()=>{const node=findNodeHandle(heading.current);if(node)AccessibilityInfo.setAccessibilityFocus(node);}}>
-  <View style={[s.overlay,{paddingTop:top,paddingBottom:bottom,paddingLeft:insets.left+12,paddingRight:insets.right+12}]}>
+ return <Modal transparent statusBarTranslucent navigationBarTranslucent visible={visible} animationType="none" onRequestClose={onClose} onShow={()=>{const node=findNodeHandle(heading.current);if(node)AccessibilityInfo.setAccessibilityFocus(node);}}>
+  <View testID="update-popover-viewport" onLayout={({nativeEvent:{layout}})=>{if(layout.width>0&&layout.height>0)setViewport(old=>old?.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height});}} style={[s.overlay,{paddingTop:top,paddingBottom:bottom,paddingLeft:insets.left+12,paddingRight:insets.right+12}]}>
    <Pressable accessibilityRole="button" accessibilityLabel="Close update bubble" onPress={onClose} style={StyleSheet.absoluteFill}/>
-   <View testID="update-popover" accessibilityViewIsModal onAccessibilityEscape={onClose} style={[s.bubble,{maxWidth:Math.min(304,window.width-insets.left-insets.right-24),maxHeight:Math.max(0,window.height-top-bottom)}]}>
+   <View testID="update-popover" accessibilityViewIsModal onAccessibilityEscape={onClose} style={[s.bubble,{maxWidth:Math.max(0,Math.min(304,width-insets.left-insets.right-24)),maxHeight:Math.max(0,height-top-bottom)}]}>
     <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
      <Text ref={heading} accessible accessibilityLiveRegion="polite" style={s.status}>{status}</Text>
      {children}
-     <Pressable accessibilityRole="button" accessibilityLabel="Close updates" onPress={onClose} style={s.close}><Text style={s.text}>Close</Text></Pressable>
+     <Pressable accessibilityRole="button" accessibilityLabel={acknowledge?.label??'Close updates'} onPress={acknowledge?.onPress??onClose} style={s.close}><Text style={s.text}>{acknowledge?'Done':'Close'}</Text></Pressable>
     </ScrollView>
    </View>
   </View>
