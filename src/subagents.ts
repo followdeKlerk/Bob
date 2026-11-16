@@ -5,7 +5,7 @@ export * from '@bob-local/subagents';
 export const SUBAGENT_REPORT_KIND='app.subagent-report';
 export const subagentReportDisplayRequest=(reporter:TaskId)=>`subagent-report-display:${reporter}`;
 /** Host evidence only: never model-authored status or provider error payloads. */
-export const SubagentFailures=defineDoc<{reported:Record<string,TaskId>;sources:Record<string,{submissionId:SubmissionId;runTaskId?:TaskId}>}>({kind:'bob.subagent-failures',version:1,scope:'conversation',history:'latest',fork:'initial',checkpointWhen:()=>true,initial:()=>({reported:{},sources:{}})});
+export const SubagentFailures=defineDoc<{reported:Record<string,TaskId>;sources:Record<string,{submissionId:SubmissionId;runTaskId?:TaskId}>;aliases?:Record<string,{runTaskId:TaskId;conversationId:ConversationId;reason:string}>}>({kind:'bob.subagent-failures',version:1,scope:'conversation',history:'latest',fork:'initial',checkpointWhen:()=>true,initial:()=>({reported:{},sources:{}})});
 export function subagentFailureReport(name:string,reason:string,source:{submissionId:SubmissionId;runTaskId?:TaskId}){
  const known=['model_error','no_model','reset','faulted','orphaned','interrupted','restart_limit','nothing_to_answer','turn_limit','run_failed'];
  const safe=known.includes(reason)?reason:'run_failed';
@@ -32,11 +32,32 @@ const tasks=NativeSubagentTools.tasks!.map(task=>{
    // only its failure decision on the SAME commit line, before the report phase.
    const commit:TaskRuntime<ReporterInput,ReporterState,null,{}>['commit']=(change,callContext,options)=>runtime.commit(async(tx,current)=>{
     const delivery=await tx.submissionByRequest(reporter.input.conversationId,`subagent:${reporter.id}`);
-    const failure=delivery?.status==='unanswered'&&delivery.reason!=='aborted'?(await tx.doc(LiveDoc,reporter.input.conversationId)).runFailure:undefined;
+    if(delivery?.status!=='unanswered'||delivery.reason==='aborted')return change(tx,current);
+    const failure=(await tx.doc(LiveDoc,reporter.input.conversationId)).runFailure;
+    const evidence=await tx.doc(SubagentFailures,runtime.conversationId);
+    const alias=Object.hasOwn(evidence.aliases??{},String(delivery.id))?evidence.aliases![delivery.id]:undefined;
+    const matched=failure?.inputs.includes(delivery.id)&&failure.reason===delivery.reason?failure:undefined;
+    let runTaskId=matched?.taskId??(alias?.conversationId===reporter.input.conversationId&&alias.reason===delivery.reason?alias.runTaskId:undefined);
+    if(runTaskId!==undefined){
+     const run=Number.isSafeInteger(runTaskId)&&runTaskId>0?await tx.task(runTaskId):undefined;
+     if(run?.kind!=='pi.generation'||run.conversationId!==reporter.input.conversationId||run.state.status!=='terminal')runTaskId=undefined;
+    }
+    // Read native membership before the callback's writes. Save ALL proven inputs,
+    // since a later child run can clear LiveDoc.runFailure before another reporter
+    // reaches this decision, including across shutdown/reopen.
+    const related:SubmissionId[]=[];
+    if(matched&&runTaskId!==undefined)for(const id of matched.inputs){
+     const input=await tx.submission(id);
+     if(input?.type==='input'&&input.conversationId===reporter.input.conversationId&&input.status==='unanswered'&&input.reason===matched.reason)related.push(id);
+    }
     const next=await change(tx,current);
-    if(delivery?.status!=='unanswered'||delivery.reason==='aborted'||next?.status!=='running'||next.checkpoint.phase!=='report'||next.checkpoint.report===undefined)return next;
-    const source={submissionId:delivery.id,...(failure?.inputs.includes(delivery.id)&&failure.reason===delivery.reason?{runTaskId:failure.taskId}:{})};
-    const evidence=await tx.doc(SubagentFailures,runtime.conversationId),key=source.runTaskId===undefined?`input:${delivery.id}`:`run:${source.runTaskId}`;
+    if(next?.status!=='running'||next.checkpoint.phase!=='report'||next.checkpoint.report===undefined)return next;
+    if(runTaskId!==undefined&&related.length){
+     evidence.aliases??={};
+     for(const id of related)evidence.aliases[id]={runTaskId,conversationId:reporter.input.conversationId,reason:delivery.reason};
+    }
+    const source={submissionId:delivery.id,...(runTaskId===undefined?{}:{runTaskId})};
+    const key=source.runTaskId===undefined?`input:${delivery.id}`:`run:${source.runTaskId}`;
     // A second steer may settle with the same native failure. Neither equal text
     // nor helper name is a result identity; a later run must still be reported.
     if(Object.hasOwn(evidence.reported,key)&&evidence.reported[key]!==reporter.id)return {...next,checkpoint:{phase:'report'}};

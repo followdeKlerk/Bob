@@ -10,13 +10,13 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {createModels} from '@earendil-works/pi-ai/models';
 import {fauxProvider,fauxAssistantMessage,fauxToolCall,type FauxResponseFactory} from '@earendil-works/pi-ai/providers/faux';
 import * as schema from '@earendil-works/pi-schema';
-import {defineTool,defineExtension,createRegistry,Harness,configure,AgentDoc,LiveDoc,type ToolRegistration,type Conversation,type ConversationId} from '@earendil-works/pi-durable';
+import {defineTask,defineTool,defineExtension,createRegistry,Harness,configure,AgentDoc,LiveDoc,type ToolRegistration,type Conversation,type ConversationId} from '@earendil-works/pi-durable';
 import {openNodeSqliteStorage} from '@earendil-works/pi-durable/storage/sqlite/node';
 import {CodingTools} from '@bob-local/coding';
 import {State} from '../src/state.js';
 import {openRuntime,ctx,type Runtime} from '../src/runtime.js';
 import {serve} from '../src/server.js';
-import {Subagents,SubagentTools} from '../src/subagents.js';
+import {Subagents,SubagentTools,SubagentFailures} from '../src/subagents.js';
 import {ChatMeta,Library} from '../src/documents.js';
 import {DelegationConfig,saveDelegationConfig,readDelegationConfig,fingerprint} from '../src/delegation-config.js';
 import {DelegationChild,DelegationSession} from '../src/delegation.js';
@@ -328,4 +328,62 @@ test('new authenticated owner can steer a genuine success or failure report run;
    assert.equal(Object.keys((await ledger(rt,chat.id)).dispatches).length,peer?0:1,'new owner gets a new bounded epoch, not borrowed old dispatches');
   }finally{release.resolve();await rt.close();f.close();}
  }
+});
+
+
+for(const scenario of ['delayed','restart','malformed-alias','wrong-child-alias','wrong-reason-alias','wrong-run-alias'] as const)test(`delayed failure reporter retains exact failed-run identity: ${scenario}`,{timeout:20000},async()=>{
+ const f=fixture(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>(),secondHeld=Promise.withResolvers<void>(),releaseSecond=Promise.withResolvers<void>();
+ const gate=defineTool({name:'delayed_failure_gate',description:'Deterministic native boundary',parameters:schema.obj({},{open:true}),replay:'unsafe',execute:async()=>{entered.resolve();await release.promise;return {output:[{type:'text' as const,text:'released'}]};}}),extension=defineExtension({name:'delayed-failure-gate',tools:[gate]});
+ const failed=()=>fauxAssistantMessage('',{stopReason:'error',errorMessage:'identical permanent fixture error'});
+ f.child.setResponses([fauxAssistantMessage(fauxToolCall('delayed_failure_gate',{}),{stopReason:'toolUse'}),failed(),fauxAssistantMessage('Separate successful run'),failed()]);
+ let sent=false,heldId:number|undefined;
+ f.setFlow(request=>{const last=request.messages.findLast(m=>m.role!=='system');if(last?.role==='user'&&last.content==='start')return dispatch([spawn('worker')]);if(last?.role==='user'&&typeof last.content==='string'&&last.content.startsWith('call:'))return dispatch(JSON.parse(last.content.slice(5)));if(last?.role==='toolResult'&&!sent){sent=true;return dispatch([{action:'send',name:'worker',message:'coalesced steer'}]);}return fauxAssistantMessage('Done');});
+ let {rt,chat}=await setup(f);
+ // Hold the second actual native reporter BEFORE its decision commit, not inside
+ // the transaction. Its durable deliver checkpoint must survive a real reopen.
+ const original=SubagentTools.tasks![1],held=defineTask({...original.definition,phases:{...original.definition.phases,deliver:async(task:any,api:any,context:any)=>original.definition.phases.deliver(task,new Proxy(api,{get(target,key){
+  if(key==='commit')return async(...args:any[])=>{
+   if(task.id===heldId){secondHeld.resolve();await new Promise<void>((resolve,reject)=>{
+    const abort=()=>reject(target.signal.reason??Error('Fixture invocation closed'));
+    if(target.signal.aborted){abort();return;}
+    target.signal.addEventListener('abort',abort,{once:true});releaseSecond.promise.then(()=>{target.signal.removeEventListener('abort',abort);resolve();});
+   });}
+   return target.commit(...args);
+  };
+  const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+ }}),context)}});
+ rt.registry.install({...rt.modules.subagents,tasks:SubagentTools.tasks!.map(task=>task===original?held:task)});
+ rt.registry.install(extension);await chat.configure({extensions:[...(await chat.agent(ctx)).extensions,extension]},ctx);
+ try{
+  await (await owner(f,chat,'start')).wait(ctx);await entered.promise;
+  const initial=Object.values((await ledger(rt,chat.id)).dispatches);assert.equal(initial.length,2);heldId=initial[1].reporter;
+  await until(async()=>!!await rt.harness.commit(tx=>tx.submissionByRequest(initial[1].child,`subagent:${heldId}`),ctx));
+  release.resolve();await secondHeld.promise;
+  await until(async()=>(await rt.harness.commit(tx=>tx.submissionByRequest(chat.id,`subagent-report:${initial[0].reporter}`),ctx))?.status==='done');
+  const failure=(await rt.harness.snapshot(LiveDoc,initial[0].child,ctx))!.runFailure!;
+  const deliveries=await rt.harness.commit(async tx=>Promise.all(initial.map(item=>tx.submissionByRequest(item.child,`subagent:${item.reporter}`))),ctx);
+  const aliases=(await rt.harness.snapshot(SubagentFailures,chat.id,ctx))?.aliases;
+  for(const delivery of deliveries){assert.equal(delivery?.status,'unanswered');assert.ok(failure.inputs.includes(delivery!.id));assert.deepEqual(aliases?.[delivery!.id],{runTaskId:failure.taskId,conversationId:initial[0].child,reason:failure.reason});}
+  await (await owner(f,chat,'call:'+JSON.stringify([{action:'send',name:'worker',message:'Explicit separate successful run'}]))).wait(ctx);
+  await until(async()=>{const live=await rt.harness.snapshot(LiveDoc,initial[0].child,ctx);return f.child.state.callCount===3&&!live?.run;});
+  assert.equal((await rt.harness.snapshot(LiveDoc,initial[0].child,ctx))?.runFailure,undefined,'later native run really cleared the transient failure');
+  const corrupt=scenario.endsWith('-alias');
+  if(corrupt)await chat.commit(async tx=>{
+   const evidence=await tx.doc(SubagentFailures,chat.id) as any,key=String(deliveries[1]!.id);
+   const alias={runTaskId:failure.taskId,conversationId:initial[1].child,reason:failure.reason};
+   evidence.aliases??={};evidence.aliases[key]=scenario==='malformed-alias'?null:scenario==='wrong-child-alias'?{...alias,conversationId:chat.id}:scenario==='wrong-reason-alias'?{...alias,reason:'no_model'}:{...alias,runTaskId:initial[0].reporter};
+  },ctx);
+  if(scenario==='restart'){const id=chat.id;await rt.close();rt=await openRuntime(f.state,f.models);chat=(await rt.harness.conversation(id,ctx))!;}
+  else releaseSecond.resolve();
+  await settled(rt);
+  const reports=async()=>{const entries=(await chat.entries({},100,undefined,ctx)).items;return {inputs:entries.filter(e=>e.kind==='pi.user'&&String(e.model?.[0]?.content).startsWith('[subagent worker failed:')),displays:entries.filter(e=>e.kind==='app.subagent-report'&&String((e.data as any)?.text).startsWith('[subagent worker failed:'))};};
+  const originalFailure=await reports();
+  assert.equal(originalFailure.inputs.length,corrupt?2:1,'a valid persisted alias suppresses only the same failed native result; invalid proof falls back conservatively');
+  assert.equal(originalFailure.displays.length,originalFailure.inputs.length);
+  if(!corrupt){assert.match(String(originalFailure.inputs[0].model?.[0]?.content),new RegExp('Native run '+failure.taskId));assert.equal(await rt.harness.commit(tx=>tx.submissionByRequest(chat.id,`subagent-report:${heldId}`),ctx),undefined);}
+  else assert.ok(originalFailure.inputs.some(entry=>String(entry.model?.[0]?.content).includes('Child input '+deliveries[1]!.id)),'invalid alias must not suppress a genuine unknown-identity result');
+  await (await owner(f,chat,'call:'+JSON.stringify([{action:'send',name:'worker',message:'Explicit later distinct failure'}]))).wait(ctx);await settled(rt);
+  const later=await reports();assert.equal(later.inputs.length,originalFailure.inputs.length+1,'same provider error on a later distinct run must still report');assert.equal(later.displays.length,later.inputs.length);
+  assert.equal(f.child.state.callCount,4,'no implicit retries');assert.ok((await results(chat)).every(result=>!result.isError));
+ }finally{release.resolve();releaseSecond.resolve();await rt.close();f.close();}
 });
