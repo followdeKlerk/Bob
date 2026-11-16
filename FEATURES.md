@@ -8,13 +8,14 @@ For setup, see [Install Bob](INSTALL.md).
 
 Open **Menu** above the message box to switch between:
 
-- **Chat** — the current conversation and its tools, files and interactive views.
 - **Terminal** — an experimental Mosh terminal for the selected main conversation on a Linux workstation. It requires the native arm64 Android client and host Mosh/tmux prerequisites described below.
 - **Notes** — a notebook shared across conversations on the selected machine.
 - **Workstations** — your paired machines. Each keeps its own conversations and configuration.
 - **Agents and Sessions** — opens the compact **Sessions** screen on the selected workstation. Search loaded conversations and helpers above the list; one **Active ▾** selector in the bottom controls opens Active, Archived and Trash choices. Conversation titles come first, with Bob, session IDs and real status below. Main conversations are compact, unboxed rows; their helpers, including completed helpers, are always shown underneath with indented branch lines. A ring around the main conversation’s dot marks the current session. Tap a main row to open its chat or a helper to open its view-only transcript—there are no expand/collapse controls. Each main row’s **⋯** menu (also available by long press) provides rename, pin/unpin, archive/unarchive, move to Trash or restore. A single in-flow bottom toolbar keeps the filter selector, **Schedules**, the **+** New session action and **Menu** available without covering list content; soft, theme-matched fades ease the list into its header and footer.
 - **Tools** — Modules for this conversation and Connections for the selected workstation. Compact cards keep versions and setup details behind a tap.
 - **Settings** — a short index with separate **Appearance**, **Conversation settings**, **Notifications**, **Voice**, **Phone & location**, **Connection**, **Storage & cache**, **App & updates** and **Advanced** pages, plus Schedules. Each submenu has Back; opening a category does not toggle its settings.
+
+Use **Back to chat** in the menu footer to return to your conversation. Skills/instructions pages and the model catalog briefly reuse recent reads in memory to avoid fetching the same lists every time. **Refresh library** reloads the library pages; conversation settings and tool/terminal permissions remain freshly checked.
 
 Switching sections keeps your chat draft and reading position. **Settings → Appearance** offers Light, Dark and System themes for chat and menus. Light-mode menu and settings windows use a beige canvas (`#e8dfd0`); Dark mode keeps dark menus, and System follows the phone’s current appearance. Both palettes use coordinated readable controls. Text follows Android's text-size setting. The light theme uses a warm beige background with deeper beige chat bubbles: a richer shade for assistant replies and a slightly lighter shade for owner messages. The selected Menu destination uses a quiet rounded outline and checkmark. Non-chat action buttons share outlined circular icons or matching text pills with a slightly stronger soft shadow, as do existing raised composer and pop-up surfaces; message bubbles and tool rows stay flat. Nunito is bundled offline for chat text, inputs, menus, settings, pickers, editors and app-owned native controls. These surfaces share compact rounded headings, consistent spacing and soft header/footer fades. Search boxes stay directly below page headings; Back/Cancel stays left and primary actions sit before Menu in the bottom controls. Code, raw technical payloads and the terminal retain Nordwand Mono for alignment.
 
@@ -29,7 +30,7 @@ Write a message and send it as normal. While Bob is working, **Chat actions → 
 
 Text-only messages can continue sending in the background. Keep Bob open for attachment uploads. If delivery is unconfirmed, check the existing message before sending a duplicate.
 
-Your messages appear on the right and Bob's replies on the left. New streamed prose has a brief leading-edge fade, without delaying the words; reduced-motion and screen-reader settings disable chat animations. Expand a tool row to see what Bob called, its result or an error. Small link footers show the reply's existing labels and destination domains without fetching web previews. Code blocks have a copy button; wide tables and code can be scrolled sideways.
+Your messages appear on the right and Bob's replies on the left. Received text appears immediately, without a typing-effect delay. The animated Bob shows factual activity rather than rotating jokes; reduced-motion and screen-reader settings disable decorative chat animations. Expand a tool row to see what Bob called, its result or an error. Small link footers show the reply's existing labels and destination domains without fetching web previews. Code blocks have a copy button; wide tables and code can be scrolled sideways.
 
 ### BTW: ask without interrupting
 
@@ -154,6 +155,10 @@ Bob can split suitable work between helpers, such as a researcher, an implementa
 
 Completed helper reports appear as expandable **Agent report** activity as soon as the backend receives them, even while Bob is still working. The same report stays in place rather than appearing again after the final reply. This is a report-ready indication, not a claim that Bob has already reviewed it or that the helper's conclusions are correct; model delivery still follows the normal reply queue.
 
+Failed helper notices identify the native run or input and warn that partial work may remain. Proven duplicate reports of one failed run are suppressed; separate failures remain visible. A failure notice does not mean its provider cause is known or that completed actions were undone. Inspect the helper's work before retrying.
+
+With automatic delegation enabled, verified helper reports can continue the current owner-authorized task, including an implementation-to-review handoff. Reports themselves never grant new authority; newer owner instructions, Stop/revoke and helper limits still apply.
+
 Use `/delegation` to inspect available routing choices. With configured profiles, `/delegation auto on` allows Bob to choose helpers for suitable tasks; `/delegation auto off` disables that automatic permission. It is off by default. Helpers can incur additional model costs, and simple work should stay with Bob rather than creating unnecessary agents.
 
 ## Switching live sessions
@@ -215,6 +220,14 @@ Bob can show interactive cards, diagrams and small workspaces in chat. Ordinary 
 A card is not an independent live feed: fresh external information or recurring checks need to be requested separately. Reopening restores saved content, but temporary local inputs may reset.
 
 Map and website buttons open their displayed destination only when you tap them. Generated cards cannot silently access your files, credentials, network or backend tools. Optional connected MCP tools and mini-apps need their own backend configuration and granted access.
+
+## Dictate a message
+
+Tap the microphone beside Send, allow Android microphone access, and speak one short utterance. Tap **Finish dictation** to finish, or hold the button to cancel without adding text. Only the final words are appended to the current draft; you decide when to send. Listening ends automatically after at most 20 seconds, with up to five more seconds for a final result. Type normally or dictate another utterance for longer messages.
+
+Bob prefers Android's actual on-device recognizer. If only the platform speech engine is available, Bob asks before each utterance because that engine may send audio to its provider. There is no automatic online fallback, backend audio upload or audio recording saved by Bob. Recognition requires an available engine and language model; activity-only speech apps are not supported. Unavailable recognition or denied permission does not prevent typing or Read aloud.
+
+Leaving Chat, switching conversations or backgrounding Bob cancels dictation and discards late results. Read aloud and dictation do not run together.
 
 ## Read aloud
 
