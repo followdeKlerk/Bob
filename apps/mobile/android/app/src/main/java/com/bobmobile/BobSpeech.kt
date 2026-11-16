@@ -19,9 +19,12 @@ import java.util.Locale
 
 /** Phone presentation only. Never writes to Durable, a file, or a network endpoint. */
 class BobSpeech(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
+    private companion object { val cleanupRegistry = SpeechEngineCleanup<TextToSpeech>() }
     private val main = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private var engine: TextToSpeech? = null
+    private val engineLease = SpeechEngineLease<TextToSpeech>({ it.stop() == TextToSpeech.SUCCESS }, { it.shutdown() })
+    private val engine: TextToSpeech? get() = engineLease.engine
+    private val stopFailure = "Read aloud could not be confirmed stopped. Try Stop again; if it still fails, close Bob completely and reopen before dictating."
     private var generation = 0
     private var active: String? = null
     private var pending: Promise? = null
@@ -52,21 +55,23 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         })
     }
     @Suppress("DEPRECATION")
-    private fun finish(state: String, message: String? = null) {
+    private fun finish(state: String, message: String? = null): Boolean {
         generation++
         timeout?.let { main.removeCallbacks(it) }; timeout = null
         val id = active; active = null
         val promise = pending; pending = null
         parts = emptyList(); index = 0
-        try { engine?.stop(); engine?.shutdown() } catch (_: Exception) {} finally { engine = null }
+        val cleaned = cleanupRegistry.cleanup(engineLease)
+        val failure = message ?: if (!cleaned) stopFailure else null
         try {
             if (Build.VERSION.SDK_INT >= 26) focus?.let { audio.abandonAudioFocusRequest(it) }
             else focusListener?.let { audio.abandonAudioFocus(it) }
         } catch (_: Exception) {}
         focus = null; focusListener = null
         if (receiverRegistered) { try { context.unregisterReceiver(noisy) } catch (_: Exception) {}; receiverRegistered = false }
-        if (id != null) event(id, state, message)
-        if (message != null) promise?.reject("speech", message) else promise?.resolve(null)
+        if (id != null) event(id, if (failure != null) "error" else state, failure)
+        if (failure != null) promise?.reject("speech", failure) else promise?.resolve(null)
+        return cleaned
     }
     private fun fail(message: String) = finish("error", message)
 
@@ -75,19 +80,19 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         val chunks = try { SpeechPolicy.chunks(text, minOf(3000, TextToSpeech.getMaxSpeechInputLength())) }
             catch (_: Exception) { promise.reject("speech", "Choose a reply containing 1–100,000 characters."); return@post }
         if (id.isBlank() || id.length > 100) { promise.reject("speech", "Invalid playback request."); return@post }
-        finish("stopped")
+        if (!finish("stopped")) { promise.reject("speech", stopFailure); return@post }
         active = id; pending = promise; parts = chunks; index = 0
         val token = generation
         event(id, "starting")
         timeout = Runnable { if (token == generation) fail("Speech engine did not initialize. Check Android text-to-speech settings.") }.also { main.postDelayed(it, 15000) }
         try {
             // Always post: Android may invoke a failure callback before the constructor returns.
-            engine = TextToSpeech(context) { status -> main.post {
+            engineLease.attach(TextToSpeech(context) { status -> main.post {
                 if (token != generation) return@post
                 timeout?.let { main.removeCallbacks(it) }; timeout = null
                 if (status != TextToSpeech.SUCCESS) { fail("No working speech engine. Install or configure one in Android text-to-speech settings."); return@post }
                 try { start(token) } catch (_: Exception) { fail("Speech could not start. Check your installed voice and Android speech settings.") }
-            } }
+            } })
         } catch (_: Exception) { fail("Speech engine is unavailable. Check Android text-to-speech settings.") }
     } }
 
@@ -149,8 +154,8 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         } catch (_: Exception) { fail("Speech playback is unavailable.") }
     }
     @ReactMethod fun stop(id: String, promise: Promise) { main.post {
-        if (id.isEmpty() || active == id) finish("stopped")
-        promise.resolve(null)
+        if ((id.isEmpty() || active == id) && !finish("stopped")) promise.reject("speech", stopFailure)
+        else promise.resolve(null)
     } }
     @ReactMethod fun openSettings(promise: Promise) { main.post {
         finish("stopped")

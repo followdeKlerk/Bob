@@ -8,7 +8,7 @@ import {VoiceInputSession} from '../voice-input';
 jest.mock('../speech',()=>({stopSpeech:jest.fn(async()=>true),subscribeSpeech:()=>()=>{},speechSnapshot:()=>null}));
 jest.mock('../theme',()=>require('../theme-context'));
 jest.mock('lucide-react-native',()=>({Mic:'Mic',Square:'Square',X:'X'}));
-const bridge={availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),cancel:jest.fn(async(_id:string)=>{}),finish:jest.fn(async(_id:string)=>{}),addListener:jest.fn(),removeListeners:jest.fn()};
+const bridge={windowFocused:jest.fn(async()=>true),availability:jest.fn(async()=>'onDevice'),start:jest.fn(async(_id:string,_mode:string,_consent:boolean)=>{}),cancel:jest.fn(async(_id:string)=>{}),finish:jest.fn(async(_id:string)=>{}),addListener:jest.fn(),removeListeners:jest.fn()};
 const props={disabled:false,active:true,scope:'backend/chat',onTranscript:jest.fn(),onError:jest.fn()};
 let tree:Renderer.ReactTestRenderer;
 const button=(label:string)=>tree.root.findAllByType(TouchTarget).find(node=>node.props.accessibilityLabel===label)!;

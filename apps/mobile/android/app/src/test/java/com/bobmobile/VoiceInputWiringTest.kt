@@ -10,7 +10,7 @@ class VoiceInputWiringTest {
     @Test fun foregroundAndAndroidPermissionPrecedeAnyRecognizerCreation() {
         val source = code
         val create = source.indexOf("SpeechRecognizer.createOnDeviceSpeechRecognizer(context)")
-        for (gate in listOf("!foreground", "context.currentActivity == null", "context.lifecycleState != LifecycleState.RESUMED",
+        for (gate in listOf("!admission.accepts(ticket) || !windowFocused()",
             "checkSelfPermission(Manifest.permission.RECORD_AUDIO)", "policy.id != null", "VoiceInputPolicy.permitted(mode, onDevice(), platform(), platformConsent)")) {
             assertTrue(gate, source.indexOf(gate) in 0 until create)
         }
@@ -20,15 +20,25 @@ class VoiceInputWiringTest {
     @Test fun allTerminalPathsRevokeBeforeDestroyAndBoundEvenAnUnresponsiveEngine() {
         val source = code
         assertTrue(source.indexOf("policy.end(token)") < source.indexOf("old?.destroy()"))
-        assertTrue(source.contains("policy.current(current) && foreground && !invalidated"))
+        assertTrue(source.contains("!policy.current(current) || !admission.accepts(ticket)"))
+        assertTrue(source.contains("if (!windowFocused()) { retire(admission.cancel(id)); return false }"))
         for (lifecycle in listOf("onHostPause", "onHostDestroy")) {
-            assertTrue(source.substringAfter("override fun $lifecycle()").substringBefore("\n").contains("foreground = false; main.post { cancelCurrent() }"))
+            assertTrue(source.substringAfter("override fun $lifecycle()").substringBefore("\n").contains("foreground = false; retire(admission.foreground(false))"))
         }
-        assertTrue(source.substringAfter("override fun invalidate()").contains("main.post { cancelCurrent() }"))
+        assertTrue(source.substringAfter("override fun invalidate()").contains("retire(admission.close())"))
         assertTrue(source.contains("main.postDelayed(it, VoiceInputPolicy.LISTEN_MS)"))
         assertTrue(source.contains("main.postDelayed(it, VoiceInputPolicy.FINISH_MS)"))
         assertTrue(source.indexOf("VoiceInputPolicy.LISTEN_MS") < source.indexOf("engine.startListening("))
-        assertTrue(source.contains("if (policy.id == id) cancelCurrent()")) // Old cancellation cannot stop a new request.
+        assertTrue(source.contains("retire(admission.cancel(id))"))
+        assertTrue(source.contains("if (activeTicket == ticket) end(token, \"cancelled\")"))
+        assertTrue(source.contains("context.addWindowFocusChangeListener(this)"))
+        assertTrue(source.contains("context.removeWindowFocusChangeListener(this)"))
+        assertTrue(source.contains("override fun onWindowFocusChange(hasFocus: Boolean) { retire(admission.focus(hasFocus)) }"))
+        assertTrue(source.contains("it.hasWindowFocus()"))
+        assertTrue(source.contains("admission.admit(ticket) { engine.startListening(intent) }"))
+        val start = source.substringAfter("@ReactMethod fun start(")
+        assertTrue(start.indexOf("val ticket = admission.claim(id)") < start.indexOf("main.post {"))
+        assertTrue(start.lastIndexOf("!admission.accepts(ticket) || !windowFocused()", start.indexOf("engine.startListening(")) >= 0)
     }
     @Test fun registrationIsDiscoverableButNoBackgroundCapturePersistenceOrAudioTransportIsAdded() {
         val manifest = File("src/main/AndroidManifest.xml").readText()

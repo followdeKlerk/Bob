@@ -4,7 +4,7 @@ import {stopSpeech,subscribeSpeech,speechSnapshot} from './speech';
 export type VoicePhase='idle'|'preparing'|'listening'|'finishing';
 type Mode='onDevice'|'platform';
 type VoiceEvent={id:string;state:'listening'|'finishing'|'final'|'cancelled'|'error';text?:string;message?:string};
-type VoiceNative={availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
+type VoiceNative={windowFocused:()=>Promise<boolean>;availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
 export const PLATFORM_VOICE_NOTICE='On-device recognition is unavailable. Android’s selected speech engine may send audio to its provider over the network. Bob does not upload or save audio. Continue for this utterance?';
 const native=():VoiceNative|undefined=>NativeModules.BobVoiceInput;
 let sequence=0;
@@ -13,6 +13,23 @@ function platformConsent():Promise<boolean>{
   {text:'Cancel',style:'cancel',onPress:()=>resolve(false)},
   {text:'Continue',onPress:()=>resolve(true)},
  ],{cancelable:true,onDismiss:()=>resolve(false)}));
+}
+/** Wait only for our consent/permission UI to return focus; never opens a recognizer. */
+function waitForWindowFocus(bridge:VoiceNative,signal:AbortSignal):Promise<void>{
+ return new Promise((resolve,reject)=>{
+  let settled=false,timer:ReturnType<typeof setTimeout>|undefined,focus:{remove:()=>void}|undefined;
+  const finish=(error?:Error)=>{
+   if(settled)return;settled=true;clearTimeout(timer);focus?.remove();signal.removeEventListener('abort',abort);
+   if(error)reject(error);else resolve();
+  };
+  const abort=()=>finish(Error('Dictation cancelled.'));
+  const check=()=>{void bridge.windowFocused().then(focused=>{if(focused)finish();}).catch(()=>finish(Error('Unable to check Bob’s window focus. Tap the mic again.')));};
+  if(signal.aborted){abort();return;}
+  if(typeof bridge.windowFocused!=='function'){finish(Error('Install an updated Bob Android build with focus-safe dictation.'));return;}
+  focus=AppState.addEventListener('focus',check);signal.addEventListener('abort',abort);
+  timer=setTimeout(()=>finish(Error('Return to Bob, then tap the mic again.')),2000);
+  check();
+ });
 }
 const voiceDependencies={
  native,
@@ -25,6 +42,7 @@ const voiceDependencies={
  },
  consent:platformConsent,
  stopSpeech,
+ waitForWindowFocus,
  foreground:()=>AppState.currentState==='active',
 };
 
@@ -37,6 +55,7 @@ export class VoiceInputSession {
  private enabled=false;
  private timer:ReturnType<typeof setTimeout>|undefined;
  private disposed=false;
+ private dialog:AbortController|null=null;
  constructor(private readonly changed:(phase:VoicePhase)=>void,private readonly transcript:(text:string)=>void,private readonly error:(message:string)=>void,private readonly deps=voiceDependencies){}
  attach(){this.disposed=false;}
  configure(scope:string,enabled:boolean){
@@ -46,10 +65,12 @@ export class VoiceInputSession {
  private publish(phase:VoicePhase){this.phase=phase;if(!this.disposed)this.changed(phase);}
  cancel(){
   this.generation++;
+  this.dialog?.abort();this.dialog=null;
   const id=this.id;this.id=null;clearTimeout(this.timer);this.timer=undefined;
   this.publish('idle');
   if(id)void this.deps.native()?.cancel(id).catch(()=>{});
  }
+ blur(){if(!this.dialog)this.cancel();}
  dispose(){this.disposed=true;this.enabled=false;this.cancel();}
  receive(raw:unknown){
   if(!raw||typeof raw!=='object')return;
@@ -81,16 +102,21 @@ export class VoiceInputSession {
   this.id=`voice-${++sequence}`;this.publish('preparing');
   // Also bounds hung availability/permission/consent/bridge promises; late answers are inert.
   this.timer=setTimeout(()=>{if(current()){this.cancel();this.error('Dictation timed out. Tap the mic to try again.');}},40000);
+  let dialog:AbortController|undefined;
   try{
    const mode=await bridge.availability();if(!current())return;
    if(mode!=='onDevice'&&mode!=='platform')throw Error('No Android speech recognizer is available. Enable an installed speech recognition service in Android Settings; typing still works.');
+   dialog=new AbortController();this.dialog=dialog;
    const consent=mode==='platform'?await this.deps.consent():false;if(!current())return;
    if(mode==='platform'&&!consent){this.cancel();return;}
    await this.deps.permission();if(!current())return;
+   await this.deps.waitForWindowFocus(bridge,dialog.signal);if(!current())return;
+   this.dialog=null;
    const stopped=await this.deps.stopSpeech();if(!current())return;
    if(!stopped)throw Error('Read aloud could not stop. Stop playback before dictating.');
    await bridge.start(this.id!,mode,consent);
   }catch(error){if(current()){this.cancel();this.error(error instanceof Error?error.message:'Dictation is unavailable. Try again or type your message.');}}
+  finally{if(this.dialog===dialog)this.dialog=null;dialog?.abort();}
  }
 }
 
@@ -99,6 +125,7 @@ export function connectVoiceInput(session:VoiceInputSession){
  const bridge=native();
  const events=Platform.OS==='android'&&bridge?new NativeEventEmitter(NativeModules.BobVoiceInput).addListener('BobVoiceInputState',event=>session.receive(event)):undefined;
  const app=AppState.addEventListener('change',state=>{if(state!=='active')session.cancel();});
+ const blur=Platform.OS==='android'?AppState.addEventListener('blur',()=>session.blur()):undefined;
  const speech=subscribeSpeech(()=>{if(speechSnapshot())session.cancel();});
- return ()=>{events?.remove();app.remove();speech();session.dispose();};
+ return ()=>{events?.remove();app.remove();blur?.remove();speech();session.dispose();};
 }
