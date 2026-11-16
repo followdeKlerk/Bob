@@ -5,45 +5,68 @@ import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
 import {View,StyleSheet,Modal} from 'react-native';
 import {AgentsScreen} from '../components/agents-screen';
-import {menuRadii} from '../theme';
 import {ThemeContext,tokens} from '../theme-context';
 import {EdgeFade} from '../components/edge-fade';
-import {SectionHeading,SectionActions} from '../components/section-ui';
+import {SectionActions} from '../components/section-ui';
 import type {AgentSession} from '../use-agent-overview';
 const text=(tree:Renderer.ReactTestRenderer)=>tree.root.findAll(n=>typeof n.props.children==='string').map(n=>n.props.children).join(' ');
 const button=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
 const sessions:AgentSession[]=[{conversationId:7,title:'Build the app',status:'working',agents:[{name:'Worker',conversationId:8,status:'working'},{name:'Reviewer',conversationId:9,status:'idle'}]},{conversationId:20,title:'Research trip',status:'idle',agents:[{name:'Worker',conversationId:21,status:'stopping'}]}];
 const props=()=>({sessions,onSelect:jest.fn(),onOpenSession:jest.fn(),onBack:jest.fn(),onHistoryChange:jest.fn(),status:'Connected',workstation:'Work PC'});
-test('compact conversation-first rows expand helpers only when requested',async()=>{
+const noHelperToggles=(tree:Renderer.ReactTestRenderer)=>{
+ expect(tree.root.findAll(node=>typeof node.props.accessibilityLabel==='string'&&/^(Expand|Collapse) agents/.test(node.props.accessibilityLabel))).toHaveLength(0);
+ expect(tree.root.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityState?.expanded!==undefined&&node.props.accessibilityLabel?.includes('agents'))).toHaveLength(0);
+ expect(text(tree)).not.toMatch(/\d+ helpers?/);
+};
+const branch=(tree:Renderer.ReactTestRenderer,parent:number,child:number,last:boolean)=>{
+ const row=tree.root.findByProps({testID:`agent-row-${parent}-${child}`}),connector=row.findByProps({testID:'agent-tree-connector'});
+ expect(connector.props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+ expect(StyleSheet.flatten(connector.props.style)).toMatchObject({position:'absolute',top:0,bottom:0,left:0,right:0});
+ expect(StyleSheet.flatten(row.findByProps({testID:'agent-tree-stem'}).props.style)).toMatchObject({left:8,top:0,bottom:last?'50%':0,width:1});
+ expect(StyleSheet.flatten(row.findByProps({testID:'agent-tree-arm'}).props.style)).toMatchObject({left:8,top:'50%',height:1});
+ return row;
+};
+test('compact conversation trees show every loaded helper initially, including completed helpers under their own parent',async()=>{
  const p=props();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<AgentsScreen {...p}>{null}</AgentsScreen>);});
- expect(tree.root.findByProps({testID:'sessions-heading'}).findAll(n=>n.props.children==='Sessions')).not.toHaveLength(0);
- expect(StyleSheet.flatten(tree.root.findByProps({testID:'sessions-heading'}).props.style).paddingTop).toBe(28);
- expect(text(tree)).not.toContain('Work PC');expect(text(tree)).not.toContain('No working helpers');
- expect(tree.root.findByProps({testID:'agent-session-tree'}).props.data).toHaveLength(2);
- expect(button(tree,'View agent Worker')).toBeUndefined();
- const toggle=button(tree,'Expand agents for Build the app'),shape=StyleSheet.flatten(toggle.props.style);
- expect(shape.minHeight).toBe(48);expect(shape.borderWidth).toBeUndefined();expect(shape.backgroundColor).toBeUndefined();expect(shape.boxShadow).toBeUndefined();
- const toggleText=toggle.findAll(n=>n.props.children?.includes?.('helpers'))[0];
- expect(StyleSheet.flatten(toggleText.props.style)).toMatchObject({fontSize:13,lineHeight:20});
- act(()=>button(tree,'Expand agents for Build the app').props.onPress());act(()=>button(tree,'Expand agents for Research trip').props.onPress());
- const workers=tree.root.findAll(n=>n.props.accessibilityLabel==='View agent Worker'&&typeof n.props.onPress==='function');expect(workers).toHaveLength(2);
- act(()=>workers[1].props.onPress());expect(p.onSelect).toHaveBeenCalledWith(20,21);
- act(()=>button(tree,'Open Bob session Build the app').props.onPress());expect(p.onOpenSession).toHaveBeenCalledWith(7);
- expect(button(tree,'View agent Reviewer')).toBeDefined();expect(StyleSheet.flatten(workers[0].props.style).minHeight).toBeGreaterThanOrEqual(48);
- const title=button(tree,'Open Bob session Build the app').findAll(n=>n.props.children==='Build the app')[0];expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:16,fontWeight:'600'});
- await act(async()=>tree.unmount());
+ try{
+  expect(tree.root.findByProps({testID:'sessions-heading'}).findAll(n=>n.props.children==='Sessions')).not.toHaveLength(0);
+  expect(StyleSheet.flatten(tree.root.findByProps({testID:'sessions-heading'}).props.style).paddingTop).toBe(28);
+  expect(text(tree)).not.toContain('Work PC');expect(text(tree)).not.toContain('No working helpers');
+  const list=tree.root.findByProps({testID:'agent-session-tree'});
+  expect(list.props.data.map((row:any)=>list.props.keyExtractor(row))).toEqual(['session:7','agent:7:8','agent:7:9','session:20','agent:20:21']);
+  expect(list.props.data.filter((row:any)=>row.kind==='session').map((row:any)=>row.first)).toEqual([true,false]);
+  noHelperToggles(tree);branch(tree,7,8,false);branch(tree,7,9,true);branch(tree,20,21,true);
+  const workers=tree.root.findAll(n=>n.props.accessibilityLabel==='View agent Worker'&&typeof n.props.onPress==='function');expect(workers).toHaveLength(2);
+  act(()=>workers[0].props.onPress());expect(p.onSelect).toHaveBeenLastCalledWith(7,8);
+  act(()=>workers[1].props.onPress());expect(p.onSelect).toHaveBeenLastCalledWith(20,21);
+  expect(workers[1].props.accessibilityHint).toContain('Under Research trip, session 20.');
+  act(()=>button(tree,'View agent Reviewer').props.onPress());expect(p.onSelect).toHaveBeenLastCalledWith(7,9);
+  act(()=>button(tree,'Open Bob session Build the app').props.onPress());expect(p.onOpenSession).toHaveBeenCalledWith(7);
+  expect(StyleSheet.flatten(workers[0].props.style).minHeight).toBeGreaterThanOrEqual(48);
+  const title=button(tree,'Open Bob session Build the app').findAll(n=>n.props.children==='Build the app')[0];expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:16,lineHeight:23,fontWeight:'600'});
+ }finally{await act(async()=>tree.unmount());}
 });
-test('search reveals matching helpers and explicit collapse also works in history mode',async()=>{
+test('search keeps only matching branches, recalculates endpoints and never introduces collapse paths in history mode',async()=>{
  const p=props();let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<AgentsScreen {...p}>{null}</AgentsScreen>);});
- const search=tree.root.findByProps({accessibilityLabel:'Search agents and sessions'});
- act(()=>search.props.onChangeText('Reviewer'));expect(button(tree,'View agent Reviewer')).toBeDefined();expect(button(tree,'Open Bob session Research trip')).toBeUndefined();
- act(()=>button(tree,'Collapse agents for Build the app').props.onPress());expect(button(tree,'View agent Reviewer')).toBeUndefined();
- act(()=>search.props.onChangeText(''));await act(async()=>tree.update(<AgentsScreen {...p} history>{null}</AgentsScreen>));
- expect(button(tree,'View agent Reviewer')).toBeDefined();act(()=>button(tree,'Collapse agents for Build the app').props.onPress());expect(button(tree,'View agent Reviewer')).toBeUndefined();
- expect(tree.root.findByProps({accessibilityLabel:'Search agents and sessions'})).toBe(search);
- await act(async()=>tree.unmount());
+ try{
+  const search=tree.root.findByProps({accessibilityLabel:'Search agents and sessions'}),list=tree.root.findByProps({testID:'agent-session-tree'});
+  const keys=()=>list.props.data.map((row:any)=>list.props.keyExtractor(row));
+  for(const history of [false,true]){
+   await act(async()=>tree.update(<AgentsScreen {...p} history={history}>{null}</AgentsScreen>));
+   act(()=>search.props.onChangeText('  wOrKeR  '));expect(keys()).toEqual(['session:7','agent:7:8','session:20','agent:20:21']);
+   branch(tree,7,8,true);branch(tree,20,21,true);expect(button(tree,'View agent Reviewer')).toBeUndefined();noHelperToggles(tree);
+   act(()=>search.props.onChangeText('Reviewer'));expect(keys()).toEqual(['session:7','agent:7:9']);branch(tree,7,9,true);
+   expect(button(tree,'Open Bob session Research trip')).toBeUndefined();noHelperToggles(tree);
+   act(()=>search.props.onChangeText('Build the app'));expect(keys()).toEqual(['session:7','agent:7:8','agent:7:9']);branch(tree,7,8,false);branch(tree,7,9,true);
+   act(()=>search.props.onChangeText('20'));expect(keys()).toEqual(['session:20','agent:20:21']);branch(tree,20,21,true);
+   act(()=>search.props.onChangeText('missing helper'));expect(keys()).toEqual([]);expect(text(tree)).toContain('No matching conversations');
+   act(()=>search.props.onChangeText(''));expect(keys()).toHaveLength(5);noHelperToggles(tree);
+   expect(tree.root.findByProps({accessibilityLabel:'Search agents and sessions'})).toBe(search);expect(tree.root.findByProps({testID:'agent-session-tree'})).toBe(list);
+  }
+  expect(p.onHistoryChange).not.toHaveBeenCalled();expect(p.onSelect).not.toHaveBeenCalled();expect(p.onOpenSession).not.toHaveBeenCalled();
+ }finally{await act(async()=>tree.unmount());}
 });
 test('opened helper retains list and transcript identity with an in-flow Back bar',async()=>{
  const p=props(),selected={parentId:7,agent:sessions[0].agents[0],title:sessions[0].title};let tree!:Renderer.ReactTestRenderer;
@@ -78,11 +101,16 @@ test('search stays above the list while the borderless action bar reserves its o
 });
 test('large branches give each helper an independently virtualized row with stable parent-scoped identity',async()=>{
  const p=props(),many:AgentSession={...sessions[0],agents:Array.from({length:1000},(_,index)=>({name:'Helper '+index,conversationId:index+100,status:'idle'}))};let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} sessions={[many]} history>{null}</AgentsScreen>);});
+ await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} sessions={[many]}>{null}</AgentsScreen>);});
  const list=tree.root.findByProps({testID:'agent-session-tree'});
  expect(list.props.data).toHaveLength(1001);
  expect(list.props.data[0].kind).toBe('session');expect(list.props.data[1].kind).toBe('agent');
  expect(list.props.keyExtractor(list.props.data[1])).toBe('agent:7:100');
+ expect(list.props.data[1].last).toBe(false);expect(list.props.data[1000].last).toBe(true);
+ expect(new Set(list.props.data.map((row:any)=>list.props.keyExtractor(row))).size).toBe(1001);
+ expect(list.props.getItemLayout).toBeUndefined();
+ const rendered=tree.root.findAll(node=>typeof node.props.testID==='string'&&node.props.testID.startsWith('agent-row-'));
+ expect(rendered.length).toBeGreaterThan(0);expect(rendered.length).toBeLessThan(1000);noHelperToggles(tree);
  await act(async()=>tree.unmount());
 });
 test('session controls are sibling targets in the tree, with inline filters and page actions',async()=>{
@@ -122,6 +150,9 @@ test('zero-helper rows stay compact and unknown execution is not fabricated as w
  await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} sessions={[{conversationId:90,title:'A descriptive conversation title',status:'unknown',agents:[]}]} currentSessionId={90} onFilterChange={onFilterChange} onNew={jest.fn()}>{null}</AgentsScreen>);});
  const row=button(tree,'Open Bob session A descriptive conversation title');expect(row.props.accessibilityState.selected).toBe(true);
  expect(tree.root.findByProps({testID:'agent-session-tree'}).props.data).toHaveLength(1);
+ expect(tree.root.findByProps({testID:'session-tree-marker-90'})).toBeDefined();
+ expect(tree.root.findAllByProps({testID:'session-tree-stem-90'})).toHaveLength(0);
+ expect(tree.root.findAllByProps({testID:'agent-tree-connector'})).toHaveLength(0);
  expect(tree.root.findAll(node=>typeof node.props.accessibilityLabel==='string'&&/^(Expand|Collapse) agents/.test(node.props.accessibilityLabel))).toHaveLength(0);
  expect(text(tree)).not.toMatch(/No (working )?helpers|Waiting|Failed|History|Work PC/);
  expect(tree.root.findByProps({accessibilityLabel:'Session status: Status unavailable'})).toBeDefined();
@@ -184,13 +215,14 @@ test('filter cancellation, native Back and hiding the page never change membersh
  }finally{await act(async()=>tree.unmount());}
 });
 
-test('lean row controls are unboxed metadata siblings and the single toolbar uses compact accessible icon targets',async()=>{
+test('flat roots keep ellipses separate from opening targets and the single toolbar uses compact accessible icons',async()=>{
  const p=props();let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} onSessionAction={async()=>{}} onFilterChange={()=>{}} onNew={()=>{}} onSchedules={()=>{}}>{null}</AgentsScreen>);});
  try{
-  const open=button(tree,'Open Bob session Build the app'),helper=button(tree,'Expand agents for Build the app'),overflow=button(tree,'Session controls for Build the app');
-  expect(open.findAll(node=>node.props.accessibilityLabel==='Expand agents for Build the app')).toHaveLength(0);
-  expect(tree.root.findByProps({testID:'session-metadata-7'}).findAll(node=>node.props.accessibilityLabel==='Expand agents for Build the app'&&typeof node.props.onPress==='function')).toHaveLength(1);
-  for(const item of [helper,overflow,button(tree,'Schedules'),button(tree,'Session filter: Active')]){
+  const open=button(tree,'Open Bob session Build the app'),overflow=button(tree,'Session controls for Build the app');
+  noHelperToggles(tree);
+  expect(open.findByProps({testID:'session-metadata-7'})).toBeDefined();
+  expect(open.findAllByProps({accessibilityLabel:'Session controls for Build the app'})).toHaveLength(0);
+  for(const item of [overflow,button(tree,'Schedules'),button(tree,'Session filter: Active')]){
    const style=StyleSheet.flatten(item.props.style);expect(style.minHeight).toBeGreaterThanOrEqual(48);
    for(const key of ['backgroundColor','borderWidth','borderRadius','boxShadow'])expect(style[key]).toBeUndefined();
   }
@@ -200,41 +232,66 @@ test('lean row controls are unboxed metadata siblings and the single toolbar use
  }finally{await act(async()=>tree.unmount());}
 });
 
-test('selected session has a rounded outline on all sides and moves without changing row geometry',async()=>{
+test('helper rows retain parent-scoped identities and selection through fresh overview/status updates and visibility cycles',async()=>{
  const p=props();let tree!:Renderer.ReactTestRenderer;
- await act(async()=>{tree=Renderer.create(<AgentsScreen {...p} currentSessionId={7}>{null}</AgentsScreen>);});
- const style=(id:number)=>StyleSheet.flatten(tree.root.findByProps({testID:`agent-session-${id}`}).props.style);
- expect(style(7).borderWidth).toBe(1);expect(style(7).borderRadius).toBe(menuRadii.card);
- expect(style(7).borderColor).not.toBe('transparent');expect(style(20).borderColor).toBe('transparent');
- expect(style(7).borderLeftWidth).toBeUndefined();expect(style(20).borderWidth).toBe(style(7).borderWidth);
- await act(async()=>tree.update(<AgentsScreen {...p} currentSessionId={20}>{null}</AgentsScreen>));
- expect(style(7).borderColor).toBe('transparent');expect(style(20).borderColor).not.toBe('transparent');
- expect(button(tree,'Open Bob session Research trip').props.accessibilityState.selected).toBe(true);
- expect(tree.root.findByProps({testID:'agent-session-tree'}).props.extraData).toBe(20);
- await act(async()=>tree.unmount());
+ const selected={parentId:20,agent:sessions[1].agents[0],title:sessions[1].title};
+ const render=(rows:AgentSession[],visible=true)=><AgentsScreen {...p} sessions={rows} visible={visible} selected={selected}><View testID="stable-child-transcript"/></AgentsScreen>;
+ await act(async()=>{tree=Renderer.create(render(sessions));});
+ try{
+  const list=tree.root.findByProps({testID:'agent-session-tree'}),search=tree.root.findByProps({accessibilityLabel:'Search agents and sessions'}),transcript=tree.root.findByProps({testID:'stable-child-transcript'});
+  const children=sessions.flatMap(session=>session.agents.map(agent=>({id:`agent-row-${session.conversationId}-${agent.conversationId}`,node:tree.root.findByProps({testID:`agent-row-${session.conversationId}-${agent.conversationId}`})})));
+  const rows=sessions.map(session=>({...session,status:'idle' as const,agents:session.agents.map(agent=>({...agent,status:'idle' as const}))})).reverse();
+  for(const visible of [true,false,true]){
+   await act(async()=>tree.update(render(rows,visible)));
+   expect(tree.root.findByProps({testID:'agent-session-tree'})).toBe(list);expect(tree.root.findByProps({accessibilityLabel:'Search agents and sessions'})).toBe(search);expect(tree.root.findByProps({testID:'stable-child-transcript'})).toBe(transcript);
+   for(const {id,node} of children)expect(tree.root.findByProps({testID:id})).toBe(node);
+   expect(tree.root.findByProps({testID:'agent-row-20-21'}).findAll(node=>node.props.accessibilityLabel==='View agent Worker'&&typeof node.props.onPress==='function')[0].props.accessibilityState.selected).toBe(true);
+   expect(tree.root.findByProps({testID:'agent-row-7-8'}).findAll(node=>node.props.accessibilityLabel==='View agent Worker'&&typeof node.props.onPress==='function')[0].props.accessibilityState.selected).toBe(false);
+   noHelperToggles(tree);
+  }
+ }finally{await act(async()=>tree.unmount());}
 });
 
-
-test.each(['light','dark'] as const)('selected session card has a complete quiet border and natural sizing in %s mode',async(scheme)=>{
+test.each(['light','dark'] as const)('flat session roots use a bullet ring for selection and keep natural wrapping in %s mode',async(scheme)=>{
  const p=props(),theme=tokens[scheme],menuTheme=menuThemes[scheme];let tree!:Renderer.ReactTestRenderer;
  const longTitle='Can we work on Bob application and CLI, with a long title that wraps naturally?';
- const rows=[{...sessions[0],title:longTitle},sessions[1]];
+ const longHelper='A helper with a descriptive name that also needs to wrap with larger system text';
+ const rows=[{...sessions[0],title:longTitle,agents:[{...sessions[0].agents[0],name:longHelper},sessions[0].agents[1]]},sessions[1]];
  const render=(currentSessionId:number)=><ThemeContext.Provider value={theme}><AgentsScreen {...p} sessions={rows} currentSessionId={currentSessionId} onSessionAction={async()=>{}}>{null}</AgentsScreen></ThemeContext.Provider>;
  await act(async()=>{tree=Renderer.create(render(7));});
  try{
-  const card=tree.root.findByProps({testID:'agent-session-7'}),shape=StyleSheet.flatten(card.props.style);
-  expect(shape).toMatchObject({borderWidth:1,borderRadius:menuRadii.card,marginBottom:10,borderColor:menuTheme.colors.selectedBorder,backgroundColor:menuTheme.colors.selectedSurface});
-  expect(shape.borderColor).not.toBe(menuTheme.colors.accent);
-  // A per-edge separator color overrides borderColor on Android and previously
-  // erased the selected card's bottom edge. Keep spacing outside the outline.
-  for(const edge of ['Top','Right','Bottom','Left'])expect(shape[`border${edge}Color`]).toBeUndefined();
-  for(const key of ['height','maxHeight','overflow'])expect(shape[key]).toBeUndefined();
-  const open=button(tree,`Open Bob session ${longTitle}`),label=open.findAll(node=>node.props.children===longTitle)[0];
-  expect(label.props.numberOfLines).toBeUndefined();expect(label.props.allowFontScaling).not.toBe(false);
-  expect(StyleSheet.flatten(button(tree,`Session controls for ${longTitle}`).props.style).minHeight).toBeGreaterThanOrEqual(48);
+  const root=tree.root.findByProps({testID:'agent-session-7'}),shape=StyleSheet.flatten(root.props.style),otherShape=StyleSheet.flatten(tree.root.findByProps({testID:'agent-session-20'}).props.style);
+  for(const style of [shape,otherShape])for(const key of ['backgroundColor','borderWidth','borderRadius','boxShadow','height','maxHeight','overflow'])expect(style[key]).toBeUndefined();
+  expect(otherShape.marginTop).toBe(12);
+  const marker=(id:number)=>StyleSheet.flatten(tree.root.findByProps({testID:`session-tree-marker-${id}`}).props.style);
+  expect(marker(7)).toMatchObject({width:7,height:7,top:'50%',backgroundColor:menuTheme.colors.accent});
+  expect(marker(20).backgroundColor).toBe(menuTheme.colors.muted);
+  const ring=tree.root.findByProps({testID:'session-tree-selection-7'}),ringStyle=StyleSheet.flatten(ring.props.style);
+  expect(ringStyle).toMatchObject({width:13,height:13,borderRadius:6.5,borderWidth:1,borderColor:menuTheme.colors.accent,top:'50%'});
+  expect(tree.root.findAllByProps({testID:'session-tree-selection-20'})).toHaveLength(0);
+  const stem=StyleSheet.flatten(tree.root.findByProps({testID:'session-tree-stem-7'}).props.style);
+  expect(stem).toMatchObject({left:8,top:'50%',bottom:0,width:1});branch(tree,7,8,false);branch(tree,7,9,true);
+  const gutter=StyleSheet.flatten(tree.root.findByProps({testID:'session-tree-marker-7'}).parent!.props.style).width;
+  const indent=StyleSheet.flatten(tree.root.findByProps({testID:'agent-row-7-8'}).props.style).paddingLeft;
+  expect(indent).toBeGreaterThan(gutter);
+  const arm=StyleSheet.flatten(tree.root.findByProps({testID:'agent-row-7-8'}).findByProps({testID:'agent-tree-arm'}).props.style);
+  expect(arm.left+arm.width).toBeLessThan(indent);
+  const open=button(tree,`Open Bob session ${longTitle}`),helper=button(tree,`View agent ${longHelper}`);
+  const title=open.findAll(node=>node.props.children===longTitle)[0],name=helper.findAll(node=>node.props.children===longHelper)[0];
+  expect(StyleSheet.flatten(title.props.style)).toMatchObject({fontSize:16,lineHeight:23});expect(StyleSheet.flatten(name.props.style)).toMatchObject({fontSize:15,lineHeight:22});
+  expect(StyleSheet.flatten(helper.findAll(node=>node.props.children==='Running')[0].props.style)).toMatchObject({fontSize:12,lineHeight:18});
+  const id=open.findByProps({testID:'session-metadata-7'}).findByProps({typography:'mono'});
+  expect(React.Children.toArray(id.props.children).join('')).toBe('#7');
+  for(const label of [title,name,...helper.findAll(node=>node.props.children==='Running')]){
+   expect(label.props.numberOfLines).toBeUndefined();expect(label.props.allowFontScaling).not.toBe(false);expect(label.props.adjustsFontSizeToFit).not.toBe(true);
+  }
+  for(const node of [root,open,helper,tree.root.findByProps({testID:'agent-row-7-8'})])for(const key of ['height','maxHeight','overflow'])expect(StyleSheet.flatten(node.props.style)[key]).toBeUndefined();
+  for(const control of [open,helper,button(tree,`Session controls for ${longTitle}`)])expect(StyleSheet.flatten(control.props.style).minHeight).toBeGreaterThanOrEqual(48);
   await act(async()=>tree.update(render(20)));
-  expect(tree.root.findByProps({testID:'agent-session-7'})).toBe(card);
-  const unselected=StyleSheet.flatten(card.props.style);expect(unselected.borderColor).toBe('transparent');expect(unselected.backgroundColor).toBe(menuTheme.colors.panel);
-  expect(unselected.borderWidth).toBe(shape.borderWidth);expect(unselected.marginBottom).toBe(shape.marginBottom);
+  expect(tree.root.findByProps({testID:'agent-session-7'})).toBe(root);expect(StyleSheet.flatten(root.props.style)).toEqual(shape);expect(StyleSheet.flatten(tree.root.findByProps({testID:'agent-session-20'}).props.style)).toEqual(otherShape);
+  expect(tree.root.findAllByProps({testID:'session-tree-selection-7'})).toHaveLength(0);expect(tree.root.findByProps({testID:'session-tree-selection-20'})).toBeDefined();
+  expect(marker(7).backgroundColor).toBe(menuTheme.colors.muted);expect(marker(20).backgroundColor).toBe(menuTheme.colors.accent);
+  expect(button(tree,'Open Bob session Research trip').props.accessibilityState.selected).toBe(true);expect(open.props.accessibilityState.selected).toBe(false);
+  expect(tree.root.findByProps({testID:'agent-session-tree'}).props.extraData).toBe(20);
  }finally{await act(async()=>tree.unmount());}
 });

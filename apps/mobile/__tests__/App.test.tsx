@@ -590,7 +590,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  await navigateTo(tree,'Agents');
  expect(activeRoot(tree).findByProps({testID:'agents-screen'})).toBeDefined();
  expect(activeRoot(tree).findAllByProps({testID:'child-history-list'})).toHaveLength(0);
- await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'Expand agents for Test chat'}).props.onPress());
+
  await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'View agent Audit helper'}).props.onPress());
  expect(activeRoot(tree).findByProps({testID:'child-history-list'})).toBeDefined();
  const childList=activeRoot(tree).findByProps({testID:'child-history-list'});
@@ -639,7 +639,7 @@ test('agent reports are collapsible non-owner rows; active indicator clears on i
  }finally{await act(async()=>tree.unmount());}
 });
 
-test('agent tree opens another session helper without changing the main draft or admitting work',async()=>{
+test('agent tree opens the correct parent-scoped helper with duplicate names without changing the main draft or admitting work',async()=>{
  jest.replaceProperty(Platform,'OS','android');
  const backend={backendId:'11111111-1111-4111-8111-111111111111',endpoint:'https://test.ts.net',name:'Test machine'};
  await AsyncStorage.setItem('backends',JSON.stringify([backend]));await AsyncStorage.setItem('selection',JSON.stringify({backendId:backend.backendId,chat:7}));
@@ -648,7 +648,7 @@ test('agent tree opens another session helper without changing the main draft or
  const snapshots=new Map<string,(event:any)=>void>(),closes=new Map<string,jest.Mock>();
  require('react-native-sse').mockImplementation((url:string)=>{const close=jest.fn();closes.set(url,close);return {addEventListener:jest.fn((event,callback)=>{if(event==='snapshot')snapshots.set(url,callback);}),close};});
  const fetch=jest.spyOn(globalThis,'fetch').mockImplementation(async(input:any)=>{
-  const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:7,title:'Main session',status:'working',agents:[]},{conversationId:20,title:'Other session',status:'working',agents:[{name:'Other helper',conversationId:21,status:'working'}]}]}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Main session'}},{id:20,meta:{title:'Other session'}}]}:url.endsWith('/updates')?{enabled:false}:[];
+  const url=String(input),data=url.includes('/agent-overview')?{backendId:backend.backendId,sessions:[{conversationId:7,title:'Main session',status:'working',agents:[{name:'Other helper',conversationId:8,status:'idle'}]},{conversationId:20,title:'Other session',status:'working',agents:[{name:'Other helper',conversationId:21,status:'working'}]}]}:url.includes('/history')?{backendId:backend.backendId,conversationId:7,coverage:'stored-entries',items:[]}:url.endsWith('/chats')?{items:[{id:7,meta:{title:'Main session'}},{id:20,meta:{title:'Other session'}}]}:url.endsWith('/updates')?{enabled:false}:[];
   return {ok:true,status:200,json:async()=>data} as Response;
  });
  let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<App/>);});
@@ -661,8 +661,12 @@ test('agent tree opens another session helper without changing the main draft or
   act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280}));
   expect(StyleSheet.flatten(activeRoot(tree).findByProps({testID:'agents-screen'}).props.style).bottom).toBe(280);
   act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:0}));
-  await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'Expand agents for Other session'}).props.onPress());
-  await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'View agent Other helper'}).props.onPress());
+
+  expect(activeRoot(tree).findAll(node=>node.props.accessibilityLabel==='View agent Other helper'&&typeof node.props.onPress==='function')).toHaveLength(2);
+  await act(async()=>activeRoot(tree).findByProps({testID:'agent-row-20-21'}).findByProps({accessibilityLabel:'View agent Other helper'}).props.onPress());
+  expect(activeRoot(tree).findByType(AgentsScreen).props.selected).toMatchObject({parentId:20,agent:{conversationId:21}});
+  expect(activeRoot(tree).findByProps({testID:'agent-row-7-8'}).findByProps({accessibilityLabel:'View agent Other helper'}).props.accessibilityState.selected).toBe(false);
+  expect(snapshots.has(`${backend.endpoint}/v1/chats/8/events?heartbeats=1&patches=1`)).toBe(false);
   const callback=snapshots.get(`${backend.endpoint}/v1/chats/21/events?heartbeats=1&patches=1`)!;expect(callback).toBeDefined();
   await act(async()=>callback({data:JSON.stringify({backendId:backend.backendId,conversationId:21,view:{entries:[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:'Other session helper work'}]}],docs:{},work:[]}})}));
   expect(activeRoot(tree).findByProps({testID:'child-history-list'}).props.data.some((entry:any)=>entry.id===1)).toBe(true);
@@ -1518,7 +1522,7 @@ describe('optional chat-list cache and child stream regressions',()=>{
   try{
    await act(async()=>{tree=Renderer.create(<App/>);});
    await navigateTo(tree,'Agents');
-   await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'Expand agents for Test chat'}).props.onPress());
+
    await act(async()=>activeRoot(tree).findByProps({accessibilityLabel:'View agent First helper'}).props.onPress());
    let expectedWrites=0;
    for(const [status,docs,work] of [
