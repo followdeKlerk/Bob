@@ -6,6 +6,9 @@ import {useTheme} from '../theme';
 import {openSpeechSettings} from '../speech';
 import type {VoiceProvider,VoiceInputSession} from '../voice-input';
 
+/** Shared with Settings → Voice; never shown in the live capture panel. */
+export const SPEECH_CAPTURE_HELP='Voice Chat sends final words once and reads the reply; dictation only edits your draft. Tap for each new turn. Bob requests a 3-second pause, but Android providers may end sooner. Bob never restarts the mic automatically.';
+
 type Pending={initial:string;generation:number;language?:string;providers?:VoiceProvider[];error?:string;resolve:(value:VoiceProvider|undefined)=>void;signal:AbortSignal};
 type NetworkConsent={provider:VoiceProvider;resolve:(value:boolean)=>void;signal:AbortSignal};
 /** Ephemeral selection UI. Closing, backgrounding or replacing the owner resolves without capture. */
@@ -85,7 +88,7 @@ export function useSpeechOptions(session:VoiceInputSession){
       {row('Forget network speech approval','Ask again before any network-capable provider receives audio. Keeps your language/provider choice.',()=>manage(()=>void session.revokeApprovals()))}
       {row('Use Google UK voice','Read replies with Google’s installed offline en-GB voice where available.',()=>manage(()=>void voicePreference(false)))}
       {row('Android voice & speed','Use Android’s chosen engine, voice and speed instead of Bob’s Google UK default.',()=>manage(()=>void voicePreference(true)))}
-      <Text style={{color:colors.muted}}>Voice Chat sends final words once and reads the reply; dictation only edits your draft. Tap for each new turn. Bob requests a 3-second pause, but Android providers may end sooner. Bob never restarts the mic automatically.</Text>
+      <Text style={{color:colors.muted}}>{SPEECH_CAPTURE_HELP}</Text>
      </>}
     </ScrollView>
     <Button variant="ghost" accessibilityLabel="Close speech options" onPress={()=>close(pending)} style={{minHeight:48,paddingLeft:12,paddingRight:12,paddingTop:8,paddingBottom:8}}><Text style={{color:colors.accent}}>Close</Text></Button>

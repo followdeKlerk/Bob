@@ -1,7 +1,7 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View} from 'react-native';
+import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,Text as NativeText,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import App from '../App';
@@ -10,6 +10,7 @@ import {DraftInput} from '../components/draft-input';
 import {VoiceChatPanel} from '../components/voice-chat-controls';
 import {ComposerStatusRecovery} from '../components/composer-recovery';
 import {ChatNavigation} from '../components/chat-navigation';
+import {SettingsHome} from '../components/settings-home';
 import {AgentsScreen} from '../components/agents-screen';
 import {stopSpeech,speechSnapshot,markAudioCleanupUnconfirmed} from '../speech';
 import {readOutbox} from '../outbox-storage';
@@ -88,8 +89,12 @@ test.each(['light','dark'] as const)('actual App: two %s Voice Chat turns auto-s
  const attachment=()=>root(mounted).findAllByProps({accessibilityLabel:'Remove drawing.png'});
  const initialFiles=attachment().length;expect(initialFiles).toBeGreaterThan(0);
  expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();await tap('Start Voice Chat');
- await event('listening');await event('partial','Partial visible words');expect(root(mounted).findByProps({testID:'voice-chat-partial'}).props.children).toBe('Partial visible words');expect(posts).toHaveLength(0);
+ await event('listening');await event('partial','Partial spoken words');
+ const panel=()=>root(mounted).findByProps({testID:'voice-chat-panel'});
+ expect(panel().findAllByType(NativeText)).toHaveLength(0);expect(root(mounted).findAllByProps({testID:'voice-chat-partial'})).toHaveLength(0);
+ expect(root(mounted).findByProps({testID:'voice-chat-phase'}).props.accessibilityLabel).toContain('Listening · auto-send\nPartial spoken words');expect(posts).toHaveLength(0);
  const firstId=NativeModules.BobVoiceInput.startConfigured.mock.calls[0][0];await event('final','FIRST SPOKEN TURN',firstId);await event('final','DUPLICATE FINAL',firstId);
+ expect(panel().findAllByType(NativeText)).toHaveLength(0);
  expect(posts).toHaveLength(1);expect(posts[0]).toMatchObject({text:'FIRST SPOKEN TURN',mode:'followUp'});expect(posts[0].questionId).toBeUndefined();
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('KEEP THIS UNSENT DRAFT');expect(root(mounted).findByType(DraftInput)).toBe(editor);expect(list(mounted)).toBe(history);expect(attachment()).toHaveLength(initialFiles);
  expect(((await readOutbox()) as any[])[0].files).toEqual([]);expect(NativeModules.BobFiles.removeAttachment).not.toHaveBeenCalled();
@@ -97,6 +102,7 @@ test.each(['light','dark'] as const)('actual App: two %s Voice Chat turns auto-s
  expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();
  const full='Full reply, literal 2*3 equals 6. '.repeat(200);await complete(0,100,full);
  expect(NativeModules.BobSpeech.speak).toHaveBeenCalledTimes(1);expect(NativeModules.BobSpeech.speak.mock.calls[0][0]).toBe(full.trim());
+ expect(panel().findAllByType(NativeText)).toHaveLength(0);expect(root(mounted).findByProps({testID:'voice-chat-phase'}).props.accessibilityLabel).toContain('Reading reply');
  const audio=NativeModules.BobSpeech.speak.mock.calls[0][1];await act(async()=>DeviceEventEmitter.emit('BobSpeechState',{id:audio,state:'done'}));
  expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);await tap('Speak to Bob');await event('final','SECOND SPOKEN TURN');expect(posts).toHaveLength(2);
  await complete(1,101,'Second completed answer');expect(NativeModules.BobSpeech.speak).toHaveBeenCalledTimes(2);expect(NativeModules.BobSpeech.speak.mock.calls[1][0]).toBe('Second completed answer');
@@ -338,12 +344,12 @@ test.each([337,361].flatMap(width=>[1,2].map(fontScale=>({width,fontScale}))))('
  await act(async()=>{input.props.onChangeText('Keep this draft');await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
  await tap('Start Voice Chat');const id=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0];
  const panelMax=root(tree!).findByType(VoiceChatPanel).props.maxHeight;
- expect(root(tree!).findByProps({testID:'voice-chat-phase'}).props.numberOfLines).toBe(2);
+ expect(root(tree!).findByProps({testID:'voice-chat-panel'}).findAllByType(NativeText)).toHaveLength(0);
  expect(button(tree!,'Read full voice error')).toBeUndefined();
  const message='Requested language model is not installed. The selected provider could not complete recognition. Download the requested model in Android settings, or use Speech options to choose another language and provider. Tap the headphones to try again. Typing still works.';
  await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'error',message});await flush();});
  const phase=root(tree!).findByProps({testID:'voice-chat-phase'});
- expect(phase.props.children).toContain('tap for details');expect(phase.props.children).toContain('model is not installed');
+ expect(phase.props.numberOfLines).toBe(2);expect(phase.props.children).toContain('tap for details');expect(phase.props.children).toContain('model is not installed');
  const disclosure=button(tree!,'Read full voice error');expect(disclosure.props.accessibilityRole).toBe('button');expect(disclosure.props.disabled).toBe(false);
  expect(disclosure.props.hitSlop).toBe(8);
  expect(root(tree!).findByType(VoiceChatPanel).props.maxHeight).toBe(panelMax);
@@ -483,4 +489,20 @@ test('forget approval is reachable, keeps draft/list, and stale options manageme
  await act(async()=>{staleForget();await flush();});expect(bridge.revokeApprovals).toHaveBeenCalledTimes(1);
  expect(bridge.startConfigured).toHaveBeenCalledTimes(1);
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Saved draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
+});
+
+
+test.each(['light','dark'] as const)('Settings → Voice in %s explains recognition and icon controls without starting audio',async scheme=>{
+ await AsyncStorage.setItem('appearance',scheme);const mounted=await mount(),input=draft(mounted),history=list(mounted);
+ await act(async()=>input.props.onChangeText('Keep settings draft'));
+ await act(async()=>{root(mounted).findByType(ChatNavigation).props.onSelect('Settings');await flush();});
+ await act(async()=>{root(mounted).findByType(SettingsHome).props.onOpen('Voice');await flush();});
+ expect(button(mounted,'Android text-to-speech settings')).toBeDefined();
+ const help=button(mounted,'Recognition & Voice Chat');expect(StyleSheet.flatten(help.props.style).minHeight).toBeGreaterThanOrEqual(48);
+ await tap('Recognition & Voice Chat');
+ const text=root(mounted).findAllByType(NativeText).map(node=>node.props.children).flat().filter(value=>typeof value==='string').join(' ');
+ expect(text).toContain('Bob requests a 3-second pause');expect(text).toContain('installed provider names and network approval');expect(text).toContain('Stop (square)');
+ expect(NativeModules.BobVoiceInput.startConfigured).not.toHaveBeenCalled();expect(PermissionsAndroid.request).not.toHaveBeenCalled();expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();expect(posts).toHaveLength(0);
+ await act(async()=>{root(mounted).findAllByType(ChatNavigation)[0].props.onSelect('Chat');await flush();});
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Keep settings draft');expect(list(mounted)).toBe(history);
 });

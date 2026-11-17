@@ -16,6 +16,7 @@ import {readOnlyProfile,conversationProfileRecord,conversationReadOnlyMessage,us
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
 import {openSpeechSettings,speechState,subscribeSpeech,stopSpeech} from './speech';
+import {SPEECH_CAPTURE_HELP} from './components/speech-options';
 import 'react-native-get-random-values';
 import './global.css';
 import Animated from 'react-native-reanimated';
@@ -1226,6 +1227,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
           {screen === 'Voice' && <>
 <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
+                <Disclosure menu label="Recognition & Voice Chat"><Text typography="ui" style={menuStyles.caption}>{SPEECH_CAPTURE_HELP}</Text><Text typography="ui" style={menuStyles.caption}>The microphone ring marks listening; the speaker marks reply playback. Stop (square) ends capture or reading; Exit (cross) closes Voice Chat. For languages, installed provider names and network approval, open Speech options (sliders) in Voice Chat. Choices are shared with dictation and remembered on this phone. Provider details and help stay in Speech options, not over the live chat.</Text></Disclosure>
                 <Disclosure menu label="About read aloud"><Text typography="ui" style={menuStyles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. Voice Chat (headphones beside Send) reads only its own completed replies automatically; the separate microphone edits the draft without sending. No audio export.</Text></Disclosure>
               </SettingsGroup>
           </>}

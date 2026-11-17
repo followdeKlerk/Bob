@@ -1,17 +1,19 @@
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,NativeModules,PermissionsAndroid,Platform,StyleSheet} from 'react-native';
+import {AppState,NativeModules,PermissionsAndroid,Platform,StyleSheet,Text as NativeText} from 'react-native';
 import {ThemeContext,tokens} from '../theme-context';
 import {VoiceInputSession} from '../voice-input';
+import type {VoiceChatState} from '../voice-chat';
 
 jest.mock('../speech',()=>({stopSpeech:jest.fn(async()=>true),subscribeSpeech:()=>()=>{},speechSnapshot:()=>null}));
-jest.mock('lucide-react-native',()=>({Mic:'Mic',Square:'Square',X:'X'}));
+jest.mock('lucide-react-native',()=>({Mic:'Mic',Square:'Square',X:'X',Headphones:'Headphones',Settings2:'Settings2',Volume2:'Volume2',Clock:'Clock'}));
 declare const __dirname:string;
 Platform.OS='android';
 // Production NativeWind button utilities, including directional px/py: no mocked Button.
 require('react-native-css-interop/dist/runtime/components');
 const {useSpeechOptions}=require('../components/speech-options');
 const {VoiceInputButton}=require('../components/voice-input-button');
+const {VoiceChatPanel}=require('../components/voice-chat-controls');
 function Harness({session}:{session:VoiceInputSession}){return useSpeechOptions(session);}
 const host=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>typeof node.type==='string'&&node.props.accessibilityLabel===label)[0];
 const action=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
@@ -90,5 +92,35 @@ test.each(['light','dark'] as const)('compiled draft recovery %s remains high-co
   await act(async()=>{tree!.root.findAll(node=>node.props.accessibilityLabel==='Open speech options from dictation recovery'&&typeof node.props.onPress==='function')[0].props.onPress();await flush();});expect(tree!.root.findByProps({testID:'speech-options'})).toBeTruthy();
   await act(async()=>{action(tree!,'Close speech options').props.onPress();await flush();});
   expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);
+ }finally{await act(async()=>tree?.unmount());}
+});
+
+
+// This exercises the production Button through compiled NativeWind styles. It proves
+// structure/props, not Android pixels, target bounds or TalkBack announcement delivery.
+test.each(matrix)('compiled icon-only voice panel $width $scheme $fontScale hides all normal copy and preserves accessible state/actions',async({width,scheme,fontScale})=>{
+ jest.spyOn(dimensions,'useWindowDimensions').mockReturnValue({width,height:440,fontScale,scale:1});
+ const session={stop:jest.fn(),press:jest.fn(),cancel:jest.fn()};
+ const provider='Speech Recognition and Synthesis from Google speech service (en-GB)';
+ let tree:Renderer.ReactTestRenderer|undefined;
+ try{
+  for(const phase of ['idle','preparing','listening','finishing','external','waiting','speaking'] as const){
+   const state:VoiceChatState={open:true,phase,partial:'Words only for accessibility',provider,external:phase==='external'};
+   await act(async()=>{const element=<ThemeContext.Provider value={tokens[scheme]}><VoiceChatPanel state={state} session={session} maxHeight={128}/></ThemeContext.Provider>;if(tree)tree.update(element);else tree=Renderer.create(element);});
+   const panel=tree!.root.findByProps({testID:'voice-chat-panel'});
+   expect(panel.findAllByType(NativeText)).toHaveLength(0);expect(panel.findAllByProps({testID:'voice-chat-details'})).toHaveLength(0);
+   const live=tree!.root.findByProps({testID:'voice-chat-phase'});
+   expect(live.props.accessibilityLiveRegion).toBe('polite');expect(live.props.accessibilityLabel).toContain('Voice Chat:');expect(live.props.accessibilityLabel).toContain('Words only for accessibility');expect(live.props.accessibilityHint).toBe(provider);
+   const glyph=tree!.root.findByProps({testID:'voice-chat-state-icon'});
+   expect(StyleSheet.flatten(glyph.props.style).borderWidth).toBe(phase==='listening'?2:0);
+   expect(glyph.findAll(node=>typeof node.type==='string'&&String(node.type)===(phase==='listening'?'Mic':phase==='speaking'?'Volume2':['preparing','finishing','waiting'].includes(phase)?'Clock':'Headphones'))).toHaveLength(1);
+   for(const label of ['Stop voice','Speech options','Exit Voice Chat']){
+    const control=host(tree!,label),style=StyleSheet.flatten(control.props.style);
+    expect(style).toMatchObject({width:48,height:48,minWidth:48,minHeight:48,padding:0});
+   }
+   expect(host(tree!,'Speech options').props.accessibilityState.disabled).toBe(phase==='waiting');
+  }
+  await act(async()=>{action(tree!,'Stop voice').props.onPress();action(tree!,'Speech options').props.onPress();action(tree!,'Exit Voice Chat').props.onPress();});
+  expect(session.stop).toHaveBeenCalledTimes(1);expect(session.press).toHaveBeenCalledWith(true);expect(session.cancel).toHaveBeenCalledWith(true);
  }finally{await act(async()=>tree?.unmount());}
 });
