@@ -15,7 +15,7 @@ import {emptyConversationMessage} from './empty-conversation';
 import {readOnlyProfile,conversationProfileRecord,conversationReadOnlyMessage,useConversationProfile,type ChatProfile} from './retired-chat-profile';
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
-import {openSpeechSettings,speechState,subscribeSpeech} from './speech';
+import {openSpeechSettings,speechState,subscribeSpeech,stopSpeech} from './speech';
 import 'react-native-get-random-values';
 import './global.css';
 import Animated from 'react-native-reanimated';
@@ -52,6 +52,7 @@ import {VoiceInputButton} from './components/voice-input-button';
 import {VoiceChatButton,VoiceChatPanel,SpeechRecoveryControl} from './components/voice-chat-controls';
 import {useVoiceChat} from './use-voice-chat';
 import {composerGeometry} from './composer-geometry';
+import {ComposerStatusIndicator,ComposerStatusRecovery,DRAFT_LOAD_WARNING,DRAFT_SAVE_WARNING,type ComposerNotice} from './components/composer-recovery';
 import type {VoiceInterest} from './voice-chat';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {workstationLabel,cleanWorkstationAlias} from './workstation-label';
@@ -280,6 +281,19 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const readOnly=readOnlyProfile(conversationProfile.profile);
   const ordinaryChat=conversationProfile.known&&!readOnly;
   const readOnlyMessage=conversationReadOnlyMessage(conversationProfile.profile);
+  const [composerRecovery,setComposerRecovery]=useState<{visit:object}>();
+  const composerNotices:ComposerNotice[]=[
+    ...(draftError?[{label:draftError==='load'?'Not loaded':'Not saved',message:draftError==='load'?DRAFT_LOAD_WARNING:DRAFT_SAVE_WARNING}]:composerRecovery?.visit===currentDraftVisit&&!draftReady.current?[{label:'Not loaded',message:DRAFT_LOAD_WARNING+' Retrying…'}]:[]),
+    ...(readOnly?[{label:'Read only',message:readOnlyMessage}]:[]),
+    ...(chat&&!conversationProfile.known?[{label:conversationProfile.error?'Chat unavailable':'Checking chat',message:conversationProfile.error??'Checking conversation capabilities…'}]:[]),
+  ];
+  const composerRecoveryVisible=!!composerRecovery&&composerRecovery.visit===currentDraftVisit&&active&&screen==='Chat'&&composerNotices.length>0;
+  const composerRecoveryOwner=useRef(composerRecovery);composerRecoveryOwner.current=composerRecovery;
+  const composerStatusOwner=useRef({visit:currentDraftVisit,available:false});
+  composerStatusOwner.current={visit:currentDraftVisit,available:active&&screen==='Chat'&&composerNotices.length>0};
+  const recoveryVisible=useRef(composerRecoveryVisible);recoveryVisible.current=composerRecoveryVisible;
+  const closeComposerRecovery=()=>{composerRecoveryOwner.current=undefined;setComposerRecovery(undefined);};
+  useLayoutEffect(()=>{if(!composerRecoveryVisible)closeComposerRecovery();},[composerRecoveryVisible]);
   const writableConversation=useRef({scope,ordinaryChat});writableConversation.current={scope,ordinaryChat:ordinaryChat&&active};
   const canWriteConversation=(current=scope)=>isVisible()&&writableConversation.current.scope===current&&writableConversation.current.ordinaryChat;
   useEffect(()=>{
@@ -297,7 +311,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const skillPickerVisible=!!(active&&backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen);
   const [voiceAdmissionEpoch,setVoiceAdmissionEpoch]=useState(0);
   const [dictationExternal,setDictationExternal]=useState(false);
-  const voiceOwnerActive=active&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen&&!skillPickerVisible;
+  const voiceOwnerActive=active&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen&&!skillPickerVisible&&!composerRecoveryVisible;
   const voiceActive=voiceOwnerActive&&(foreground||dictationExternal);
   const voiceTransport=JSON.stringify([backend?.backendId,backend?.endpoint,chat??null,shell.connectionRevisions[backend?.backendId??'']??0]);
   const voiceVisit=useRef({transport:voiceTransport,active:voiceActive,generation:0});
@@ -326,8 +340,20 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   }});
   const playbackState=useSyncExternalStore(subscribeSpeech,speechState,speechState);
   const [composerHeadingHeight,setComposerHeadingHeight]=useState(76);
-  const voiceGeometry=composerGeometry({height:windowSize.height,keyboard:keyboardInset,top:insets.top,bottom:insets.bottom,fontScale:windowSize.fontScale,heading:composerHeadingHeight,attachments:attachments.length>0,voice:voiceChat.state.open,recovery:playbackState.phase==='stop-unconfirmed'});
+  const voiceGeometry=composerGeometry({height:windowSize.height,keyboard:keyboardInset,top:insets.top,bottom:insets.bottom,fontScale:windowSize.fontScale,heading:composerHeadingHeight,attachments:attachments.length>0,voice:voiceChat.state.open,recovery:playbackState.phase==='stop-unconfirmed',status:composerNotices.length>0});
   const audioComposer=voiceChat.state.open||playbackState.phase==='stop-unconfirmed';
+  const boundedComposer=audioComposer||voiceGeometry.constrained;
+  const openComposerRecovery=()=>{
+    if(!isVisible()||draftVisit.current!==currentDraftVisit||composerStatusOwner.current.visit!==currentDraftVisit||!composerStatusOwner.current.available)return;
+    revokeVoiceVisit(); // Synchronous capture/send/autoplay fence, before showing UI.
+    const phase=speechState().phase;if(phase==='starting'||phase==='speaking')void stopSpeech();
+    const owner={visit:currentDraftVisit};composerRecoveryOwner.current=owner;setComposerRecovery(owner);
+  };
+  const retryComposerDraft=()=>{
+    if(draftVisit.current!==currentDraftVisit)return;
+    if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}
+    else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);
+  };
   const modelRequest=useRef(0);
   useEffect(()=>{modelRequest.current++;},[scope,active,backend?.endpoint]);
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
@@ -342,6 +368,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const childHistory=useStoredHistory(backend?.backendId,child,(path,signal)=>request(path,'GET',undefined,backend,signal));
   useEffect(()=>{skillEditorEpoch.current++;},[scope,screen]);
   useBackNavigation(()=>{
+    if(composerRecoveryVisible){closeComposerRecovery();return true;}
     if(navigationOpen){setNavigationOpen(false);return true;}
     if(actions){setActions(false);return true;}
     if(screen==='Agents'&&agentTarget){setChild(undefined);setAgentTarget(undefined);return true;}
@@ -986,7 +1013,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
       {/* Keep the same native list and viewport alive under section overlays.
           Unmounting here recreates FlatList at its initial offset on every return. */}
       <>
-          <PersistentMotionSurface active={screen==='Chat'} testID="chat-viewport" pointerEvents={screen==='Chat'?'auto':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} style={{flex:1,opacity:screen==='Chat'?1:0}}>
+          <PersistentMotionSurface active={screen==='Chat'} testID="chat-viewport" pointerEvents={screen==='Chat'&&!composerRecoveryVisible?'auto':'none'} accessibilityElementsHidden={screen!=='Chat'||composerRecoveryVisible} importantForAccessibility={screen==='Chat'&&!composerRecoveryVisible?'auto':'no-hide-descendants'} style={{flex:1,opacity:screen==='Chat'?1:0}}>
             {chat ? (
               transcript(view)
             ) : (
@@ -1006,14 +1033,14 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
             {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,...shadows.floating}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
 
           </PersistentMotionSurface>
-          <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
-            <View testID="composer-heading" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0&&!voiceGeometry.constrained)setComposerHeadingHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composerHeading,audioComposer&&voiceGeometry.constrained&&{height:48}]}>
-              <View style={{flex:1,minWidth:0}}>{audioComposer&&voiceGeometry.constrained&&<Text numberOfLines={1} accessibilityLabel={attachments.length?`${attachments.length} draft attachments retained; previews collapsed during voice`:'Voice Chat'} style={{fontSize:13,lineHeight:18,color:colors.muted}}>{attachments.length?`${attachments.length} attached`:playbackState.phase==='stop-unconfirmed'?'Audio recovery':'Voice Chat'}</Text>}{ordinaryChat&&!(audioComposer&&voiceGeometry.constrained)&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
+          <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'&&!composerRecoveryVisible?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'||composerRecoveryVisible} importantForAccessibility={screen==='Chat'&&!composerRecoveryVisible?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
+            <View testID="composer-heading" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0&&!voiceGeometry.constrained)setComposerHeadingHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composerHeading,voiceGeometry.constrained&&{height:48}]}>
+              <View style={{flex:1,minWidth:0}}>{voiceGeometry.constrained&&composerNotices.length>0?<ComposerStatusIndicator notices={composerNotices} onOpen={openComposerRecovery}/>:<>{voiceGeometry.constrained&&<Text numberOfLines={1} accessibilityLabel={attachments.length?`${attachments.length} draft attachments retained; previews collapsed during voice`:'Voice Chat'} style={{fontSize:13,lineHeight:18,color:colors.muted}}>{attachments.length?`${attachments.length} attached`:playbackState.phase==='stop-unconfirmed'?'Audio recovery':'Voice Chat'}</Text>}{ordinaryChat&&!voiceGeometry.constrained&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?DRAFT_LOAD_WARNING:DRAFT_SAVE_WARNING}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={retryComposerDraft}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</>}</View>
               <ChatNavigation showTrigger={active&&screen==='Chat'} open={active&&navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
             </View>
             <View testID="composer-row" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerRowHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={styles.composerRow}>
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
-              {attachments.length>0&&<ScrollView testID="draft-attachment-previews" accessibilityElementsHidden={audioComposer&&voiceGeometry.attachmentHeight===0} importantForAccessibility={audioComposer&&voiceGeometry.attachmentHeight===0?'no-hide-descendants':'auto'} style={{maxHeight:audioComposer?voiceGeometry.attachmentHeight:136,overflow:'hidden'}} keyboardShouldPersistTaps="handled"><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
+              {attachments.length>0&&<ScrollView testID="draft-attachment-previews" accessibilityElementsHidden={boundedComposer&&voiceGeometry.attachmentHeight===0} importantForAccessibility={boundedComposer&&voiceGeometry.attachmentHeight===0?'no-hide-descendants':'auto'} style={{maxHeight:boundedComposer?voiceGeometry.attachmentHeight:136,overflow:'hidden'}} keyboardShouldPersistTaps="handled"><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
                 {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={file.drawingData?{uri:file.drawingData}:{uri:file.uri}} onOpen={file.drawingData&&ordinaryChat?()=>{setDrawingEditor(true);}:undefined} disabled={!ordinaryChat||!!pending} onRemove={()=>{
                   const current=scope;
                   setDraftAttachments(previous=>({...previous,[current]:(previous[current]??[]).filter(item=>item.id!==file.id)}));
@@ -1023,7 +1050,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
               <SpeechRecoveryControl maxHeight={audioComposer?voiceGeometry.recoveryMax:180}/>
               <VoiceChatPanel state={voiceChat.state} session={voiceChat.session} maxHeight={voiceGeometry.voiceMax}/>
               <DraftInput key="draft-editor" scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={160}
-                maxHeight={audioComposer?voiceGeometry.draftMax:Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
+                maxHeight={boundedComposer?voiceGeometry.draftMax:Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
                 trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript} onBegin={()=>voiceChat.session.cancel(true)} onExternalChange={setDictationExternal}/><VoiceChatButton state={voiceChat.state} session={voiceChat.session} disabled={!voiceOwnerActive||!foreground||!sendReady||!!pending}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
               />
@@ -1043,6 +1070,10 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
       />}
       {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} key={'agents:'+String(backend?.backendId)} visible={active&&screen==='Agents'&&!!backend} bottomInset={Math.max(0,keyboardInset-insets.bottom)} workstation={backend?workstationLabel(backend,backends):undefined} sessions={agentSessions} currentSessionId={chat} selected={agentTarget} onSelect={(parentId,id)=>{const session=agentSessions.find(item=>item.conversationId===parentId),agent=session?.agents.find(item=>item.conversationId===id);if(session&&agent){Keyboard.dismiss();setAgentTarget({parentId,agent,title:session.title});setChild(id);}}} onOpenSession={id=>{Keyboard.dismiss();setChat(id);showChat();}} onBack={()=>{setChild(undefined);setAgentTarget(undefined);}} history={agentHistory} onHistoryChange={setAgentHistory} onNew={()=>run(newChat)} newBusy={!!backend&&creatingIds.has(backend.backendId)} filter={sessionFilter} onFilterChange={setSessionFilter} onSessionAction={async(id,action,title)=>{await sessionAction(id,action,title);agentOverview.retry();}} onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}} status={childStatus} loading={agentOverview.loading} error={agentOverview.error} onRetry={agentOverview.retry} hasMore={!!agentOverview.next} onLoadMore={agentOverview.loadMore}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
       <TerminalScreen menuOpen={navigationOpen} menu={screen==='Terminal'?sectionMenu:undefined} key={'terminal:'+scope} visible={active&&screen==='Terminal'} bottomInset={Math.max(0,keyboardInset-insets.bottom)} target={backend&&chat?{backendId:backend.backendId,conversationId:chat,title:listedChat?.meta?.title??'Current conversation'}:undefined} workstation={backend?workstationLabel(backend,backends):undefined} allowed={ordinaryChat&&!listedChat?.meta?.trashed&&!listedChat?.owner} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)}/>
+      {composerRecoveryVisible&&<ComposerStatusRecovery notices={composerNotices} top={insets.top} bottom={Math.max(0,keyboardInset-insets.bottom)} onClose={()=>{if(composerRecoveryOwner.current===composerRecovery)closeComposerRecovery();}} retry={draftError?{label:draftError==='load'?'Retry loading draft':'Retry saving draft',onPress:()=>{
+        if(!recoveryVisible.current||composerRecoveryOwner.current!==composerRecovery||composerRecovery?.visit!==draftVisit.current||!isVisible())return;
+        retryComposerDraft();
+      }}:undefined}/>}
       {backend&&<SchedulesScreen menu={screen==='Schedules'?sectionMenu:undefined} key={'schedules:'+backend.backendId} visible={active&&screen==='Schedules'} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)} onCompose={text=>{setDraft(previous=>previous.trim()?`${previous}\n\n${text}`:text);showChat();}} onOpenChat={id=>{setChat(id);showChat();}}/>}
       {screen!=='Terminal'&&screen!=='Schedules'&&screen!=='Chat'&&screen!=='Notes'&&screen!=='Workstations'&&screen!=='Agents'&&(
         <MenuTheme><MotionSurface transitionKey={screen} testID="section-overlay" style={[StyleSheet.absoluteFill,{backgroundColor:menuColors.background,zIndex:25,bottom:Math.max(0,keyboardInset-insets.bottom)}]}>

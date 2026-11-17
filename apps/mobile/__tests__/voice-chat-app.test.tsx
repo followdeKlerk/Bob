@@ -8,7 +8,10 @@ import App from '../App';
 import {DrawingEditor} from '../components/drawing-editor';
 import {DraftInput} from '../components/draft-input';
 import {VoiceChatPanel} from '../components/voice-chat-controls';
-import {stopSpeech,speechSnapshot} from '../speech';
+import {ComposerStatusRecovery} from '../components/composer-recovery';
+import {ChatNavigation} from '../components/chat-navigation';
+import {AgentsScreen} from '../components/agents-screen';
+import {stopSpeech,speechSnapshot,markAudioCleanupUnconfirmed} from '../speech';
 import {readOutbox} from '../outbox-storage';
 import {tokens} from '../theme-context';
 jest.mock('react-native-get-random-values',()=>({}));
@@ -37,10 +40,12 @@ let tree:Renderer.ReactTestRenderer|undefined;
 let publish:(entries:any[],live?:any)=>void;
 let posts:any[],operations:Map<string,any>,answers:Map<number,any>;
 let lifecycle:Map<string,Set<Function>>;
+const storageDefaults={read:(AsyncStorage.getItem as jest.Mock).getMockImplementation()!,write:(AsyncStorage.setItem as jest.Mock).getMockImplementation()!};
 const oldEntries=[{id:1,kind:'pi.assistant',model:[{role:'assistant',content:'OLD HISTORY — NEVER AUTO READ'}]}];
 const finalEntry=(id:number,text:string)=>({id,conversationId:7,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'thinking',thinking:'hidden reasoning'}, {type:'text',text}, {type:'toolCall',id:'tool',name:'write',arguments:{text:'secret tool args'}}],stopReason:'stop'}]});
 
 beforeEach(async()=>{
+ (AsyncStorage.getItem as jest.Mock).mockImplementation(storageDefaults.read);(AsyncStorage.setItem as jest.Mock).mockImplementation(storageDefaults.write);
  await AsyncStorage.clear();jest.clearAllMocks();jest.useFakeTimers();jest.replaceProperty(Platform,'OS','android');(AppState as any).currentState='active';
  let seq=0;require('uuid').v4.mockImplementation(()=>`33333333-3333-4333-8333-${String(++seq).padStart(12,'0')}`);
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:device,password:'synthetic-token'});
@@ -209,4 +214,113 @@ test('a constrained error keeps its cause in the live header, not hidden below e
  expect(root(tree!).findByProps({testID:'voice-chat-phase'}).props.children).toContain('model is not installed');
  expect(StyleSheet.flatten(button(tree!,'Speech options').props.style)).toMatchObject({width:48,height:48});
  expect(button(tree!,'Stop voice')).toBeDefined();expect(button(tree!,'Exit Voice Chat')).toBeDefined();expect(posts).toHaveLength(0);
+});
+
+const recoveryMatrix=[337,361].flatMap(width=>['light','dark'].flatMap(scheme=>[1,2].flatMap(fontScale=>[false,true].map(recovery=>({width,scheme,fontScale,recovery})))));
+test.each(recoveryMatrix)('actual failed draft save stays visible/retryable: $width $scheme $fontScale x recovery=$recovery',async({width,scheme,fontScale,recovery})=>{
+ await AsyncStorage.setItem('appearance',scheme);jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale});
+ await mount();const input=draft(tree!),history=list(tree!),editor=root(tree!).findByType(DraftInput),dismiss=jest.spyOn(require('react-native').Keyboard,'dismiss');
+ await act(async()=>{input.props.onFocus();await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ await tap('Start Voice Chat');const capture=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0];
+ if(recovery)await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id:capture,state:'error',stopUnconfirmed:true,message:'Synthetic potential audio cleanup'});await flush();});
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key.startsWith('draft:')&&fail?Promise.reject(Error('Synthetic storage full')):write(key,value));
+ await act(async()=>{input.props.onChangeText('KEEP THIS FAILED DRAFT');await flush();input.props.onChangeText('KEEP THIS FAILED DRAFT — EDITED');await flush();});
+ const heading=root(tree!).findByProps({testID:'composer-heading'});
+ expect(StyleSheet.flatten(heading.props.style).height).toBe(48);
+ expect(heading.findAll(node=>node.props.accessibilityLabel==='Retry saving draft')).toHaveLength(0);
+ expect(root(tree!).findByType(VoiceChatPanel).props.state.open).toBe(!recovery);
+ expect(button(tree!,'Not saved. Open composer recovery')).toBeDefined();
+ if(recovery)expect(button(tree!,'Retry stopping playback')).toBeDefined();else{expect(button(tree!,'Stop voice')).toBeDefined();expect(button(tree!,'Exit Voice Chat')).toBeDefined();}
+ const files=root(tree!).findAllByProps({accessibilityLabel:'Remove drawing.png'}).length,dismissals=dismiss.mock.calls.length;
+ await act(async()=>{button(tree!,'Not saved. Open composer recovery').props.onPress();DeviceEventEmitter.emit('BobVoiceInputState',{id:capture,state:'final',text:'LATE — MUST NOT SEND'});await flush();});
+ expect(root(tree!).findByProps({testID:'composer-status-recovery'}).props.accessibilityViewIsModal).toBe(true);
+ expect(root(tree!).findByProps({testID:'chat-composer'}).props.importantForAccessibility).toBe('no-hide-descendants');
+ expect(root(tree!).findByProps({testID:'chat-viewport'}).props.pointerEvents).toBe('none');
+ expect(button(tree!,'Retry saving draft')).toBeDefined();expect(button(tree!,'Close composer recovery')).toBeDefined();
+ await tap('Retry saving draft'); // Still failing: surface and warning remain available.
+ expect(button(tree!,'Close composer recovery')).toBeDefined();await tap('Close composer recovery');
+ expect(button(tree!,'Not saved. Open composer recovery')).toBeDefined();
+ expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);
+ await tap('Not saved. Open composer recovery');fail=false;await tap('Retry saving draft');
+ expect(await AsyncStorage.getItem(`draft:${backend.backendId}:7`)).toBe('KEEP THIS FAILED DRAFT — EDITED');
+ expect(root(tree!).findAllByProps({testID:'composer-status-recovery'})).toHaveLength(0);
+ expect(draft(tree!)).toBe(input);expect(root(tree!).findByType(DraftInput)).toBe(editor);expect(list(tree!)).toBe(history);expect(input.props.caretHidden).toBe(false);
+ expect(input.props.value).toBe('KEEP THIS FAILED DRAFT — EDITED');expect(root(tree!).findAllByProps({accessibilityLabel:'Remove drawing.png'})).toHaveLength(files);
+ expect(NativeModules.BobFiles.removeAttachment).not.toHaveBeenCalled();expect(dismiss).toHaveBeenCalledTimes(dismissals);
+ expect(posts).toHaveLength(0);expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);
+ if(recovery){expect(button(tree!,'Retry stopping playback')).toBeDefined();await tap('Retry stopping playback');}
+ console.log('DRAFT_RECOVERY_APP',JSON.stringify({width,scheme,fontScale,recovery,warningOutsideHeading:true,retrySaved:true,editorListCaretFilesRetained:true,posts:posts.length}));
+});
+
+test('old recovery retry and close cannot act after closing/reopening or newer edits',async()=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});await mount();
+ const input=draft(tree!),write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key.startsWith('draft:')&&fail?Promise.reject(Error('Full')):write(key,value));
+ await act(async()=>{DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});input.props.onChangeText('old');await flush();});await tap('Not saved. Open composer recovery');
+ const retry=button(tree!,'Retry saving draft').props.onPress,close=button(tree!,'Close composer recovery').props.onPress;
+ await tap('Close composer recovery');await tap('Not saved. Open composer recovery');
+ const writes=()=>(AsyncStorage.setItem as jest.Mock).mock.calls.filter(([key])=>key.startsWith('draft:')).length,count=writes();
+ fail=false;await act(async()=>{retry();close();await flush();});expect(writes()).toBe(count);expect(button(tree!,'Close composer recovery')).toBeDefined();
+ const retryBeforeEdit=button(tree!,'Retry saving draft').props.onPress;
+ await act(async()=>{input.props.onChangeText('newest');await flush();retryBeforeEdit();await flush();});expect(await AsyncStorage.getItem(`draft:${backend.backendId}:7`)).toBe('newest');
+ expect(posts).toHaveLength(0);
+});
+
+
+test.each(['load','read-only','unknown','load-read-only'] as const)('global potential-audio recovery coexists safely with a %s notice',async kind=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});
+ const read=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!,key=`draft:${backend.backendId}:7`;let fail=kind.startsWith('load');
+ await AsyncStorage.setItem(key,'ORIGINAL SAVED DRAFT');
+ (AsyncStorage.getItem as jest.Mock).mockImplementation((k:string)=>k===key&&fail?Promise.reject(Error('Synthetic load failure')):read(k));
+ if(kind!=='load'){
+  const fetch=(globalThis.fetch as jest.Mock).getMockImplementation()!;
+  (globalThis.fetch as jest.Mock).mockImplementation(async(input:any,options:any)=>{
+   if(String(input).endsWith('/chats'))return{ok:true,status:200,json:async()=>({items:kind.includes('read-only')?[{id:7,meta:{profile:{id:'restricted-local',readOnly:true}}}]:[]})};
+   if(String(input).endsWith('/configure')&&kind==='unknown')throw Error('Unavailable metadata');
+   return fetch(input,options);
+  });
+ }
+ await mount();const input=draft(tree!),history=list(tree!);
+ await act(async()=>{DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});markAudioCleanupUnconfirmed('Synthetic unresolved audio; no provider activation');await flush();});
+ const label=kind.startsWith('load')?'Not loaded':kind==='read-only'?'Read only':'Chat unavailable',accessibleLabel=kind==='load-read-only'?'Not loaded. Read only':label;
+ const heading=root(tree!).findByProps({testID:'composer-heading'});
+ expect(StyleSheet.flatten(heading.props.style).height).toBe(48);expect(heading.findAllByType(ComposerStatusRecovery)).toHaveLength(0);
+ expect(button(tree!,`${accessibleLabel}. Open composer recovery`)).toBeDefined();expect(button(tree!,'Retry stopping playback')).toBeDefined();
+ await tap(`${accessibleLabel}. Open composer recovery`);
+ const surface=root(tree!).findByType(ComposerStatusRecovery);expect(surface.props.notices[0].message).toContain(kind.startsWith('load')?'not been overwritten':kind==='read-only'?'read-only':'capabilities unavailable');
+ expect(StyleSheet.flatten(root(tree!).findByProps({testID:'composer-status-card'}).props.style).maxHeight).toBe('100%');
+ expect(StyleSheet.flatten(button(tree!,'Close composer recovery').props.style)).toMatchObject({minWidth:48,minHeight:48});
+ if(kind.startsWith('load')){
+  expect(input.props.editable).toBe(false);await tap('Retry loading draft');expect(input.props.editable).toBe(false);
+  fail=false;await tap('Retry loading draft');expect(input.props.value).toBe('ORIGINAL SAVED DRAFT');expect(input.props.editable).toBe(kind==='load');if(kind==='load-read-only'){expect(root(tree!).findByType(ComposerStatusRecovery).props.notices).toHaveLength(1);await tap('Close composer recovery');}
+ }else{expect(input.props.editable).toBe(false);expect(surface.props.retry).toBeUndefined();await tap('Close composer recovery');}
+ expect(draft(tree!)).toBe(input);expect(list(tree!)).toBe(history);expect(button(tree!,'Retry stopping playback')).toBeDefined();
+ expect(NativeModules.BobVoiceInput.startConfigured).not.toHaveBeenCalled();expect(posts).toHaveLength(0);await tap('Retry stopping playback');
+});
+
+test('opening recovery retires pending completed-answer autoplay and never resumes on close',async()=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});await mount();
+ await act(async()=>{DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ await tap('Start Voice Chat');await event('final','ONE DELIBERATE TURN');expect(posts).toHaveLength(1);
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key.startsWith('draft:')?Promise.reject(Error('Full')):write(key,value));
+ await act(async()=>{draft(tree!).props.onChangeText('Separate unsaved draft');await flush();});await tap('Not saved. Open composer recovery');
+ await complete(0,100,'THIS MUST NOT PLAY AFTER OVERLAY ADMISSION');await tap('Close composer recovery');
+ expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);expect(posts).toHaveLength(1);
+});
+
+test('overlay retry/open callbacks are scoped to the draft visit, including A-B-A return',async()=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});await mount();
+ const input=draft(tree!),write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;let fail=true;
+ (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key.startsWith('draft:')&&fail?Promise.reject(Error('Full')):write(key,value));
+ await act(async()=>{DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});input.props.onChangeText('old failed draft');await flush();});
+ const open=button(tree!,'Not saved. Open composer recovery').props.onPress;await tap('Not saved. Open composer recovery');const retry=button(tree!,'Retry saving draft').props.onPress;
+ await act(async()=>{root(tree!).findByType(ChatNavigation).props.onSelect('Sessions');await flush();open();await flush();});
+ expect(root(tree!).findAllByType(ComposerStatusRecovery)).toHaveLength(0);
+ await act(async()=>{root(tree!).findByType(AgentsScreen).props.onOpenSession(8);await flush();});
+ await act(async()=>{root(tree!).findByType(ChatNavigation).props.onSelect('Sessions');await flush();root(tree!).findByType(AgentsScreen).props.onOpenSession(7);await flush();});
+ fail=false;await act(async()=>{draft(tree!).props.onChangeText('newest returned draft');await flush();});await act(flush);
+ const key=`draft:${backend.backendId}:7`,writes=()=>(AsyncStorage.setItem as jest.Mock).mock.calls.filter(([k])=>k===key).length,count=writes();
+ await act(async()=>{retry();open();await flush();});expect(writes()).toBe(count);expect(await AsyncStorage.getItem(key)).toBe('newest returned draft');expect(posts).toHaveLength(0);
 });

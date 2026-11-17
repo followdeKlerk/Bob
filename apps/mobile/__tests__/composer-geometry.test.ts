@@ -12,3 +12,10 @@ test('accounts for separate control row and scaled text minimum, not a fictitiou
  expect(draftMetrics(2,false)).toMatchObject({input:72,controls:52,minimum:124,inline:false});
  expect(draftMetrics(1,true)).toMatchObject({minimum:48,inline:true});
 });
+
+test.each([1,2].flatMap(fontScale=>[false,true].flatMap(recovery=>[false,true].map(voice=>({fontScale,recovery,voice})))))(
+ 'essential status stays bounded even after voice retirement: $fontScale / recovery $recovery / voice $voice',fixture=>{
+ const layout=composerGeometry({height:754,top:24,bottom:16,heading:76,attachments:true,keyboard:280,status:true,...fixture});
+ expect(layout.constrained).toBe(true);expect(layout.heading).toBe(48);expect(layout.maximum).toBeLessThanOrEqual(layout.available);
+ expect(layout.draftMax).toBeGreaterThanOrEqual(draftMetrics(fixture.fontScale,false).input);
+});

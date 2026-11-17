@@ -255,3 +255,55 @@ npm test -- --runInBand --runTestsByPath \
 Use the scoped native compile/test command above only after Jest finishes. No
 APK/release build, installation, deployment or real microphone/TTS activation was
 performed. Independent re-review and refreshed full validation are still required.
+
+### Final constrained-notice recovery correction
+
+The `5020fbc` re-review found that the decorative 48dp heading still contained
+full draft persistence recovery copy/buttons. Essential notices now replace that
+decoration with a visible 48dp **Not saved / Not loaded / Read only / Chat
+unavailable** status control whenever constrained (and for notices with the IME
+visible). It opens a themed, bounded in-tree recovery surface with full warning
+text and fixed **Retry / Close** controls; only the warning body scrolls. Multiple
+notices are retained together, with a visible additional-notice count. Roomy
+headings retain their existing inline warnings/retries. Global audio cleanup can
+coexist with load failures, read-only or unavailable capabilities; none of these
+notices remain stacked inside the forced ornamental lane.
+
+Opening recovery synchronously retires the current capture/send/autoplay interest
+and stops currently starting/speaking playback through existing APIs. It does not
+retry uncertain audio cleanup. Dismissal never restarts capture or playback. The
+parent owns safe-area and IME clearance once; no native Modal, keyboard dismissal,
+editor/list remount, file removal or persistence-policy change is involved. Retry,
+close and opening callbacks are fenced by their surface/draft/chat visit, including
+newer edits and A→B→A navigation. A failed load retry remains visible while reading;
+recovered text never changes a read-only conversation's permissions.
+
+Post-correction checks, run sequentially from the repository root:
+
+```sh
+npm --prefix apps/mobile test -- --runInBand --runTestsByPath \
+  __tests__/voice-chat-app.test.tsx __tests__/composer-geometry.test.ts \
+  __tests__/retired-app.test.tsx __tests__/App.test.tsx \
+  __tests__/draft-input.test.tsx --detectOpenHandles
+(cd apps/mobile && ../../node_modules/.bin/tsc --noEmit)
+npm --prefix apps/mobile test -- --runInBand --detectOpenHandles
+```
+
+Results: **219/219 focused**, TypeScript passed, **1661/1661 full mobile** in
+133 suites, all exit 0. Actual App callbacks cover failed persistence while Voice
+Chat remains open, subsequent edits, bounded recovery admission and successful
+retry, preserving the native input/list/caret and attachment contents. They also
+cover late recognition, pending-answer autoplay, stale retries/surface callbacks,
+load recovery, read-only/capability notices and global potential-audio cleanup.
+
+The cloned review browser adapter passed **448/448** closed/opened geometry cases:
+the original 64 normal cases and eight failing draft-error cases, expanded across
+337/361×754, both themes, 1×/2× text, keyboard, files, voice/audio recovery and
+combined notices. Real editor, audio panels, attachments and new recovery
+components run in that adapter; navigation/avatar and roomy inline-warning chrome
+are synthetic. This remains **non-Android, non-Yoga, non-IME hardware evidence**.
+Fresh artifacts live under `/tmp/bob-voice-draft-recovery-fix/`; original reviewer
+artifacts were not modified. Android **0.3.199 / 202**, native/audio/privacy/locale
+implementations and all 26 immutable source files remain unchanged. Native/root
+gates were not rerun for this UI-only correction; independent re-review and the
+supervised release lane remain the parent's responsibility. No build was queued.

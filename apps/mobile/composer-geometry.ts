@@ -7,7 +7,7 @@ export function draftMetrics(fontScale:number,compact:boolean){
 export function voicePanelMetrics(fontScale:number){
  return {phase:Math.ceil(36*fontScale)+8,actions:Math.max(48,Math.ceil(18*fontScale)+16)};
 }
-export type ComposerGeometryInput={height:number;keyboard:number;top:number;bottom:number;fontScale:number;heading?:number;attachments:boolean;voice:boolean;recovery:boolean};
+export type ComposerGeometryInput={height:number;keyboard:number;top:number;bottom:number;fontScale:number;heading?:number;attachments:boolean;voice:boolean;recovery:boolean;status?:boolean};
 /** Reserve the ENTIRE minimum editor (including its separate 48dp control row),
  * heading, capsule chrome/gaps and essential audio controls BEFORE any previews.
  * Only previews/explanatory copy and the decorative avatar collapse under pressure. */
@@ -20,7 +20,9 @@ export function composerGeometry(input:ComposerGeometryInput){
  const naturalHeading=Math.max(76,input.heading??0);
  const naturalSlots=1+(audio?1:0)+(attachments?1:0);
  const natural=naturalHeading+chrome+gap*(naturalSlots-1)+editor.minimum+essential+(attachments?136:0);
- const constrained=audio&&natural>available;
+ // Essential notices use the same compact lane while the keyboard is present,
+ // including after opening their recovery surface has retired Voice Chat.
+ const constrained=(audio||!!input.status)&&(natural>available||!!input.status&&keyboard>0);
  const heading=constrained?48:naturalHeading;
  const attachmentHeight=attachments&&!constrained?136:0;
  const slots=1+(audio?1:0)+(attachments?1:0);
