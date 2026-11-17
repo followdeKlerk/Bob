@@ -25,6 +25,7 @@ import com.facebook.react.uimanager.ViewManager
 class BobVoiceInput(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener, WindowFocusChangeListener {
     private val main = Handler(Looper.getMainLooper())
     private val policy = VoiceInputPolicy()
+    private val preferences = VoicePreferences(context)
     private var recognizer: SpeechRecognizer? = null
     private var foreground = context.lifecycleState == LifecycleState.RESUMED
     private val admission = VoiceInputAdmission(foreground, context.currentActivity?.hasWindowFocus() == true)
@@ -44,10 +45,17 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
     @ReactMethod fun options(language: String?, promise: Promise) { main.post {
         try {
             val tag = language?.takeIf { VoiceLanguage.valid(it) } ?: if (language == null) null else throw IllegalArgumentException("Invalid speech language")
-            promise.resolve(Arguments.createArray().apply { VoiceProviders.options(context, tag ?: java.util.Locale.getDefault().toLanguageTag()).forEach { plan -> pushMap(Arguments.createMap().apply {
-            putString("mode", plan.mode); putString("key", plan.key); putString("label", plan.label); putString("language", plan.language); putBoolean("networkCapable", plan.networkCapable)
-        }) } }) } catch (_: Exception) { promise.reject("voice", "Could not inspect Android speech providers. Check Android speech settings.") }
+            val plans = VoiceProviders.options(context, tag ?: preferences.language)
+            val selected = if (tag == null) preferences.selection else null
+            if (selected != null && plans.none { it.selection == selected }) throw IllegalStateException("Saved provider unavailable")
+            promise.resolve(Arguments.createArray().apply { plans.sortedByDescending { it.selection == selected }.forEach { plan -> pushMap(Arguments.createMap().apply {
+            putString("mode", plan.mode); putString("key", plan.key); putString("label", plan.label); putString("language", plan.language); putBoolean("networkCapable", plan.networkCapable); putBoolean("approved", preferences.approved(plan.key))
+        }) } }) } catch (_: Exception) { promise.reject("voice", "Speech provider unavailable. Open Speech options to choose another.") }
     } }
+    @ReactMethod fun revokeApprovals(promise: Promise) {
+        retire(admission.cancelCurrent()) // Revoke before posting, including queued support callbacks.
+        main.post { preferences.revoke(); promise.resolve(null) }
+    }
     @ReactMethod fun availability(promise: Promise) { main.post { promise.resolve(runCatching { VoiceProviders.options(context).firstOrNull()?.mode }.getOrNull() ?: "unavailable") } }
     private fun event(id: String, state: String, text: String? = null, message: String? = null, stopUnconfirmed: Boolean = false) {
         if (!context.hasActiveReactInstance()) return
@@ -105,7 +113,7 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             admission.release(ticket); promise.reject("voice", VoiceInputPolicy.error(9)); return
         }
-        if (policy.id != null || plan == null || (plan.networkCapable && !consent)) {
+        if (policy.id != null || plan == null || (plan.networkCapable && !consent && !preferences.approved(plan.key))) {
             admission.release(ticket); promise.reject("voice", "Speech provider/configuration changed. Tap again to review it; no fallback was started."); return
         }
         // JS cleanup is not the security boundary. Retry all unresolved TTS leases, including retired modules.
@@ -119,24 +127,37 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
         try {
             token = policy.begin(ticket.id); activeTicket = ticket
             val current = token
+            if (!admission.admit(ticket) { preferences.remember(plan, consent) }) {
+                end(current, "cancelled"); promise.reject("voice", "Recognition cancelled."); return
+            }
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, VoiceInputPolicy.SILENCE_MS)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, VoiceInputPolicy.SILENCE_MS)
                 .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.requested(plan.language))
                 .putExtra("com.google.recognition.extra.MUTE_AUDIO_BEEPS", true)
+            // Recheck at the actual native admission, after asynchronous model support lookup.
+            // A changed provider/version/settings or revoked ticket cannot inherit an old Allow callback.
+            fun configured(): Boolean = VoiceProviders.options(context, plan.language).any { it.key == plan.key } &&
+                (!plan.networkCapable || consent || preferences.approved(plan.key)) &&
+                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             if (plan.mode == "activity") {
-                if (!admission.handoff(ticket)) { end(current, "cancelled"); promise.reject("voice", "Speech screen handoff was cancelled."); return }
-                VoiceActivityHandoff.begin(VoiceActivityHandoff.Request(ticket.id, intent.setComponent(plan.component)) { heard ->
-                    if (policy.current(current) && admission.ownsHandoff(ticket)) {
-                        pendingExternal = current to heard
-                        deliverExternal()
-                    }
-                })
-                event(ticket.id, "external")
-                listenTimeout = Runnable { end(current, "error", message = "Speech screen timed out. Return to Bob and tap again.") }.also { main.postDelayed(it, 60_000) }
-                context.currentActivity!!.startActivity(Intent(context, BobVoiceRecognitionActivity::class.java).putExtra("voiceRequest", ticket.id))
+                if (!admission.admit(ticket) {
+                    check(configured())
+                    check(admission.handoff(ticket))
+                    VoiceActivityHandoff.begin(VoiceActivityHandoff.Request(ticket.id, intent.setComponent(plan.component)) { heard ->
+                        if (policy.current(current) && admission.ownsHandoff(ticket)) {
+                            pendingExternal = current to heard
+                            deliverExternal()
+                        }
+                    })
+                    event(ticket.id, "external")
+                    listenTimeout = Runnable { end(current, "error", message = "Speech screen timed out. Return to Bob and tap again.") }.also { main.postDelayed(it, 60_000) }
+                    context.currentActivity!!.startActivity(Intent(context, BobVoiceRecognitionActivity::class.java).putExtra("voiceRequest", ticket.id))
+                }) { end(current, "cancelled"); promise.reject("voice", "Speech screen handoff was cancelled."); return }
                 promise.resolve(null); return
             }
             val engine = if (plan.mode == "onDevice" && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
@@ -174,7 +195,10 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
                 if (language != null) intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
                 listenTimeout = Runnable { end(current, "error", message = "Speech provider did not become ready. Use Speech options or tap again.") }.also { main.postDelayed(it, 12_000) }
                 try {
-                    if (!admission.admit(ticket) { engine.startListening(intent) }) end(current, "cancelled")
+                    if (!admission.admit(ticket) {
+                        if (!configured()) throw IllegalStateException("Speech configuration changed")
+                        engine.startListening(intent)
+                    }) end(current, "cancelled")
                 } catch (_: Exception) { end(current, "error", message = "The selected speech provider refused recognition. Use Speech options to choose another; no fallback was started.") }
             }
             if (Build.VERSION.SDK_INT >= 33) {
@@ -186,10 +210,10 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
                         val pools = if (plan.mode == "onDevice") installed else installed + support.onlineLanguages
                         val exact = VoiceLanguage.supportedRequest(plan.language, pools)
                         if (plan.mode == "onDevice" && exact == null && VoiceLanguage.supportedRequest(plan.language, support.supportedOnDeviceLanguages) != null) {
-                            started = true; end(current, "error", message = "The requested ${plan.language} model is supported but not installed on this device. Download it in Android speech settings or choose another language explicitly. No online fallback was started.")
+                            started = true; end(current, "error", message = "${plan.language} model not installed. Download it in Android settings or choose another in Speech options.")
                         } else if (exact == null && (pools.isNotEmpty() || plan.mode == "onDevice" && support.supportedOnDeviceLanguages.isNotEmpty())) {
                             val alternative = VoiceLanguage.closest(plan.language, pools)
-                            val suggestion = alternative?.let { " This provider advertises $it instead. Choose that language explicitly in Speech options; its model may still need downloading." }.orEmpty()
+                            val suggestion = alternative?.let { " Available: $it." }.orEmpty()
                             started = true; end(current, "error", message = VoiceInputPolicy.error(13) + suggestion)
                         } else begin(exact) // Unknown capabilities keep the exact requested tag; never guess a region.
                     }

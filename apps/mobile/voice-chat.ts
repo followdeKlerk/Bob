@@ -81,12 +81,12 @@ export class VoiceChatSession {
   this.claimed=undefined;
   const epoch=++this.epoch,scope=this.scope;
   const current=()=>this.active&&!this.disposed&&this.epoch===epoch&&this.scope===scope&&this.state.open;
-  this.publish({phase:'waiting',partial:text,message:'Sending once through Bob’s message queue…'});
+  this.publish({phase:'waiting',partial:text,message:'Sending spoken message…'});
   try{
    const interest=await this.port.send(text,current);
    if(!current())return; // Already enqueued delivery stays with the outbox, never resubmit it.
    this.interest=interest;this.until=Date.now()+10*60*1000;
-   this.publish({message:'Waiting for this spoken turn’s completed reply…'});
+   this.publish({message:'Waiting for reply…'});
    this.wake();
   }catch(error){if(current())this.publish({phase:'error',message:String((error as Error).message??error)});}
  }
@@ -137,7 +137,7 @@ export class VoiceChatSession {
     const fatal=(error as {httpStatus?:number;deliveryUnconfirmed?:boolean});
     if(fatal.httpStatus===401||fatal.httpStatus===403||fatal.deliveryUnconfirmed||!(error instanceof Error)||error instanceof VoiceReceiptError){
      this.interest=undefined;this.publish({phase:'error',message:String((error as Error).message??error)});
-    }else this.publish({message:'Reply delivery/completion is not confirmed yet. Checking the same request; never resending.'});
+    }else this.publish({message:'Reply unconfirmed. Checking; not resending.'});
    }
   }finally{
    clearTimeout(deadline);
@@ -151,7 +151,7 @@ export class VoiceChatSession {
  private async play(text:string,epoch:number){
   if(this.epoch!==epoch||!this.active)return;
   const id=`voice-chat-${++voiceSequence}`;this.playing=id;
-  this.capture.cancel();this.publish({phase:'speaking',message:'Reading the completed reply. Tap the voice button to interrupt and speak again.'});
+  this.capture.cancel();this.publish({phase:'speaking',message:'Reading reply · tap headphones to interrupt'});
   const admitted=await startSpeech(id,text,{onError:message=>{if(this.epoch===epoch)this.publish({phase:'error',message});}});
   if(this.epoch!==epoch){if(speechState().phase!=='stop-unconfirmed')void stopSpeech(id);return;}
   if(!admitted&&speechSnapshot()!==id){this.playing=undefined;if(this.state.phase!=='error')this.publish({phase:'error',message:'Reply playback did not start. The text remains in chat.'});}
@@ -162,7 +162,7 @@ export class VoiceChatSession {
   const status=speechState();
   if(status.id===this.playing){if(status.phase==='stop-unconfirmed')this.publish({phase:'error',message:status.message});return;}
   this.playing=undefined;
-  if(this.state.phase==='speaking')this.publish({phase:'idle',message:'Reply finished. Tap the voice button for the next turn.'});
+  if(this.state.phase==='speaking')this.publish({phase:'idle',message:'Reply finished · tap headphones to speak'});
  }
  async stop(){
   this.cancel(false);

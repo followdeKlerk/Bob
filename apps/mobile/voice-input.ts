@@ -2,11 +2,11 @@ import {AppState,NativeEventEmitter,NativeModules,PermissionsAndroid,Platform} f
 import {stopSpeech,subscribeSpeech,speechSnapshot,markAudioCleanupUnconfirmed} from './speech';
 
 export type VoicePhase='idle'|'preparing'|'listening'|'finishing'|'external';
-export type VoiceProvider={mode:'onDevice'|'platform'|'activity';key:string;label:string;language:string;networkCapable:boolean};
+export type VoiceProvider={mode:'onDevice'|'platform'|'activity';key:string;label:string;language:string;networkCapable:boolean;approved?:boolean};
 export type VoiceDetails={partial:string;provider?:string;external:boolean};
 type Mode='onDevice'|'platform'|'activity';
 type VoiceEvent={id:string;state:'listening'|'finishing'|'external'|'partial'|'final'|'cancelled'|'error';text?:string;message?:string;stopUnconfirmed?:boolean};
-type VoiceNative={options?:(language:string|null)=>Promise<VoiceProvider[]>;startConfigured?:(id:string,key:string,language:string,consent:boolean)=>Promise<void>;windowFocused:()=>Promise<boolean>;availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
+type VoiceNative={revokeApprovals?:()=>Promise<void>;options?:(language:string|null)=>Promise<VoiceProvider[]>;startConfigured?:(id:string,key:string,language:string,consent:boolean)=>Promise<void>;windowFocused:()=>Promise<boolean>;availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
 const native=():VoiceNative|undefined=>NativeModules.BobVoiceInput;
 let sequence=0;
 /** Wait only for our consent/permission UI to return focus; never opens a recognizer. */
@@ -51,9 +51,17 @@ export class VoiceInputSession {
  private disposed=false;
  private dialog:AbortController|null=null;
  private external=false;
- private selected?:VoiceProvider;
  private picker?: (initial:string,load:(language:string)=>Promise<VoiceProvider[]>,signal:AbortSignal)=>Promise<VoiceProvider|undefined>;
  private consent?: (provider:VoiceProvider,signal:AbortSignal)=>Promise<boolean>;
+ async revokeApprovals(){
+  this.cancel(); // Also aborts the options owner and any outstanding Allow callback.
+  const generation=this.generation;
+  try{
+   const bridge=this.deps.native();
+   if(!bridge?.revokeApprovals)throw Error('Install an updated Bob Android build to manage speech approval.');
+   await bridge.revokeApprovals();
+  }catch(error){if(generation===this.generation&&!this.disposed&&this.enabled&&this.deps.foreground())this.error(error instanceof Error?error.message:'Could not forget speech approval.');}
+ }
  setPicker(picker:typeof this.picker){this.picker=picker;}
  setConsent(consent:typeof this.consent){this.consent=consent;}
  private details:VoiceDetails={partial:'',external:false};
@@ -63,7 +71,6 @@ export class VoiceInputSession {
  attach(){this.disposed=false;}
  configure(scope:string,enabled:boolean){
   if(this.scope!==scope||!enabled)this.cancel();
-  if(this.scope!==scope)this.selected=undefined; // Remember choices for this chat visit only.
   this.scope=scope;this.enabled=enabled;
  }
  private publish(phase:VoicePhase){this.phase=phase;if(!this.disposed)this.changed(phase);}
@@ -119,23 +126,22 @@ export class VoiceInputSession {
   let dialog:AbortController|undefined;
   try{
    if(chooseProvider&&!bridge.options)throw Error('Speech options require an updated Bob Android build. No microphone was started.');
-   const initial=bridge.options?await bridge.options(chooseProvider?null:this.selected?.language??null):undefined;if(!current())return;
-   let provider=chooseProvider?initial?.[0]:this.selected?initial?.find(plan=>plan.key===this.selected?.key):initial?.[0];
-   if(!chooseProvider&&this.selected&&!provider)throw Error('Speech provider configuration changed. Open Speech options to review it; no fallback was started.');
+   const initial=bridge.options?await bridge.options(chooseProvider?'en-GB':null):undefined;if(!current())return;
+   let provider=initial?.[0]; // Native preferences are shared by dictation and Voice Chat.
    let mode=provider?.mode??await bridge.availability();if(!current())return;
    dialog=new AbortController();this.dialog=dialog;
    if(chooseProvider){
     if(!this.picker)throw Error('Speech options are not available on this screen. No microphone was started.');
     const chosen=await this.picker(initial?.[0]?.language??'',language=>bridge.options!(language),dialog.signal);
     if(!current())return;if(!chosen){this.cancel();return;}
-    provider=chosen;this.selected=chosen;mode=provider.mode;
+    provider=chosen;mode=provider.mode;
    }
    if(mode!=='onDevice'&&mode!=='platform'&&mode!=='activity')throw Error('No Android speech recognizer is available. Enable an installed speech recognition service in Android Settings; typing still works.');
    this.describe({provider:provider?`${provider.label} (${provider.language})`:mode});
    const network=provider?.networkCapable??mode!=='onDevice';
-   if(network&&(!provider||!this.consent))throw Error('Named speech-provider consent is unavailable. No microphone was started.');
-   const consent=network?await this.consent!(provider!,dialog.signal):false;if(!current())return;
-   if(network&&!consent){this.cancel();return;}
+   if(network&&(!provider||!provider.approved&&!this.consent))throw Error('Named speech-provider consent is unavailable. No microphone was started.');
+   const consent=network&&!provider?.approved?await this.consent!(provider!,dialog.signal):false;if(!current())return;
+   if(network&&!provider?.approved&&!consent){this.cancel();return;}
    await this.deps.permission();if(!current())return;
    await this.deps.waitForWindowFocus(bridge,dialog.signal);if(!current())return;
    this.dialog=null;

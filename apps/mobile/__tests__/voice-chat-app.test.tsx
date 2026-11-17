@@ -122,7 +122,7 @@ test.each(optionsMatrix)('actual App Speech options $width $scheme $fontScale: r
  expect(StyleSheet.flatten(option('English (US) · en-US').props.style).minHeight).toBeGreaterThanOrEqual(48);
  await act(async()=>{option('English (UK) · en-GB').props.onPress();await flush();});
  expect(native.options).toHaveBeenCalledWith('en-GB');expect(native.startConfigured).toHaveBeenCalledTimes(1);
- await act(async()=>{option('On-device · en-GB').props.onPress();await flush();});
+ await act(async()=>{option('Google speech engine on-device · en-GB').props.onPress();await flush();});
  expect(native.startConfigured).toHaveBeenCalledWith(expect.any(String),'local|en-GB','en-GB',false);
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Unsent draft');expect(list(mounted)).toBe(history);
  expect(posts).toHaveLength(0);
@@ -151,7 +151,7 @@ test('speech options accept a manually requested regional tag without treating i
  await act(async()=>{tag.props.onChangeText('zh-Hant-TW-u-nu-latn');await flush();});
  await act(async()=>{option('Request entered language').props.onPress();await flush();});
  expect(native.options).toHaveBeenCalledWith('zh-Hant-TW-u-nu-latn');expect(native.startConfigured).toHaveBeenCalledTimes(1);
- await act(async()=>{option('On-device · zh-Hant-TW-u-nu-latn').props.onPress();await flush();});
+ await act(async()=>{option('Local · zh-Hant-TW-u-nu-latn').props.onPress();await flush();});
  expect(native.startConfigured).toHaveBeenCalledWith(expect.any(String),'local|zh-Hant-TW-u-nu-latn','zh-Hant-TW-u-nu-latn',false);
  expect(draft(mounted)).toBe(input);expect(posts).toHaveLength(0);
 });
@@ -171,7 +171,7 @@ test.each(['light','dark'] as const)('actual App %s draft failure recovery opens
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Retain this draft');expect(root(mounted).findByType(DraftInput)).toBe(editor);expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
 });
 
-test.each(['light','dark'] as const)('actual App %s named network consent is explicit each turn, dismissable and keeps draft/list untouched',async scheme=>{
+test.each(['light','dark'] as const)('actual App %s named network approval is informed, remembered, dismissable and keeps draft/list untouched',async scheme=>{
  await AsyncStorage.setItem('appearance',scheme);const mounted=await mount(),input=draft(mounted),history=list(mounted);
  await act(async()=>input.props.onChangeText('Unsent draft'));
  const bridge=NativeModules.BobVoiceInput as any;
@@ -183,13 +183,19 @@ test.each(['light','dark'] as const)('actual App %s named network consent is exp
  const disclosure=text(card);
  expect(disclosure).toContain('Named Google speech service');
  expect(disclosure).toContain('en-GB');
- expect(disclosure).toContain('may send microphone audio over the network');
+ expect(disclosure).toContain('May send microphone audio to this provider over the network');
+ expect(disclosure).toContain('Remember approval on this phone');
  expect(bridge.startConfigured).not.toHaveBeenCalled();
  const inModal=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
  await act(async()=>{inModal('Cancel network speech').props.onPress();await flush();});
  expect(bridge.startConfigured).not.toHaveBeenCalled();await tap('Speak to Bob');
- await act(async()=>{inModal('Allow network speech for this utterance').props.onPress();await flush();});
+ await act(async()=>{inModal('Allow and remember network speech').props.onPress();await flush();});
  expect(bridge.startConfigured).toHaveBeenCalledWith(expect.any(String),'service|en-GB','en-GB',true);
+ // Native options attest the saved approval; JS never invents a remembered grant.
+ bridge.options.mockResolvedValue([{mode:'platform',key:'service|en-GB',label:'Named Google speech service',language:'en-GB',networkCapable:true,approved:true}]);
+ await tap('Stop voice');await tap('Speak to Bob');
+ expect(bridge.startConfigured).toHaveBeenLastCalledWith(expect.any(String),'service|en-GB','en-GB',false);
+ expect(mounted.root.findAllByProps({testID:'speech-network-consent'})).toHaveLength(0);
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Unsent draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
 });
 
@@ -198,9 +204,9 @@ test('background or Stop while network consent is open revokes it; late Allow ca
  bridge.options.mockResolvedValue([{mode:'activity',key:'screen|en-GB',label:'Named screen',language:'en-GB',networkCapable:true}]);
  await tap('Start Voice Chat');
  const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
- const staleAllow=option('Allow network speech for this utterance').props.onPress;
+ const staleAllow=option('Allow and remember network speech').props.onPress;
  await tap('Stop voice');await act(async()=>{staleAllow();await flush();});expect(bridge.startConfigured).not.toHaveBeenCalled();
- await tap('Speak to Bob');const secondAllow=option('Allow network speech for this utterance').props.onPress;
+ await tap('Speak to Bob');const secondAllow=option('Allow and remember network speech').props.onPress;
  await act(async()=>{(AppState as any).currentState='background';for(const callback of lifecycle.get('change')??[])callback('background');await flush();secondAllow();await flush();});
  expect(bridge.startConfigured).not.toHaveBeenCalled();expect(posts).toHaveLength(0);
 });
@@ -210,14 +216,14 @@ test('old consent Allow and old picker provider callbacks cannot authorize a new
  bridge.options.mockResolvedValue([{mode:'platform',key:'service|en-GB',label:'Named provider',language:'en-GB',networkCapable:true}]);
  await tap('Start Voice Chat');
  const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
- const staleAllow=option('Allow network speech for this utterance').props.onPress;
+ const staleAllow=option('Allow and remember network speech').props.onPress;
  await act(async()=>{option('Cancel network speech').props.onPress();await flush();});
  await tap('Speak to Bob');
  await act(async()=>{staleAllow();await flush();});expect(bridge.startConfigured).not.toHaveBeenCalled();
  await act(async()=>{option('Cancel network speech').props.onPress();await flush();});
  await tap('Speech options');
  await act(async()=>{option('English (UK) · en-GB').props.onPress();await flush();});
- const staleProvider=option('Speech service · en-GB').props.onPress;
+ const staleProvider=option('Named provider · en-GB').props.onPress;
  await act(async()=>{option('Back to languages').props.onPress();await flush();staleProvider();await flush();});
  expect(bridge.startConfigured).not.toHaveBeenCalled();expect(mounted.root.findByProps({testID:'speech-options'})).toBeTruthy();
  await act(async()=>{option('Close speech options').props.onPress();await flush();});expect(posts).toHaveLength(0);
@@ -442,4 +448,23 @@ test('overlay retry/open callbacks are scoped to the draft visit, including A-B-
  fail=false;await act(async()=>{draft(tree!).props.onChangeText('newest returned draft');await flush();});await act(flush);
  const key=`draft:${backend.backendId}:7`,writes=()=>(AsyncStorage.setItem as jest.Mock).mock.calls.filter(([k])=>k===key).length,count=writes();
  await act(async()=>{retry();open();await flush();});expect(writes()).toBe(count);expect(await AsyncStorage.getItem(key)).toBe('newest returned draft');expect(posts).toHaveLength(0);
+});
+
+
+test('forget approval is reachable, keeps draft/list, and stale options management cannot revoke a newer capture',async()=>{
+ const mounted=await mount(),input=draft(mounted),history=list(mounted),bridge=NativeModules.BobVoiceInput as any;
+ await act(async()=>input.props.onChangeText('Saved draft'));
+ const provider={mode:'platform',key:'google|en-GB',label:'Google speech',language:'en-GB',networkCapable:true};
+ let approved=true;
+ bridge.options.mockImplementation(async()=>[{...provider,approved}]);
+ bridge.revokeApprovals=jest.fn(async()=>{approved=false;});
+ await tap('Start Voice Chat');expect(bridge.startConfigured).toHaveBeenCalledTimes(1);
+ await tap('Speech options');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const staleForget=option('Forget network speech approval').props.onPress;
+ await act(async()=>{staleForget();await flush();});expect(bridge.revokeApprovals).toHaveBeenCalledTimes(1);
+ await tap('Speak to Bob');expect(option('Allow and remember network speech')).toBeTruthy();
+ await act(async()=>{staleForget();await flush();});expect(bridge.revokeApprovals).toHaveBeenCalledTimes(1);
+ expect(bridge.startConfigured).toHaveBeenCalledTimes(1);
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Saved draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
 });

@@ -16,6 +16,7 @@ import java.util.Locale
 
 internal data class VoiceProvider(val mode: String, val component: ComponentName?, val language: String, val key: String, val label: String) {
     val networkCapable get() = mode != "onDevice"
+    val selection get() = "$mode|${component?.flattenToString()}"
 }
 internal object VoiceProviders {
     private fun onDevice(context: Context): ComponentName? {
@@ -31,13 +32,12 @@ internal object VoiceProviders {
     private fun stamp(context: Context, component: ComponentName): String = runCatching {
         val info = context.packageManager.getPackageInfo(component.packageName, 0)
         "${info.lastUpdateTime}:${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()}"
-    }.getOrDefault("system")
-    fun options(context: Context, requestedLanguage: String = Locale.getDefault().toLanguageTag()): List<VoiceProvider> {
+    }.getOrThrow()
+    fun options(context: Context, requestedLanguage: String = "en-GB"): List<VoiceProvider> {
         val pm = context.packageManager
         val picked = runCatching { Settings.Secure.getString(context.contentResolver, "voice_recognition_service") }.getOrNull()?.let(ComponentName::unflattenFromString)
         val services = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), PackageManager.GET_META_DATA)
             .mapNotNull { it.serviceInfo }.filter { it.isEnabled && it.applicationInfo.enabled && it.metaData?.containsKey(RecognitionService.SERVICE_META_DATA) == true }
-        val service = services.firstOrNull { ComponentName(it.packageName, it.name) == picked } ?: services.firstOrNull()
         val device = onDevice(context)
         val activityIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         val activities = pm.queryIntentActivities(activityIntent, PackageManager.MATCH_DEFAULT_ONLY).mapNotNull { it.activityInfo }
@@ -52,17 +52,16 @@ internal object VoiceProviders {
         fun plan(mode: String, component: ComponentName, label: String) = VoiceProvider(mode, component, language,
             listOf(mode, component.flattenToString(), stamp(context, component), language, picked?.flattenToString().orEmpty()).joinToString("|"), label)
         val local = device?.let { plan("onDevice", it, "On-device recognition") }
-        val regular = service?.let { plan("platform", ComponentName(it.packageName, it.name), "${pm.getApplicationLabel(it.applicationInfo)} speech service") }
+        val regular = services.sortedWith(compareByDescending<android.content.pm.ServiceInfo> { it.packageName.startsWith("com.google.") }
+            .thenByDescending { ComponentName(it.packageName, it.name) == picked }.thenBy { it.packageName }.thenBy { it.name })
+            .map { plan("platform", ComponentName(it.packageName, it.name), "${pm.getApplicationLabel(it.applicationInfo)} speech service") }
         val screen = activity?.let { plan("activity", ComponentName(it.packageName, it.name), "${pm.getApplicationLabel(it.applicationInfo)} speech screen") }
-        // Honor an explicitly selected non-Google service rather than silently replacing it with Google's local engine.
-        val pickedOther = picked != null && !picked.packageName.startsWith("com.google.")
-        val selectedService = service != null && picked == ComponentName(service.packageName, service.name)
-        val selectedActivity = activity != null && activity.packageName == picked?.packageName
-        return when {
-            pickedOther && selectedService -> listOf(regular, local, screen)
-            pickedOther && selectedActivity -> listOf(screen, local, regular)
-            else -> listOf(local, regular, screen)
-        }.filterNotNull()
+        // Keep Android's explicitly selected non-Google provider. Otherwise prefer Google
+        // over the system-locale on-device route. Saved Bob choices are ordered separately.
+        val selectedOther = if (picked != null && !picked.packageName.startsWith("com.google."))
+            regular.firstOrNull { it.component == picked } ?: screen?.takeIf { it.component?.packageName == picked.packageName } else null
+        return (listOfNotNull(selectedOther) + regular.filter { it.component?.packageName?.startsWith("com.google.") == true } +
+            listOfNotNull(local) + regular.filterNot { it.component?.packageName?.startsWith("com.google.") == true } + listOfNotNull(screen)).distinctBy { it.key }
     }
 }
 

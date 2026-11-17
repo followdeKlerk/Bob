@@ -27,11 +27,20 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     private val ticketOwner = SpeechAdmission.Owner()
     private var activeTicket: SpeechAdmission.Ticket? = null
     private var configured: String? = null
+    private val preferences = VoicePreferences(context)
+    private fun requestedEngine(): String? {
+        val selected = Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH)
+        if (!preferences.googleVoice && !selected.isNullOrBlank() && selected != "com.google.android.tts") return selected
+        if (!preferences.systemVoice && context.packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
+                .any { it.serviceInfo?.packageName == "com.google.android.tts" && it.serviceInfo.enabled && it.serviceInfo.applicationInfo.enabled }) return "com.google.android.tts"
+        return selected
+    }
     private fun configuration(): String = listOf(
         Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH).orEmpty(),
         Locale.getDefault().toLanguageTag(),
         Settings.Secure.getString(context.contentResolver, "tts_default_rate").orEmpty(),
-        Settings.Secure.getString(context.contentResolver, "tts_default_locale").orEmpty()
+        Settings.Secure.getString(context.contentResolver, "tts_default_locale").orEmpty(),
+        preferences.voiceMode, requestedEngine().orEmpty()
     ).joinToString("|")
     @ReactMethod fun configuration(promise: Promise) { main.post {
         promise.resolve(Arguments.createMap().apply {
@@ -126,12 +135,12 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         try {
             // Always post: Android may invoke a failure callback before the constructor returns.
             NativeSpeechEngineLease.owner = this
-            engineLease.attach(TextToSpeech(context) { status -> main.post {
+            engineLease.attach(TextToSpeech(context, { status -> main.post {
                 if (token != generation || !admission.accepts(ticket)) return@post
                 timeout?.let { main.removeCallbacks(it) }; timeout = null
                 if (status != TextToSpeech.SUCCESS) { fail("No working speech engine. Install or configure one in Android text-to-speech settings."); return@post }
                 try { start(token, ticket) } catch (_: Exception) { fail("Speech could not start. Check your installed voice and Android speech settings.") }
-            } })
+            } }, requestedEngine()))
         } catch (_: Exception) { fail("Speech engine is unavailable. Check Android text-to-speech settings.") }
     } }
 
@@ -142,13 +151,13 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         if (configured != null && configured != configuration()) { fail("Speech preferences changed. Review settings before playback."); return }
         val tts = engine ?: return
         val preferred = tts.defaultVoice
-        val locale = Locale.getDefault()
+        val locale = if (preferences.systemVoice) preferred?.locale ?: Locale.getDefault() else Locale.UK
         val voice = tts.voices.orEmpty().filter {
-            SpeechPolicy.permitsVoice(it.isNetworkConnectionRequired) && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language
-        }.sortedWith(compareByDescending<android.speech.tts.Voice> { it.name == preferred?.name }
+            SpeechPolicy.permitsVoice(it.isNetworkConnectionRequired) && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language && (preferences.systemVoice || it.locale.country == locale.country)
+        }.sortedWith(compareByDescending<android.speech.tts.Voice> { preferences.systemVoice && it.name == preferred?.name }
             .thenByDescending { it.locale == locale }.thenByDescending { it.quality }.thenBy { it.name }).firstOrNull()
         if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) {
-            fail("No installed offline voice for ${locale.displayLanguage}. Download an offline voice in Android speech settings. Network override is unavailable because Android may select an unidentified fallback engine."); return
+            fail("No installed offline ${locale.toLanguageTag()} voice. Download it in Android voice settings or choose another voice."); return
         }
         val rate = Settings.Secure.getInt(context.contentResolver, "tts_default_rate", 100) / 100f
         tts.setSpeechRate(rate.coerceIn(0.5f, 2f))
@@ -215,11 +224,20 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
             else promise.resolve(null)
         }
     }
+    @ReactMethod fun useDefaultVoice(promise: Promise) {
+        admission.cancelAll()
+        main.post {
+            if (!NativeSpeechEngineLease.cleanRevoked()) { rejectStop(promise); return@post }
+            preferences.useSystemVoice(false)
+            promise.resolve(null)
+        }
+    }
     @ReactMethod fun openSettings(promise: Promise) {
         admission.cancelAll()
         main.post {
             if (!NativeSpeechEngineLease.cleanRevoked()) { rejectStop(promise); return@post }
             try {
+                preferences.useSystemVoice(true) // Deliberate settings visit opts into Android’s saved engine/voice.
                 context.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 promise.resolve(null)
             } catch (_: Exception) { promise.reject("speech", "Open Android Settings and search for Text-to-speech output.") }

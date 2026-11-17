@@ -46,16 +46,21 @@ test.each(matrix)('compiled voice options/consent $width $scheme $fontScale keep
   await act(async()=>{action(tree!,'English (UK) · en-GB').props.onPress();await flush();});
   const back=host(tree!,'Back to languages'),backStyle=StyleSheet.flatten(back.props.style);
   expect(backStyle.minHeight).toBeGreaterThanOrEqual(48);expect(backStyle.paddingTop).toBe(10);
-  await act(async()=>{action(tree!,'Speech service · en-GB').props.onPress();await flush();});
+  await act(async()=>{action(tree!,'Named speech service · en-GB').props.onPress();await flush();});
   const consent=tree!.root.findByProps({testID:'speech-network-consent'});
   expect(StyleSheet.flatten(consent.props.style).backgroundColor).toBe(tokens[scheme].colors.background);
   const text=(node:any):string=>node.children.map((child:any)=>typeof child==='string'?child:text(child)).join(' ');
   expect(text(consent)).toContain('Named speech service');expect(text(consent)).toContain('en-GB');
   const body=consent.findAll(node=>typeof node.type==='string'&&StyleSheet.flatten(node.props.style)?.lineHeight===24)[0];
   expect(StyleSheet.flatten(body.props.style).color).toBe(tokens[scheme].colors.foreground);
-  const allow=host(tree!,'Allow network speech for this utterance'),allowStyle=StyleSheet.flatten(allow.props.style);
+  const allow=host(tree!,'Allow and remember network speech'),allowStyle=StyleSheet.flatten(allow.props.style);
   expect(allowStyle).toMatchObject({minHeight:48,paddingTop:8,paddingBottom:8,paddingLeft:8,paddingRight:8});
-  await act(async()=>{action(tree!,'Cancel network speech').props.onPress();await flush();});await work;
+  const staleAllow=action(tree!,'Allow and remember network speech').props.onPress;
+  await act(async()=>{
+   if(fontScale===2)tree!.root.findAll(node=>node.props.visible===true&&typeof node.props.onRequestClose==='function')[0].props.onRequestClose();
+   else action(tree!,'Cancel network speech').props.onPress();
+   await flush();staleAllow();await flush();
+  });await work;
   const again=session.press(true);await act(flush);
   const close=host(tree!,'Close speech options'),closeStyle=StyleSheet.flatten(close.props.style);
   expect(closeStyle).toMatchObject({minHeight:48,paddingTop:8,paddingBottom:8,paddingLeft:12,paddingRight:12});

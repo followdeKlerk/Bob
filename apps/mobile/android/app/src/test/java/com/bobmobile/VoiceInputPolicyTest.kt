@@ -41,6 +41,7 @@ class VoiceInputPolicyTest {
         for (id in listOf("", " ", "x".repeat(101))) {
             try { VoiceInputPolicy().begin(id); fail("accepted invalid request") } catch (_: IllegalArgumentException) {}
         }
+        assertEquals(3_000L, VoiceInputPolicy.SILENCE_MS)
         assertEquals(25_000L, VoiceInputPolicy.LISTEN_MS + VoiceInputPolicy.FINISH_MS)
         assertEquals(16_000, VoiceInputPolicy.MAX_TEXT)
     }
@@ -50,6 +51,6 @@ class VoiceInputPolicyTest {
         assertTrue(VoiceInputPolicy.error(9).contains("permission"))
         assertTrue(VoiceInputPolicy.error(6).contains("No speech"))
         assertTrue(VoiceInputPolicy.error(2).contains("connect"))
-        assertTrue(VoiceInputPolicy.error(13).contains("No online fallback"))
+        assertTrue(VoiceInputPolicy.error(13).contains("Speech options"))
     }
 }

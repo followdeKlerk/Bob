@@ -3,6 +3,7 @@ package com.bobmobile
 /** Main-thread admission/finalization policy. No Android dependencies or transcript retention. */
 internal class VoiceInputPolicy {
     companion object {
+        const val SILENCE_MS = 3_000L // Advisory: engines may end earlier. Never restart capture to emulate it.
         const val LISTEN_MS = 20_000L
         const val FINISH_MS = 5_000L
         const val MAX_TEXT = 16_000
@@ -22,7 +23,7 @@ internal class VoiceInputPolicy {
             6, 7 -> "No speech was recognized. Tap the mic and try again."
             8 -> "Android speech recognition is busy. Wait a moment, then tap the mic again."
             9 -> "Microphone permission is unavailable. Check Bob’s Microphone permission in Android Settings."
-            12, 13 -> "This speech engine has no installed model for your language. Use Speech options to choose the selected service or speech screen, or download the language model in Android speech settings. No online fallback was started."
+            12, 13 -> "Language model unavailable. Choose a language/provider in Speech options or download its model."
             else -> "Android speech recognition was interrupted or unavailable. Tap the mic to try again."
         }
     }

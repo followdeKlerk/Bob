@@ -12,13 +12,14 @@ class VoiceInputAdmissionTest {
         assertNull(gate.claim("overlap")); gate.close(); assertFalse(gate.accepts(first)); assertNull(gate.claim("new"))
     }
     @Test fun cancelPauseAndBlurBeforeQueuedAdmissionRemainRevokedAfterRapidReturn() {
-        for (cause in listOf("cancel", "pause", "blur", "destroy")) {
+        for (cause in listOf("cancel", "revokeApproval", "pause", "blur", "destroy")) {
             val gate = VoiceInputAdmission(true, true)
             val queued = gate.claim("old")!!
             var microphoneStarts = 0
             val admit = { gate.admit(queued) { microphoneStarts++ } }
             when (cause) {
                 "cancel" -> gate.cancel("old")
+                "revokeApproval" -> gate.cancelCurrent()
                 "pause" -> gate.foreground(false)
                 "blur" -> gate.focus(false)
                 else -> gate.close()

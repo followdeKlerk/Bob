@@ -13,15 +13,17 @@ class VoiceInputWiringTest {
         val launch = source.substringAfter("private fun launch(")
         val create = launch.indexOf("SpeechRecognizer.createOnDeviceSpeechRecognizer(context)")
         for (gate in listOf("!admission.accepts(ticket) || !windowFocused()", "checkSelfPermission(Manifest.permission.RECORD_AUDIO)",
-            "plan == null", "plan.networkCapable && !consent", "NativeSpeechEngineLease.stopForCapture()", "NativeVoiceCapture.claim(this)")) {
+            "plan == null", "plan.networkCapable && !consent && !preferences.approved(plan.key)", "NativeSpeechEngineLease.stopForCapture()", "NativeVoiceCapture.claim(this)")) {
             assertTrue(gate, launch.indexOf(gate) in 0 until create)
         }
         assertTrue(source.contains("VoiceProviders.options(context, language).firstOrNull { it.key == key && it.language == language }"))
         assertTrue(providers.contains("Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(context)"))
         assertTrue(providers.contains("RecognitionService.SERVICE_META_DATA"))
-        assertTrue(providers.contains("pickedOther && selectedService"))
-        assertTrue(providers.contains("pickedOther && selectedActivity"))
-        assertTrue(providers.contains("activity.packageName == picked?.packageName"))
+        assertTrue(providers.contains("it.packageName.startsWith(\"com.google.\")"))
+        assertTrue(providers.contains("requestedLanguage: String = \"en-GB\""))
+        assertTrue(source.contains("preferences.selection"))
+        assertTrue(source.contains("plans.sortedByDescending { it.selection == selected }"))
+        assertTrue(source.contains("Saved provider unavailable"))
         assertTrue(source.contains("SpeechRecognizer.createSpeechRecognizer(context, plan.component)"))
         // Advisory offline preference is never mistaken for a guarantee: nonlocal providers require consent above.
         assertTrue(source.contains("RecognizerIntent.EXTRA_PREFER_OFFLINE, true"))
@@ -36,7 +38,10 @@ class VoiceInputWiringTest {
         for (lifecycle in listOf("onHostPause", "onHostDestroy")) assertTrue(source.contains("override fun $lifecycle()"))
         assertTrue(source.substringAfter("override fun invalidate()").contains("retire(admission.close())"))
         for (deadline in listOf("VoiceInputPolicy.LISTEN_MS", "VoiceInputPolicy.FINISH_MS", "12_000", "60_000", "2000")) assertTrue(deadline, source.contains("main.postDelayed(it, $deadline)"))
-        assertTrue(source.contains("admission.admit(ticket) { engine.startListening(intent) }"))
+        val start = source.substringAfter("fun begin(language: String?)")
+        assertTrue(start.indexOf("if (!admission.admit(ticket)") < start.indexOf("engine.startListening(intent)"))
+        assertTrue(start.indexOf("if (!configured())") < start.indexOf("engine.startListening(intent)"))
+        assertTrue(source.contains("VoiceProviders.options(context, plan.language).any { it.key == plan.key }"))
         for (method in listOf("start(", "startConfigured(")) {
             val start = source.substringAfter("@ReactMethod fun $method").substringBefore("private fun launch(")
             assertTrue(start.indexOf("val ticket = admission.claim(id)") < start.indexOf("main.post {"))
@@ -47,7 +52,7 @@ class VoiceInputWiringTest {
     }
     @Test fun externalActivityIsExplicitOwnedOneUseAndOnlyDeliversBackToFocusedBob() {
         val source = code
-        assertTrue(source.contains("if (!admission.handoff(ticket))"))
+        assertTrue(source.contains("check(admission.handoff(ticket))"))
         assertTrue(source.contains("intent.setComponent(plan.component)"))
         assertTrue(source.contains("admission.ownsHandoff(ticket)"))
         assertTrue(source.contains("windowFocused() && admission.accepts(ticket)"))
@@ -65,8 +70,18 @@ class VoiceInputWiringTest {
         assertTrue(manifest.contains("android.permission.RECORD_AUDIO"))
         assertFalse(manifest.contains("FOREGROUND_SERVICE_MICROPHONE"))
         assertTrue(File("src/main/java/com/bobmobile/MainApplication.kt").readText().contains("add(BobVoiceInputPackage())"))
-        for (bad in listOf("MediaRecorder", "AudioRecord", "File(", "SharedPreferences", "Log.", "printStackTrace", "OkHttp", "openConnection", "startService", "HeadlessJs", "startForeground", "dev.omalauncher", "ProcessBuilder", "Proot", "compose.runtime")) assertFalse(bad, code.contains(bad))
+        for (bad in listOf("MediaRecorder", "AudioRecord", "File(", "Log.", "printStackTrace", "OkHttp", "openConnection", "startService", "HeadlessJs", "startForeground", "dev.omalauncher", "ProcessBuilder", "Proot", "compose.runtime")) assertFalse(bad, code.contains(bad))
         assertTrue(code.contains("override fun onBufferReceived(buffer: ByteArray?) {}"))
+    }
+    @Test fun approvalIsNativeBoundRevocableAndSilenceHintsDoNotAddRetries() {
+        val source = code
+        assertTrue(source.contains("putBoolean(\"approved\", preferences.approved(plan.key))"))
+        assertTrue(source.contains("preferences.remember(plan, consent)"))
+        val revoke = source.substringAfter("@ReactMethod fun revokeApprovals").substringBefore("@ReactMethod fun availability")
+        assertTrue(revoke.indexOf("admission.cancelCurrent()") < revoke.indexOf("main.post"))
+        assertTrue(revoke.contains("preferences.revoke()"))
+        for (extra in listOf("EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", "EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS")) assertTrue(source.contains("RecognizerIntent.$extra, VoiceInputPolicy.SILENCE_MS"))
+        assertEquals(1, Regex("engine.startListening").findAll(source).count())
     }
     @Test fun allRoutesSendTheDisclosedLocaleWithoutRegionRewriting() {
         assertTrue(code.contains("RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.requested(plan.language)"))

@@ -34,6 +34,7 @@ internal class VoiceInputAdmission(private var foreground: Boolean, private var 
         focused = value
         return if (!value && external == null) revoke() else null
     }
+    @Synchronized fun cancelCurrent(): Ticket? = revoke()
     @Synchronized fun close(): Ticket? { closed = true; return revoke() }
     private fun revoke(): Ticket? = current.also { current = null; external = null }
 }

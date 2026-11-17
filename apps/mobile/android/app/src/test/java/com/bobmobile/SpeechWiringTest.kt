@@ -9,7 +9,7 @@ class SpeechWiringTest {
     private val code get() = File("src/main/java/com/bobmobile/BobSpeech.kt").readText()
     @Test fun actualAndroidStopStatusAndShutdownFeedTheTestedProcessLifetimeLease() {
         assertTrue(code.contains("SpeechEngineLease<TextToSpeech>({ it.stop() == TextToSpeech.SUCCESS }, { it.shutdown() })"))
-        assertTrue(code.contains("engineLease.attach(TextToSpeech(context)"))
+        assertTrue(code.contains("engineLease.attach(TextToSpeech(context,"))
         assertTrue(code.contains("internal object NativeSpeechEngineLease"))
         assertTrue(code.contains("val cleanupRegistry = SpeechEngineCleanup<TextToSpeech>()"))
         assertTrue(code.contains("owner?.stopForCapture() ?: cleanupRegistry.cleanup(emptyLease)"))
@@ -37,6 +37,15 @@ class SpeechWiringTest {
         assertTrue(code.contains("TextToSpeech.QUEUE_FLUSH")) // one bounded chunk at a time, next only on matching onDone
         assertTrue(code.contains("utteranceId != \"\$active:\$index\""))
     }
+    @Test fun freshDefaultRequestsGoogleOfflineUkButDeliberateAndroidVoiceChoicesRemainAvailable() {
+        assertTrue(code.contains("com.google.android.tts"))
+        assertTrue(code.contains("}, requestedEngine()))"))
+        assertTrue(code.contains("if (preferences.systemVoice) preferred?.locale ?: Locale.getDefault() else Locale.UK"))
+        assertTrue(code.contains("preferences.systemVoice || it.locale.country == locale.country"))
+        assertTrue(code.contains("preferences.useSystemVoice(true)"))
+        assertTrue(code.contains("preferences.useSystemVoice(false)"))
+        assertTrue(code.contains("SpeechPolicy.permitsVoice(it.isNetworkConnectionRequired)"))
+    }
     @Test fun queuedInitializationAndEveryChunkUseSynchronousNativeRevocation() {
         val stop = code.substringAfter("@ReactMethod fun stop(").substringBefore("@ReactMethod fun openSettings(")
         assertTrue(stop.indexOf("admission.cancelAll()") < stop.indexOf("main.post"))
@@ -49,6 +58,6 @@ class SpeechWiringTest {
         assertFalse(code.contains("getCurrentEngine")); assertFalse(code.contains("java.lang.reflect"))
         assertFalse(code.contains("putString(\"provider\"")) // settings are not recipient attestation
         val start = code.substringAfter("private fun speakInternal(")
-        assertTrue(start.indexOf("if (consent)") < start.indexOf("TextToSpeech(context)"))
+        assertTrue(start.indexOf("if (consent)") < start.indexOf("TextToSpeech(context,"))
     }
 }

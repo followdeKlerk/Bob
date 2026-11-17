@@ -45,7 +45,7 @@ test.each([PermissionsAndroid.RESULTS.DENIED,PermissionsAndroid.RESULTS.NEVER_AS
 });
 const namedProvider={mode:'platform' as const,key:'selected-service|en-PL',label:'Selected service',language:'en-PL',networkCapable:true};
 function namedNetwork(){const startConfigured=jest.fn(async(_id:string,_key:string,_language:string,_consent:boolean)=>{});Object.assign(native,{options:jest.fn(async()=>[namedProvider]),startConfigured});return startConfigured;}
-test('named provider requires explicit, renewed per-utterance consent before permission or start',async()=>{
+test('unapproved native configuration requires informed approval before permission or start',async()=>{
  const startConfigured=namedNetwork();const decisions=[deferred<boolean>(),deferred<boolean>()];let request=0;const consent=jest.fn((_provider:VoiceProvider,_signal:AbortSignal):Promise<boolean>=>decisions[request++].promise);
  session.setConsent(consent);const work=session.press();await flush();expect(consent).toHaveBeenCalledWith(namedProvider,expect.any(AbortSignal));
  expect(PermissionsAndroid.request).not.toHaveBeenCalled();expect(startConfigured).not.toHaveBeenCalled();
@@ -181,19 +181,19 @@ test('Speech options cancels the old capture without starting a replacement unti
 
 test.each((['onDevice','platform','activity'] as const).flatMap(mode=>['en-US','en-GB'].map(language=>({mode,language}))))('en-PL default, explicit $language on $mode route, retained next tap; cancellation and consent fenced',async({mode,language})=>{
  const plan=(language:string)=>({mode,key:`${mode}|provider|${language}`,label:`Provider ${mode}`,language,networkCapable:mode!=='onDevice'});
- const options=jest.fn(async(language:string|null)=>[plan(language??'en-PL')]);const startConfigured=jest.fn(async(_id:string,_key:string,_language:string,_consent:boolean)=>{});
+ let saved='en-PL';const options=jest.fn(async(language:string|null)=>[plan(language??saved)]);const startConfigured=jest.fn(async(_id:string,_key:string,language:string,_consent:boolean)=>{saved=language;});
  Object.assign(native,{options,startConfigured});
  const select=deferred<any>();const picker=jest.fn(async(_initial:string,load:(language:string)=>Promise<any[]>,signal:AbortSignal)=>{
-  expect(_initial).toBe('en-PL');expect(signal.aborted).toBe(false);const [choice]=await load(language);select.resolve(choice);return choice;
+  expect(_initial).toBe('en-GB');expect(signal.aborted).toBe(false);const [choice]=await load(language);select.resolve(choice);return choice;
  });session.setPicker(picker);
  const decisions=[deferred<boolean>(),deferred<boolean>()];let request=0;const consent=jest.fn(():Promise<boolean>=>decisions[request++].promise);session.setConsent(consent);
  const first=session.press(true);await flush();expect(picker).toHaveBeenCalledTimes(1);
- expect(options).toHaveBeenCalledWith(null);expect(options).toHaveBeenCalledWith(language);
+ expect(options).toHaveBeenCalledWith('en-GB');expect(options).toHaveBeenCalledWith(language);
  if(mode!=='onDevice'){expect(consent).toHaveBeenCalledTimes(1);expect(startConfigured).not.toHaveBeenCalled();decisions[0].resolve(true);}
  await first;expect(startConfigured).toHaveBeenCalledWith(expect.any(String),plan(language).key,language,mode!=='onDevice');
  session.receive({id:startConfigured.mock.calls[0][0],state:'error',message:'No installed model. Download a model in Android settings or choose another language explicitly.'});
  const again=session.press();await flush();if(mode!=='onDevice'){expect(consent).toHaveBeenCalledTimes(2);decisions[1].resolve(false);}await again;
- expect(options).toHaveBeenCalledWith(language);expect(startConfigured).toHaveBeenCalledTimes(mode==='onDevice'?2:1);expect(native.start).not.toHaveBeenCalled();
+ expect(options).toHaveBeenLastCalledWith(null);expect(startConfigured).toHaveBeenCalledTimes(mode==='onDevice'?2:1);expect(native.start).not.toHaveBeenCalled();
  delete (native as any).options;delete (native as any).startConfigured;
 });
 
@@ -204,4 +204,35 @@ test('cancel, scope A-B-A and late picker choice never start recognition',async(
  const work=session.press(true);await flush();session.configure('other',true);session.configure('backend/chat',true);selected.resolve(plan);await work;
  expect((native as any).startConfigured).not.toHaveBeenCalled();expect(native.start).not.toHaveBeenCalled();expect(transcript).not.toHaveBeenCalled();
  delete (native as any).options;delete (native as any).startConfigured;
+});
+
+
+test('native remembered approval skips only Bob consent, never runtime microphone permission; changed config asks again',async()=>{
+ const startConfigured=namedNetwork(),consent=jest.fn(async()=>true);session.setConsent(consent);
+ (native as any).options.mockResolvedValue([{...namedProvider,approved:true}]);
+ await session.press();expect(consent).not.toHaveBeenCalled();
+ expect(PermissionsAndroid.request).toHaveBeenCalledTimes(1);
+ expect(startConfigured).toHaveBeenLastCalledWith(expect.any(String),namedProvider.key,'en-PL',false);
+ session.cancel();(native as any).options.mockResolvedValue([{...namedProvider,key:'provider-update|en-PL',approved:false}]);
+ await session.press();expect(consent).toHaveBeenCalledTimes(1);
+ expect(startConfigured).toHaveBeenLastCalledWith(expect.any(String),'provider-update|en-PL','en-PL',true);
+ session.cancel();jest.mocked(PermissionsAndroid.request).mockResolvedValue(PermissionsAndroid.RESULTS.DENIED);
+ (native as any).options.mockResolvedValue([{...namedProvider,approved:true}]);await session.press();
+ expect(startConfigured).toHaveBeenCalledTimes(2);expect(error).toHaveBeenLastCalledWith(expect.stringContaining('denied'));
+});
+
+test('forgetting approval cancels pending Allow; later capture rereads native approval and requires review',async()=>{
+ const startConfigured=namedNetwork(),decision=deferred<boolean>();session.setConsent(()=>decision.promise);
+ const revokeApprovals=jest.fn(async()=>{});Object.assign(native,{revokeApprovals});
+ const work=session.press();await flush();await session.revokeApprovals();decision.resolve(true);await work;
+ expect(revokeApprovals).toHaveBeenCalledTimes(1);expect(startConfigured).not.toHaveBeenCalled();
+ session.setConsent(jest.fn(async()=>false));await session.press();expect(startConfigured).not.toHaveBeenCalled();
+ delete (native as any).revokeApprovals;
+});
+
+test('a native saved explicit non-UK choice survives a new session; no JS system-locale migration overwrites it',async()=>{
+ const startConfigured=namedNetwork();(native as any).options.mockResolvedValue([{...namedProvider,approved:true}]);
+ session.dispose();const next=new VoiceInputSession(changed,transcript,error);next.configure('new/chat',true);
+ await next.press();expect((native as any).options).toHaveBeenCalledWith(null);
+ expect(startConfigured).toHaveBeenLastCalledWith(expect.any(String),namedProvider.key,'en-PL',false);next.dispose();
 });
