@@ -62,7 +62,7 @@ test('unchanged phone Voice snapshot matches the exact allowlist and SHA256 inve
   }
 });
 
-test('snapshot retains upstream attribution, exclusions and the explicit blocked-integration boundary', () => {
+test('snapshot retains upstream attribution, exclusions and the immutable-reference/adapted-integration boundary', () => {
   const license = read('source/LICENSE');
   assert.match(license, /MIT License/);
   assert.match(license, /Copyright \(c\) 2026 Simon Schubert and contributors/);
@@ -70,7 +70,7 @@ test('snapshot retains upstream attribution, exclusions and the explicit blocked
   assert.match(read('source/THIRD_PARTY.md'), /Coding agent logos/);
   assert.match(read('source/app/src/main/assets/licenses/apache-2.0.txt'), /Apache License/);
   const documentation = read('README.md');
-  assert.match(documentation, /Copied, not integrated/);
+  assert.match(documentation, /Immutable reference, adapted integration/);
   assert.match(documentation, /Do not describe this engine as offline-only/);
   for (const dependency of ['Compose Multiplatform', 'Android Jetpack', 'Kotlin and kotlinx.coroutines', 'JSON-java']) {
     assert.ok(documentation.includes(dependency), dependency);

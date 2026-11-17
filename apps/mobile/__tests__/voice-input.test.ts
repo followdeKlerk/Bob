@@ -131,3 +131,45 @@ test('failure to restore focus is bounded, and focus verification failure does n
  expect(native.start).not.toHaveBeenCalled();expect(error).toHaveBeenCalledWith('Return to Bob, then tap the mic again.');
  native.windowFocused.mockRejectedValue(Error('unavailable'));await session.press();expect(native.start).not.toHaveBeenCalled();expect(error).toHaveBeenLastCalledWith(expect.stringContaining('window focus'));
 });
+test('30-second setup does not consume listening/finalization budgets',async()=>{
+ const permission=deferred<any>();jest.mocked(PermissionsAndroid.request).mockReturnValueOnce(permission.promise);
+ const work=session.press();await flush();jest.advanceTimersByTime(30000);permission.resolve(PermissionsAndroid.RESULTS.GRANTED);await work;
+ const id=currentId();session.receive({id,state:'listening'});
+ jest.advanceTimersByTime(12000);session.receive({id,state:'finishing'});jest.advanceTimersByTime(3000);
+ session.receive({id,state:'final',text:'A complete fifteen-second recognition after setup.'});
+ expect(transcript).toHaveBeenCalledTimes(1);expect(error).not.toHaveBeenCalled();expect(native.cancel).not.toHaveBeenCalled();
+});
+test('each setup, ready, listening and finalization wait is bounded independently',async()=>{
+ await session.press();jest.advanceTimersByTime(15000);expect(error).toHaveBeenCalledTimes(1);
+ await session.press();session.receive({id:currentId(),state:'listening'});jest.advanceTimersByTime(25000);expect(error).toHaveBeenCalledTimes(2);
+ await session.press();const id=currentId();session.receive({id,state:'listening'});session.receive({id,state:'finishing'});jest.advanceTimersByTime(8000);
+ session.receive({id,state:'final',text:'late'});expect(error).toHaveBeenCalledTimes(3);expect(transcript).not.toHaveBeenCalled();
+});
+test('configured selected service receives provider-specific disclosure and a pinned key; partials are visible but never final',async()=>{
+ const provider={mode:'platform',key:'selected-provider-v2|en-US',label:'Selected non-Google service',language:'en-US',networkCapable:true};
+ const options=jest.fn(async()=>[provider]),startConfigured=jest.fn(async(_id:string,_key:string,_consent:boolean)=>{});
+ Object.assign(native,{options,startConfigured});const alert=jest.spyOn(Alert,'alert'),details=jest.fn();
+ const configured=new VoiceInputSession(changed,transcript,error,undefined,details);configured.configure('selected/chat',true);
+ const work=configured.press();await flush();expect(String(alert.mock.calls[0][1])).toContain(provider.label);expect(String(alert.mock.calls[0][1])).toContain('may send audio');
+ alert.mock.calls[0][2]![1].onPress!();await work;const id=startConfigured.mock.calls[0][0];
+ expect(startConfigured).toHaveBeenCalledWith(id,provider.key,true);expect(native.start).not.toHaveBeenCalled();
+ configured.receive({id,state:'partial',text:'Visible partial'});expect(details).toHaveBeenCalledWith(expect.objectContaining({partial:'Visible partial'}));expect(transcript).not.toHaveBeenCalled();
+ configured.receive({id,state:'error',message:'No model. Use Speech options.'});expect(startConfigured).toHaveBeenCalledTimes(1);expect(error).toHaveBeenCalledWith(expect.stringContaining('Speech options'));
+ configured.dispose();delete (native as any).options;delete (native as any).startConfigured;
+});
+test('activity-only provider handoff is explicit, bounded and revocable; focus regain never restarts capture',async()=>{
+ const provider={mode:'activity',key:'speech-screen-v1|en-US',label:'Activity-only speech',language:'en-US',networkCapable:true};
+ const startConfigured=jest.fn(async(_id:string,_key:string,_consent:boolean)=>{});Object.assign(native,{options:jest.fn(async()=>[provider]),startConfigured});
+ const alert=jest.spyOn(Alert,'alert');const work=session.press();await flush();alert.mock.calls[0][2]![1].onPress!();await work;
+ const id=startConfigured.mock.calls[0][0];expect(session.ownsExternal()).toBe(true);session.background();session.blur();
+ expect(native.cancel).not.toHaveBeenCalled();session.configure('new/chat',true);expect(native.cancel).toHaveBeenCalledWith(id);expect(session.ownsExternal()).toBe(false);
+ session.receive({id,state:'final',text:'revoked external result'});expect(transcript).not.toHaveBeenCalled();expect(startConfigured).toHaveBeenCalledTimes(1);
+ delete (native as any).options;delete (native as any).startConfigured;
+});
+
+test('Speech options cancels the old capture instead of accidentally finalizing/sending it',async()=>{
+ await session.press();const id=currentId();session.receive({id,state:'listening'});
+ await session.press(true);
+ expect(native.finish).not.toHaveBeenCalled();expect(native.cancel).toHaveBeenCalledWith(id);expect(native.start).toHaveBeenCalledTimes(2);
+ session.receive({id,state:'final',text:'Discarded old utterance'});expect(transcript).not.toHaveBeenCalled();
+});

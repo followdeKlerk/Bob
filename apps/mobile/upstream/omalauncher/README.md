@@ -1,8 +1,10 @@
 # Omalauncher Voice — unchanged phone-source snapshot
 
-**Copied, not integrated.** Nothing here is registered with Gradle, Metro, the
-Android manifest or Bob's composer. This is not a working Voice Chat feature.
-There is no new button, alternate chat, backend, agent or replacement screen.
+**Immutable reference, adapted integration.** `source/` and `SHA256SUMS` remain
+byte-identical phone reference material, not Gradle/Metro build inputs. Bob now
+separately extracts and adapts useful Voice behavior into its own Android and
+React Native chat. The owner explicitly authorized extraction after the original
+unchanged-controller blocker; no launcher runtime emulation was introduced.
 
 ## Provenance and byte verification
 
@@ -62,59 +64,60 @@ original `Speech` selected-service/on-device/activity fallback and `Speaker`
 engine/voice/language/rate handling are untouched. These are source observations,
 not an installed-phone test.
 
-## Concrete integration blocker — stopped without a shim
+## Extracted implementation and deliberate differences
 
-The upstream has no injected chat transport interface:
+- `Speech.kt`: selected/non-Google service discovery, on-device checks, locale
+  matching/main-region fallback, final/partial results and activity-only recognition.
+  Adapted in `BobVoiceInput.kt`, `VoiceProviders.kt`, `VoiceInputPolicy.kt` and
+  `BobVoiceRecognitionActivity.kt`. Bob owns Android permission, focus, separate
+  stage deadlines, cancellation and process-wide capture/playback exclusion.
+- `VoiceScreen.kt` / `VoiceSession.kt`: a final utterance submits without Send;
+  subsequent captures require a tap; waiting/errors are visible; the answer is
+  automatically read. Adapted in `voice-chat.ts`, `use-voice-chat.ts`,
+  `components/voice-chat-controls.tsx` and actual `App.tsx` callbacks. Bob's current
+  selected-chat/device-bound outbox and authenticated causal completion receipt
+  replace the launcher process link. No second delivery controller is introduced.
+- `Speaker.kt`: system TTS engine/language/rate/voice selection, bounded output,
+  progress/failure and stop handling. Adapted in `BobSpeech.kt` and `speech.ts`,
+  retaining Bob's fail-closed process-lifetime engine lease.
 
-1. `VoiceScreen(runtime: Runtime, ...)` (`VoiceScreen.kt:167–178`) requires the
-   concrete launcher `Runtime`, not a speech/chat interface. It directly reads
-   `runtime.bootstrap.state`, accesses agent install states and opens launcher
-   agent settings/terminals (`:282`, `:334`, `:415`, `:492`). The actual `Runtime`
-   constructs PRoot, Wayland/window management, agent provisioning and widgets;
-   those unrelated subsystems were inspected, not imported.
-2. `VoiceSession` (`VoiceSession.kt:39–44`) requires concrete `Proot` and
-   `AgentStore`. `ask()` (`:461–505`) refuses to submit without a live local
-   `Process`. `start()` (`:698–782`) chooses a global `VOICE_LINKS` entry, calls
-   `proot.process(l.command(session)).start()` and reads that process's pipes.
-   There is no public callback for Bob's selected connection/current chat,
-   canonical submission identity/outbox, or receipt reconciliation.
-3. The existing Bob integration is **not** that connector. `BobLink.command()`
-   (`BobLink.kt:32`) executes `bob-voice-agent rpc` in the launcher guest. Its
-   protocol loads separately paired companion state, optionally switches
-   `bob-voice:<id>` sessions, and exposes session selection (`:35–56`, `:111–135`).
-   Pointing it at the owner's already paired launcher companion would silently
-   use another connection/selection and evade Bob's current-chat admission
-   boundary. Copying its private configuration is explicitly out of scope.
-4. The unchanged session owns persistent local transcripts/settings under
-   `context.filesDir/voice` and can continue running after the screen closes
-   (`VoiceSession.kt:35–38`, `:453–457`). Bob's permitted integration instead
-   needs current-chat/connection revocation and must preserve the existing draft,
-   list and Durable/outbox identities. Adding a composer launch alone does not
-   resolve either ownership or lifecycle.
+**Working path:** deliberate headphones tap → Android final utterance → existing
+Bob outbox → exact request's completed-answer receipt → full recorded assistant
+public text → automatic TTS. The next capture always needs another tap. The
+separate microphone stays draft-only/manual Send and existing drafts/attachments
+are untouched. **This reads the completed answer; it does not reproduce upstream
+sentence-stream timing.** Virtualized rows do not own Voice Chat playback.
 
-Bob's existing canonical send path remains `apps/mobile/App.tsx`'s `submit()`:
-it creates a request ID and adds an `OutgoingMessage` to the app-owned outbox.
-The upstream process path cannot be connected to it by manifest/registration
-alone. Keeping upstream files unchanged would require substantial launcher
-runtime/process emulation; replacing that path would change upstream behavior.
-Both exceed the requested small external connector. No such adapter was added,
-and Bob dictation was not substituted. Integration compilation and real-phone
-acceptance are therefore **blocked**, not passed.
+The old unchanged-controller blocker was real: `VoiceScreen` required concrete
+launcher `Runtime`; `VoiceSession` required `Proot`, `AgentStore`, a live local
+process, filesystem transcripts/settings and process-pipe events. The copied
+`BobLink` starts `bob-voice-agent rpc` with separately paired launcher companion
+state and its own session selection. None of that runtime/process/companion path,
+Compose shell, Linux/PRoot, launcher filesystem settings, plugin UI, logos or fonts
+is connected to Bob. Authorized extraction removes that architectural blocker
+without altering the pristine phone reference.
+
+The one ephemeral playback interest belongs to the current voice turn and is
+revoked by cancellation, text send, navigation, chat/connection/pairing changes,
+background or unmount. Only the deliberately owned external provider Activity may
+temporarily leave Bob. Completion polling is bounded and read-only; outbox
+recovery still owns delivery. Snapshots/history/reconnect cannot reconstruct
+revoked autoplay authority. See root `FEATURES.md` for timing, controls and limits.
 
 ## Privacy and licensing boundary
 
-Do not describe this engine as offline-only. `Speech.kt:236–252,380–388` falls
-back to a regular recognizer and can remove the offline preference when a
-language model is unavailable; `SpeakNowActivity` can invoke another app's speech
-UI. Android's selected provider may send microphone audio over the network.
-`Speaker.kt:192–196,217–225` sorts network-required voices but does not prohibit
-them; selected TTS providers may receive reply text. Unlike Bob's existing
-per-utterance dictation consent and offline-capable Read aloud claims, these
-upstream fallbacks have no equivalent Bob consent boundary. Any future exposed
-integration must disclose that before deliberate Voice entry; this dormant
-snapshot makes no change to current Bob behavior or privacy claims. Also note
-upstream `VoiceSession.trace()` writes bounded plaintext command/event traces in
-the launcher guest; those logs were not copied.
+**Do not describe this engine as offline-only.** Original `Speech.kt` can fall back
+to a regular recognizer, remove the offline preference for missing language data,
+or invoke another app's speech screen. Original `Speaker.kt` sorts but does not
+prohibit network voices. Bob's adaptation never silently follows those network
+fallbacks: each non-on-device recognition utterance needs named-provider consent;
+TTS first requires a voice reporting offline support and an unavailable voice
+exposes a separate, explicitly disclosed **per-reply** provider-voice choice.
+Consent is configuration-bound, revocable and not persisted as blanket permission.
+Provider/model changes fail closed. Bob itself saves/uploads no microphone audio;
+only final text uses normal chat delivery. Installed provider behavior remains
+Android/provider-dependent. Upstream plaintext process trace code remains dormant
+reference material, not a Bob logging path.
 
 The MIT license and **Copyright (c) 2026 Simon Schubert and contributors** are
 retained verbatim in `source/LICENSE`, including its exclusions. `source/THIRD_PARTY.md`
@@ -135,5 +138,54 @@ for the Voice dependency boundary; their Apache 2.0 text is copied at
 - JSON-java (upstream JVM test dependency): Public Domain;
   https://github.com/stleary/JSON-java.
 
-No new dependency is installed, resolved or bundled by this snapshot. A future
-build must retain the actual resolved artifacts' licenses/notices as well.
+No dependency was installed by this extraction. Production speech text reuses the
+already installed MIT `markdown-it` parser, now declared directly, rather than
+stripping Markdown with destructive regexes. Root `THIRD_PARTY_NOTICES.md` records
+attribution; full upstream MIT/exclusions and Markdown parser licences are also
+bundled under Android `assets/licenses/`.
+
+## Validation boundary and focused checks
+
+```sh
+(cd apps/mobile/upstream/omalauncher/source && sha256sum -c ../SHA256SUMS)
+node --import tsx --test test/omalauncher-voice-import.test.ts test/documentation.test.ts
+(cd apps/mobile && ../../node_modules/.bin/tsc --noEmit)
+(cd apps/mobile && npm test -- --runInBand --runTestsByPath \
+  __tests__/App.test.tsx __tests__/voice-chat-app.test.tsx __tests__/voice-chat.test.ts \
+  __tests__/voice-input.test.ts __tests__/voice-input-button.test.tsx \
+  __tests__/speech.test.ts __tests__/speech-action.test.tsx __tests__/voice-speech-safety.test.ts)
+# Scoped compile/unit tests only; configured SDK/JDK and cached dependencies required.
+(cd apps/mobile/android && ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest \
+  --tests 'com.bobmobile.Voice*' --tests 'com.bobmobile.Speech*' \
+  -x buildBobInteractive -x buildBobTerminal --offline --console=plain)
+```
+
+These exercise App/controller/native policy/lease/wiring boundaries without
+activating a microphone, installed recognizer, TTS engine or model/provider.
+Structural 337/361×754 theme/font/keyboard tests are not physical rendering or
+audio-device proof. Real provider, permission, Activity handoff, focus and speech
+quality still need owner-run device acceptance. No APK build, installation,
+deployment, service restart or audio activation is part of this implementation.
+
+### Recorded implementation checks
+
+- **176/176 tests, eight focused mobile Jest suites**, including the real App's
+  auto-send/outbox/receipt/playback callbacks, two turns, preserved draft and
+  attachments, late focus/background/navigation/pairing races, unmounted rows,
+  failed capture/playback cleanup, and both themes at 337/361×754 with keyboard
+  and 1×/2× font-scale structural probes. `--detectOpenHandles` reported no handles.
+- Mobile **`tsc --noEmit` passed**.
+- Scoped debug Kotlin compilation and **31/31 Voice/Speech JVM tests passed**
+  offline with Temurin 17. Existing ReactPackage/Gradle deprecation warnings remain.
+- Source/provenance and documentation **9/9 tests passed**; **26/26 source hashes**
+  remain equal to the phone inventory, including the unchanged manifest hash.
+- The original three reproduction inputs now pass: 30-second setup followed by a
+  valid 15-second recognition/final still delivers its transcript; failed Stop
+  retains visible recovery while revoking old event authority; `2*3` is preserved.
+  The independent probe harness only needed the new Markdown module wired into
+  its imports; inputs were not weakened.
+
+One simultaneous Gradle/Jest attempt exceeded the pre-existing App harness's
+five-second test deadline and caused a downstream fixture failure. The identical
+Jest command passed when rerun alone; no deadlines/assertions were relaxed. These
+results do not replace physical-provider/audio/layout acceptance.

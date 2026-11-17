@@ -221,19 +221,35 @@ A card is not an independent live feed: fresh external information or recurring 
 
 Map and website buttons open their displayed destination only when you tap them. Generated cards cannot silently access your files, credentials, network or backend tools. Optional connected MCP tools and mini-apps need their own backend configuration and granted access.
 
+## Voice Chat
+
+Tap the **headphones beside Send** to start Voice Chat deliberately. Speak once: when Android recognition finishes, Bob **automatically sends those final words as their own message into the current chat**, then **automatically reads that turn’s completed assistant reply**. There is no extra Send or speaker tap. Tap the headphones again for the next turn; the microphone never restarts itself. The separate microphone button is draft dictation, not Voice Chat.
+
+The small Voice Chat panel shows setup/listening/finalization, partial words, the selected recognition provider, waiting, playback and errors. **Stop voice** cancels capture or automatic reading; **Exit Voice Chat** closes the voice session. These controls do not cancel an already admitted backend task or resend a message. Use ordinary **Stop Bob** to stop backend work. You can interrupt playback by deliberately tapping to speak again. If playback cleanup fails, **Retry Stop** stays available outside reply rows, and microphone admission remains blocked until cleanup succeeds; a broken provider may require closing Bob completely.
+
+Your existing typed draft, attachments and editor stay untouched: they are not combined with the spoken message. Voice turns use the existing device-bound outbox and receipt recovery, with a distinct follow-up submission rather than implicitly steering an in-progress turn. Delivery is not completion. Voice checks that exact request’s authenticated completion receipt and fetches the full recorded answer, including when it has scrolled outside loaded history. Only that answer’s public assistant text is read—never old history, tool arguments/results, hidden reasoning, images, status updates, or a later helper follow-up. A shared answer is read once per voice session. **This first integration reads after completion; it does not speak sentences while a reply streams.**
+
+Leaving Chat, changing conversation/connection/pairing, sending text, backgrounding Bob or unmounting the session revokes automatic reading. Returning or reconnecting never arms historical/outbox replies for playback. Voice’s read-only completion checks stop on revocation and are bounded to ten minutes per turn; outbox delivery/recovery remains independent. A delivery uncertainty is never a reason for Voice Chat to create another request.
+
+### Speech providers and privacy
+
+Microphone permission is still Android’s **RECORD_AUDIO** permission. Bob prefers the actual on-device recognizer, except when Android explicitly selects another app’s speech service or speech-only screen. Missing language/model errors expose **Speech options**, including the selected service or an activity-only provider such as a speech app’s own screen. Alternatives never start silently. Service capture is bounded to 20 seconds plus five seconds for finalization after readiness; the explicitly owned external speech-screen handoff has its own 60-second result deadline and short foreground-return deadline, and only returns final words to focused Bob. Cancelling, changing scope or expiry revokes that handoff; process recreation cannot restore it.
+
+For any recognition provider other than Android’s actual on-device engine, Bob names the chosen provider/language and asks **for each utterance** before it can receive audio: the provider may use the network even when offline recognition is preferred. Consent is bound to the exact provider/configuration; a changed provider must be reviewed again. Bob itself neither saves microphone audio nor uploads audio to the backend. Only final text enters the normal chat pipeline.
+
+Automatic reading initially requires an installed TTS voice reporting offline support. If no suitable voice is installed, Voice Chat shows the failure; **Allow provider voice once** explicitly discloses that the selected TTS provider may receive this completed reply’s text over the network. That choice is bound to the current TTS configuration and this one reply, never saved as blanket permission. Install voice data or change language/voice/speed through **Settings → Voice → Voice & speed**. Installed provider behavior still depends on Android and the provider; Bob does not claim that every installed engine is offline.
+
 ## Dictate a message
 
-Tap the microphone beside Send, allow Android microphone access, and speak one short utterance. Tap **Finish dictation** to finish, or hold the button to cancel without adding text. Only the final words are appended to the current draft; you decide when to send. Listening ends automatically after at most 20 seconds, with up to five more seconds for a final result. Type normally or dictate another utterance for longer messages.
+Tap the **microphone** beside Send, allow Android microphone access, and speak one short utterance. Tap **Finish dictation** to finish, or hold the button to cancel without adding text. Only final words are appended to the current draft; **you decide when to press Send**. Partial words never become draft edits. Setup, listening and finalization have separate deadlines, so a slow first-use permission/consent dialog does not consume speaking time.
 
-Bob prefers Android's actual on-device recognizer. If only the platform speech engine is available, Bob asks before each utterance because that engine may send audio to its provider. There is no automatic online fallback, backend audio upload or audio recording saved by Bob. Recognition requires an available engine and language model; activity-only speech apps are not supported. Unavailable recognition or denied permission does not prevent typing or Read aloud.
-
-Leaving Chat, switching conversations or backgrounding Bob cancels dictation and discards late results. Read aloud and dictation do not run together.
+Dictation uses the same explicitly disclosed Android provider selection and owned speech-screen fallback described above. Leaving Chat, switching conversations, sending or backgrounding Bob cancels dictation and discards late results (apart from the deliberately opened, bounded provider-screen handoff). Denied permission or unavailable recognition does not prevent typing. Recognition and playback do not overlap.
 
 ## Read aloud
 
-Tap the speaker beside a saved reply to read it aloud, then **Stop reading** to stop. Bob uses Android's speech engine and an installed voice reporting offline support; install voice data if needed. Change language, voice and speed through **Settings → Voice → Voice & speed**.
+Tap the speaker beside a saved reply to read it aloud, then **Stop reading** to stop. Manual Read aloud uses Android’s speech engine and an installed voice reporting offline support; install voice data if needed. Voice Chat’s automatic reading is separately scoped to its own spoken turns.
 
-One reply plays at a time. Leaving chat, minimising the app or losing audio focus stops playback. Code blocks are omitted. Pause/seek and audio export are not supported.
+One reply plays at a time. Leaving Chat, minimising the app or losing audio focus stops playback. The playback owner is independent of virtualized reply rows for Voice Chat. Code blocks are omitted; links use their visible labels and literal mathematics is preserved. Copy still copies the original text unchanged. Pause/seek and audio export are not supported.
 
 ## Notifications
 

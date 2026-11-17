@@ -15,7 +15,7 @@ import {emptyConversationMessage} from './empty-conversation';
 import {readOnlyProfile,conversationProfileRecord,conversationReadOnlyMessage,useConversationProfile,type ChatProfile} from './retired-chat-profile';
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
-import {openSpeechSettings} from './speech';
+import {openSpeechSettings,speechState,subscribeSpeech} from './speech';
 import 'react-native-get-random-values';
 import './global.css';
 import Animated from 'react-native-reanimated';
@@ -49,6 +49,9 @@ import {ChatNavigation} from './components/chat-navigation';
 import {menuDestination} from './menu-navigation';
 import {MenuReadCache} from './menu-read-cache';
 import {VoiceInputButton} from './components/voice-input-button';
+import {VoiceChatButton,VoiceChatPanel,SpeechRecoveryControl} from './components/voice-chat-controls';
+import {useVoiceChat} from './use-voice-chat';
+import type {VoiceInterest} from './voice-chat';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {workstationLabel,cleanWorkstationAlias} from './workstation-label';
 import {WorkstationAliasEditor} from './components/workstation-alias-editor';
@@ -82,7 +85,7 @@ import {useTranscriptLiveTools} from './transcript-live-tools';
 import {hasInlineChatContent,isRecordedToolGeneration,inputAttribution,isActiveSubagent,memoryStatusText,learningStatusText,compactMemoryStatuses,isCompactActivityEntry} from './chat-presentation';
 import {ToolContent} from './components/tool-content';
 import {CHAT_CONTENT_GAP} from './tool-presentation';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -292,13 +295,16 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const [modelChoice,setModelChoice]=useState<ModelChoice>({});
   const skillPickerVisible=!!(active&&backend&&chat&&ordinaryChat&&screen==='Chat'&&draftFocused&&!slashDismissed&&slashQuery!==null&&skillPopupHeight>=48&&!drawer&&!actions&&!navigationOpen);
   const [voiceAdmissionEpoch,setVoiceAdmissionEpoch]=useState(0);
-  const voiceActive=active&&foreground&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen&&!skillPickerVisible;
+  const [dictationExternal,setDictationExternal]=useState(false);
+  const voiceOwnerActive=active&&screen==='Chat'&&ordinaryChat&&composerReady&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen&&!draftExpanded&&!attachmentPicker&&!modelPickerTarget&&!updatesOpen&&!skillPickerVisible;
+  const voiceActive=voiceOwnerActive&&(foreground||dictationExternal);
   const voiceTransport=JSON.stringify([backend?.backendId,backend?.endpoint,chat??null,shell.connectionRevisions[backend?.backendId??'']??0]);
   const voiceVisit=useRef({transport:voiceTransport,active:voiceActive,generation:0});
   if(voiceVisit.current.transport!==voiceTransport||voiceVisit.current.active!==voiceActive)voiceVisit.current={transport:voiceTransport,active:voiceActive,generation:voiceVisit.current.generation+1};
   const voiceScope=JSON.stringify([voiceTransport,voiceVisit.current.generation,voiceAdmissionEpoch]);
   const voiceOwner=useRef({scope:voiceScope,active:voiceActive,visit:currentDraftVisit});voiceOwner.current={scope:voiceScope,active:voiceActive,visit:currentDraftVisit};
-  const revokeVoiceVisit=()=>{
+  const revokeVoiceVisit=(keepVoiceChat=false)=>{
+    if(!keepVoiceChat)voiceChat.session.cancel(true);
     // Fence same-turn callbacks before React can configure/cancel the native child.
     voiceOwner.current.active=false;
     // Persist retirement across fast outbox admission/settlement, not a sending flag.
@@ -309,6 +315,17 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     if(!value||!voiceOwner.current.active||voiceOwner.current.scope!==voiceScope||voiceOwner.current.visit!==currentDraftVisit||!snapshotLifecycle.active()||!canWriteConversation())return;
     setDraft(previous=>previous+(/\s$/.test(previous)||!previous?'':' ')+value);
   };
+  const voiceConversationVisit=useRef({transport:voiceTransport,active:voiceOwnerActive,generation:0});
+  if(voiceConversationVisit.current.transport!==voiceTransport||voiceConversationVisit.current.active!==voiceOwnerActive)voiceConversationVisit.current={transport:voiceTransport,active:voiceOwnerActive,generation:voiceConversationVisit.current.generation+1};
+  const voiceConversationScope=JSON.stringify([voiceTransport,voiceConversationVisit.current.generation]);
+  const voiceChat=useVoiceChat({scope:voiceConversationScope,active:voiceOwnerActive,foreground,snapshot:view,port:{
+    send:enqueueVoiceTurn,
+    read:(path,interest,signal)=>requestBackend(path,'GET',undefined,interest.backend,signal,interest.deviceId),
+    sameDevice:async interest=>{const credential=await Keychain.getGenericPassword({service:`bob.${interest.backend.backendId}`});return !!credential&&credential.username===interest.deviceId;},
+  }});
+  const playbackState=useSyncExternalStore(subscribeSpeech,speechState,speechState);
+  const voicePanelHeight=Math.max(120,Math.min(280,(windowSize.height-keyboardInset-insets.top-insets.bottom)*0.4));
+  const voiceComposerBudget=(voiceChat.state.open?voicePanelHeight:0)+(playbackState.phase==='stop-unconfirmed'?180:0);
   const modelRequest=useRef(0);
   useEffect(()=>{modelRequest.current++;},[scope,active,backend?.endpoint]);
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
@@ -581,6 +598,35 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     setChats(items);setChatCursor(result.next);await writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);
     }finally{pendingCreates.current.delete(b.backendId);setCreatingIds(new Set(pendingCreates.current));}
   }
+  /** The one foreground enqueue path. Voice supplies explicit text and NO draft files. */
+  function enqueueChatMessage(text:string,files:DraftAttachment[],mode:'steer'|'followUp',questionId?:string,voiceDeviceId?:string):OutgoingMessage {
+    if(!composerReady||!sendReady||!canWriteConversation()||!backend||!chat||pending||pendingOperations.current.has(scope))throw Error('This conversation is not ready to send. Nothing was enqueued.');
+    revokeVoiceVisit(!!voiceDeviceId);
+    parentFollow.resume();
+    const current=scope,op=uuid();
+    // Voice's captured pairing uses the existing device-bound foreground lane. Native
+    // handoff must not rebind this request to a cached/different pairing credential.
+    const foregroundOnly=!!voiceDeviceId||files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
+    const item:OutgoingMessage={id:op,scope:current,...(voiceDeviceId?{foregroundDeviceId:voiceDeviceId}:{}),foregroundUnsent:!voiceDeviceId&&(!backgroundOutbox||foregroundOnly)?true:undefined,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
+      message:Message.parse({requestId:op,...(questionId?{questionId}:{}),text,mode,allowSubagents:true,
+        ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:visualDisplayHeight(view?.docs?.['bob.display'])},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
+    const saved=outbox.add(item);
+    // Dispatch before awaiting storage, as in ordinary Send; foreground-only items
+    // are deliberately ignored by native enqueue and retain the canonical JS lane.
+    const handedOff=backgroundOutbox?.enqueue(item);void handedOff?.catch(()=>{});
+    void saved.then(()=>drainOutbox()).catch(()=>{/* Local bubble/queue retains the SAME identity for storage recovery. */});
+    return item;
+  }
+  async function enqueueVoiceTurn(text:string,current:()=>boolean):Promise<VoiceInterest> {
+    const value=text.trim(),b=backend,id=chat,visit=currentDraftVisit,voiceVisitAtStart=voiceConversationVisit.current;
+    if(!value||!b||!id||!current())throw Error('Voice turn was cancelled before sending.');
+    const credential=await Keychain.getGenericPassword({service:`bob.${b.backendId}`});
+    if(!current()||!snapshotLifecycle.active()||draftVisit.current!==visit||!canWriteConversation()||voiceVisitAtStart!==voiceConversationVisit.current)throw Error('Conversation changed. Voice was not sent.');
+    if(!credential||!credential.username)throw Error('Pair again: device identity is missing. Voice was not sent.');
+    if(outbox.items.some(item=>item.scope===scope&&(!item.admitted||item.uncertain)))throw Error('An earlier message has pending or uncertain delivery. Resolve it in chat before another voice turn; nothing was resent.');
+    const item=enqueueChatMessage(value,[],'followUp',undefined,credential.username);
+    return {backend:b,chat:id,requestId:item.id,deviceId:credential.username};
+  }
   async function submit(mode: 'steer' | 'followUp',answer?:{questionId:string;text:string}) {
     const side=answer?null:btwCommand(draft);
     if(side!==null){
@@ -593,22 +639,10 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     }
     if (!composerReady || !sendReady || !canWriteConversation() || !backend || !chat || (!answer&&!hasDraft) || pending || pendingOperations.current.has(scope)) return;
     if(answer&&(view?.docs['bob.questions']?.pending?.id!==answer.questionId||outbox.items.some(item=>item.scope===scope&&item.message.questionId===answer.questionId&&(!item.rejected||item.admitted))))return;
-    revokeVoiceVisit();
-    parentFollow.resume();
-    const current=scope,files=answer?[]:attachments,op=uuid();
-    const foregroundOnly=files.length>0||outbox.items.some(item=>item.scope===current&&!item.rejected&&!item.admitted&&(item.files.length>0||item.foregroundOnly));
-    const item:OutgoingMessage={id:op,scope:current,foregroundUnsent:!backgroundOutbox||foregroundOnly?true:undefined,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
-      message:Message.parse({requestId:op,...(answer?{questionId:answer.questionId}:{}),text:answer?.text??(draft.trim()?draft:'Please look at the attached file'+(files.length===1?'.':'s.')),mode,allowSubagents:true,
-        ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:visualDisplayHeight(view?.docs?.['bob.display'])},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
-    // Publish the ordinary chat bubble and clear the composer before any await.
-    const saved=outbox.add(item);
-    // Dispatch to native before awaiting JS storage: locking may suspend JS immediately.
-    const handedOff=backgroundOutbox?.enqueue(item);
-    void handedOff?.catch(()=>{});
+    const current=scope;
+    enqueueChatMessage(answer?.text??(draft.trim()?draft:'Please look at the attached file'+(attachments.length===1?'.':'s.')),answer?[]:attachments,mode,answer?.questionId);
     Keyboard.dismiss();
     if(!answer){setDraft('');setDraftAttachments(previous=>({...previous,[current]:[]}));}
-    try {await saved;void drainOutbox();}
-    catch{/* Keep the local bubble and retry saving before any network send. */}
   }
   async function addDrawing(dataUri:string){
     const current=scope,b=backend;if(!current||!b||!canWriteConversation())throw Error('Open a writable conversation before adding a drawing.');
@@ -673,6 +707,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     await NativeModules.BobInteractive.open(b.endpoint, b.backendId, credential.password, item.value.conversationId, item.value.id);
   }
   async function stop(tree: boolean) {
+    voiceChat.session.cancel(true);revokeVoiceVisit();
     if(!canWriteConversation())return;
     const current = scope;
     setStatus('Stop requested • stopping');
@@ -983,10 +1018,12 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
               </ScrollView>}
-              <DraftInput scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={104}
-                maxHeight={Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
+              <SpeechRecoveryControl/>
+              <VoiceChatPanel state={voiceChat.state} session={voiceChat.session} maxHeight={voicePanelHeight}/>
+              <DraftInput key="draft-editor" scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={160}
+                maxHeight={Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)-voiceComposerBudget))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
-                trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
+                trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript} onBegin={()=>voiceChat.session.cancel(true)} onExternalChange={setDictationExternal}/><VoiceChatButton state={voiceChat.state} session={voiceChat.session} disabled={!voiceOwnerActive||!foreground||!sendReady||!!pending}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
               />
             </Animated.View>
 
@@ -1156,7 +1193,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
           {screen === 'Voice' && <>
 <SettingsGroup title="Voice">
                 <SettingsRow title="Voice & speed" label="Android text-to-speech settings" icon={Volume2} onPress={()=>run(openSpeechSettings)}/>
-                <Disclosure menu label="About read aloud"><Text typography="ui" style={menuStyles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. No automatic playback or audio export.</Text></Disclosure>
+                <Disclosure menu label="About read aloud"><Text typography="ui" style={menuStyles.caption}>Use the speaker beside a reply. Selected text goes to your Android speech engine and an installed offline-capable voice. Reading stops when you leave Chat or background Bob. Voice Chat (headphones beside Send) reads only its own completed replies automatically; the separate microphone edits the draft without sending. No audio export.</Text></Disclosure>
               </SettingsGroup>
           </>}
           {screen === 'Phone & location' && <>

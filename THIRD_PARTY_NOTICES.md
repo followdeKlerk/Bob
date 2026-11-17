@@ -98,3 +98,13 @@ SOFTWARE.
 ## Nunito
 
 Bob bundles unmodified official Google Fonts **Nunito 3.602** static fonts, Copyright 2014 The Nunito Project Authors ([upstream](https://github.com/googlefonts/nunito)), under the SIL Open Font License 1.1. The [full license](apps/mobile/android/app/src/main/assets/fonts/nunito/OFL.txt), [integration/provenance guide](apps/mobile/android/app/src/main/assets/fonts/nunito/README.md), and [pinned download URLs and SHA-256 checksums](apps/mobile/android/app/src/main/assets/fonts/nunito/provenance.json) are shipped with the Android app. Nunito is the rounded UI/chat-prose family; Nordwand Mono remains the code/terminal family. Fonts are bundled offline; no runtime download is required.
+
+## Android Voice Chat extraction
+
+Android recognition/provider/language handling, activity-only handoff, TTS engine/language/rate/queue handling, final-speech automatic submission and automatic reply reading are adapted from [Omalauncher](https://github.com/SimonSchubert/omalauncher), **MIT, Copyright (c) 2026 Simon Schubert and contributors**. The exact owner-authorized dirty phone-source reference, original relative paths, full MIT licence/exclusions, dependency notices and verified per-file SHA256 inventory are retained in `apps/mobile/upstream/omalauncher/`. Base HEAD is `af07fb11e2b72337e2e189bb0f75eecba7ee5a04`; copied bytes are working-tree bytes, not that commit’s reconstruction.
+
+Production adaptations are separately marked in `BobVoiceInput.kt`, `VoiceProviders.kt`, `BobVoiceRecognitionActivity.kt`, `BobSpeech.kt` and `apps/mobile/voice-chat.ts`. Bob’s existing React Native UI, authenticated selected chat, outbox, exact native completion receipts and playback/capture safety boundaries replace the launcher shell; no launcher UI, Compose, Linux/PRoot, local agent process, separately paired companion, logos or fonts are included by this extraction. The immutable upstream files are reference material, not Android build sources.
+
+The complete upstream MIT text is also bundled in the APK at `assets/licenses/omalauncher-voice-MIT.txt`, with its exclusions retained at `assets/licenses/omalauncher-THIRD_PARTY.md`. Recognition/TTS providers are independently installed Android software, not bundled here; their licensing and network behavior are not covered by Omalauncher’s MIT licence.
+
+Speech text uses the already bundled **markdown-it 14.3.3**, MIT, Copyright (c) 2014 Vitaly Puzrin, Alex Kocharin. Its licence is bundled at `assets/licenses/markdown-it-MIT.txt`. Reusing the Markdown grammar preserves visible labels, inline code and literal numeric operators without changing Copy’s original text; this is not a new Markdown renderer or a new downloaded dependency.
