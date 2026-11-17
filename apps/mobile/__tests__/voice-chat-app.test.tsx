@@ -265,6 +265,35 @@ test('remount does not reconstruct autoplay from history or a reflected/recovere
  await mount();await tick(5000);expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();expect(posts).toHaveLength(1);
 });
 
+test.each(['light','dark'] as const)('actual App constrained 640px %s composer heading stays text-free through normal voice states but retains errors and recovery',async scheme=>{
+ await AsyncStorage.setItem('appearance',scheme);
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:640,scale:1,fontScale:2});
+ const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+ const mounted=await mount(),input=draft(mounted),history=list(mounted);
+ await act(async()=>{input.props.onChangeText('Keep constrained draft');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ await tap('Start Voice Chat');
+ const heading=()=>root(mounted).findByProps({testID:'composer-heading'});
+ const normal=(phase:string)=>{
+  expect(root(mounted).findByType(VoiceChatPanel).props.state.phase).toBe(phase);
+  expect(StyleSheet.flatten(heading().props.style).height).toBe(48);
+  expect(heading().findAllByType(NativeText)).toHaveLength(0);
+  expect(heading().findByType(ChatNavigation).props.showTrigger).toBe(true);
+  expect(root(mounted).findByProps({testID:'voice-chat-panel'}).findAllByType(NativeText)).toHaveLength(0);
+ };
+ normal('preparing');await event('listening');normal('listening');await event('finishing');normal('finishing');
+ await event('final','One constrained voice turn');normal('waiting');await complete(0,125,'Constrained reply');normal('speaking');
+ const audio=NativeModules.BobSpeech.speak.mock.calls.at(-1)[1];
+ await act(async()=>{DeviceEventEmitter.emit('BobSpeechState',{id:audio,state:'done'});await flush();});normal('idle');
+ await tap('Speak to Bob');const id=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0],message='Requested speech model is missing. Open Speech options to choose another provider.';
+ await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'error',message});await flush();});
+ expect(root(mounted).findByProps({testID:'voice-chat-phase'}).props.children).toContain(message);
+ await tap('Read full voice error');expect(alert).toHaveBeenCalledWith('Voice error',message,[{text:'Close'}]);
+ await act(async()=>{markAudioCleanupUnconfirmed('Potential audio remains; retry Stop.');await flush();});
+ expect(heading().findAllByType(NativeText).map(node=>node.props.children)).toContain('Audio recovery');
+ expect(button(mounted,'Retry stopping playback')).toBeDefined();
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Keep constrained draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(1);
+});
+
 test.each([337,361].flatMap(width=>['light','dark'].map(scheme=>({width,scheme}))))('voice controls fit structural $width×754 geometry in $scheme at both scales and keyboard states without input/list replacement',async({width,scheme})=>{
  await AsyncStorage.setItem('appearance',scheme);const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale:1});await mount();const input=draft(tree!),history=list(tree!);
  await act(async()=>root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture'));
@@ -276,7 +305,7 @@ test.each([337,361].flatMap(width=>['light','dark'].map(scheme=>({width,scheme})
   const fixed=root(tree!).findByProps({testID:'voice-chat-fixed-controls'});
   const stop=fixed.findAll(node=>node.props.accessibilityLabel==='Stop voice'&&typeof node.props.onPress==='function')[0];expect(StyleSheet.flatten(stop.props.style).minHeight).toBe(48);
   expect(root(tree!).findByType(DraftInput).props.maxHeight).toBeGreaterThanOrEqual(Math.max(48,Math.ceil(26*fontScale+20)));
-  if(keyboard&&fontScale===2){expect(StyleSheet.flatten(root(tree!).findByProps({testID:'draft-attachment-previews'}).props.style).maxHeight).toBe(0);expect(StyleSheet.flatten(root(tree!).findByProps({testID:'composer-heading'}).props.style).height).toBe(48);}
+  if(keyboard&&fontScale===2){expect(StyleSheet.flatten(root(tree!).findByProps({testID:'draft-attachment-previews'}).props.style).maxHeight).toBe(0);const heading=root(tree!).findByProps({testID:'composer-heading'});expect(StyleSheet.flatten(heading.props.style).height).toBe(48);expect(heading.findByProps({accessibilityLabel:'1 draft attachments retained; previews collapsed during voice'}).props.children).toBe('1 attached');}
   const panel=root(tree!).findByType(VoiceChatPanel);expect(panel.props.maxHeight).toBeLessThanOrEqual(280);
   const phase=root(tree!).findByProps({testID:'voice-chat-phase'});expect(phase.parent?.props.testID).not.toBe('voice-chat-details');
   expect(root(tree!).findAllByProps({accessibilityLabel:'Allow provider voice once'})).toHaveLength(0);
