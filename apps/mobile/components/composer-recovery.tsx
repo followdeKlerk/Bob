@@ -29,7 +29,9 @@ export function ComposerStatusRecovery({notices,retry,onClose,top,bottom}:{notic
  </View>;
 }
 const sTheme=themed(({colors})=>StyleSheet.create({
- indicator:{alignSelf:'flex-start',maxWidth:'100%',minHeight:48,minWidth:48,paddingHorizontal:8,paddingVertical:4,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border},
+ // Explicit edges override the shared button's compiled px/py utilities;
+ // paddingVertical alone leaves their paddingTop/Bottom active at large text.
+ indicator:{alignSelf:'flex-start',maxWidth:'100%',minHeight:48,minWidth:48,paddingLeft:8,paddingRight:8,paddingTop:4,paddingBottom:4,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border},
  indicatorText:{fontSize:13,lineHeight:18,color:colors.foreground},
  overlay:{position:'absolute',left:0,right:0,zIndex:50,backgroundColor:colors.background,padding:12,justifyContent:'center'},
  card:{maxHeight:'100%',padding:16,gap:12,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border},

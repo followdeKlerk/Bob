@@ -307,3 +307,22 @@ artifacts were not modified. Android **0.3.199 / 202**, native/audio/privacy/loc
 implementations and all 26 immutable source files remain unchanged. Native/root
 gates were not rerun for this UI-only correction; independent re-review and the
 supervised release lane remain the parent's responsibility. No build was queued.
+
+### Production button-style regression
+
+The constrained status indicator overrides the shared button's **individual padding
+edges**, not only `paddingVertical`/`paddingHorizontal`. NativeWind's compiled
+`py`/`px` edges otherwise win, requiring 52dp inside the 48dp heading at 2× text.
+`composer-recovery-interop.test.tsx` compiles the actual shared-button Android
+Tailwind rules and exercises the real Button/TouchTarget path in both themes.
+The compiler runs in a short-lived Node process so Lightning CSS's native GC
+handle does not remain in Jest. This checks production style resolution, not
+physical Android font metrics, IME or TalkBack behavior.
+
+Final correction checks: mobile TypeScript; 1,663 mobile tests / 134 suites with
+`--runInBand --ci --detectOpenHandles`; 448 browser-adapter geometry cases with
+native-like utility padding and directional-padding precedence. All passed.
+The immediately preceding frozen full gates also passed: 975 root tests with 14
+explicit skips, 311 Android JVM tests / 49 suites, package guards and 26 source
+hashes. Native/audio, server and version metadata were unchanged by this final
+padding/test correction. Supervised release validation remains authoritative.
