@@ -14,7 +14,7 @@ class SpeechEngineLeaseTest {
         fun stop(): Boolean { stops++; if (stopThrows) error("stop"); return stopCode == 0 }
         fun shutdown() { shutdowns++; if (shutdownThrows) error("shutdown") }
     }
-    private fun lease(engine: Engine) = SpeechEngineLease<Engine>({ it.stop() }, { it.shutdown() }).also { it.attach(engine) }
+    private fun lease(engine: Engine) = SpeechEngineLease<Engine>({ it.stop() }, { it.shutdown() }).also { it.attach(engine); it.markPossibleAudio() }
     @Test fun successfulStopAndShutdownReleaseExactlyOnce() {
         val engine = Engine(); val lease = lease(engine)
         assertTrue(lease.cleanup()); assertNull(lease.engine)
@@ -66,4 +66,21 @@ class SpeechEngineLeaseTest {
         replacement.attach(Engine()); assertTrue(registry.cleanup(replacement))
     }
 
+    @Test fun neverAttemptedEngineRetiresOnConfirmedShutdownEvenWhenStopCannotConnect() {
+        val engine = Engine().apply { stopCode = -1 }
+        val cold = SpeechEngineLease<Engine>({ it.stop() }, { it.shutdown() }).also { it.attach(engine) }
+        val registry = SpeechEngineCleanup<Engine>()
+        assertTrue(registry.cleanup(cold)); assertNull(cold.engine); assertEquals(1, engine.shutdowns)
+        val replacement = lease(Engine()); assertTrue(registry.cleanup(replacement))
+    }
+    @Test fun coldEngineWithFailedShutdownStillBlocksButAnAttemptedSpeakErrorIsNeverCold() {
+        val engine = Engine().apply { stopCode = -1; shutdownThrows = true }
+        val cold = SpeechEngineLease<Engine>({ it.stop() }, { it.shutdown() }).also { it.attach(engine) }
+        assertFalse(cold.cleanup()); assertSame(engine, cold.engine)
+        engine.shutdownThrows = false; assertTrue(cold.cleanup())
+        cold.attach(engine)
+        cold.markPossibleAudio() // Even a throwing/rejected speak MAY already have handed text/audio off.
+        assertFalse(cold.cleanup()); assertSame(engine, cold.engine)
+        engine.stopCode = 0; assertTrue(cold.cleanup())
+    }
 }

@@ -4,6 +4,7 @@ import {Keyboard,Modal,Pressable,StyleSheet,View,useWindowDimensions} from 'reac
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Maximize2,Minimize2} from 'lucide-react-native';
 import {useKeyboardInset} from '../keyboard-inset';
+import {draftMetrics} from '../composer-geometry';
 import {themed,useTheme,useThemedValue} from '../theme';
 import Animated,{LinearTransition,ReduceMotion} from 'react-native-reanimated';
 export const composerTransition=LinearTransition.duration(180).reduceMotion(ReduceMotion.System);
@@ -25,8 +26,7 @@ export function DraftInput({value,onChangeText,scope,maxHeight=260,leading,trail
  // At larger font scales, preserve full-width text and the reachable expansion
  // action instead of squeezing a scaled line between three fixed-size buttons.
  const {fontScale}=useWindowDimensions();
- const compactRow=compact&&fontScale<=1;
- const minimum=Math.max(48,Math.ceil(26*fontScale+20));
+ const {inline:compactRow,input:minimum}=draftMetrics(fontScale,compact);
  const limit=compactRow?48:Math.max(minimum,maxHeight),height=Math.min(limit,Math.max(minimum,Math.ceil(contentHeight)));
  const canExpand=contentHeight>minimum+1||value.includes('\n');
  const close=()=>{blur();setExpanded(false);Keyboard.dismiss();};

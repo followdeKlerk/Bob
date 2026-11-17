@@ -55,3 +55,11 @@ test('numeric operators remain literal across repeated expressions and inside re
  expect(speechText('Dose: 2*3 = 6. Again: 2*3 = 6.')).toBe('Dose: 2*3 = 6. Again: 2*3 = 6.');
  expect(speechText('`2*3` and **important** and 2**3, then 2**3')).toBe('2*3 and important and 2**3, then 2**3');
 });
+
+test('old provider-A network consent is rejected before any recipient sees the reply',async()=>{
+ const onError=jest.fn();const bridge=NativeModules.BobSpeech;
+ bridge.speak.mockClear();bridge.speakConfigured=jest.fn(async()=>{});
+ expect(await startSpeech('old-A-authorization','Private completed reply',{configuration:'configured-A',networkConsent:true,onError})).toBe(false);
+ expect(bridge.speak).not.toHaveBeenCalled();expect(bridge.speakConfigured).not.toHaveBeenCalled();
+ expect(onError).toHaveBeenCalledWith(expect.stringContaining('unidentified fallback engine'));
+});

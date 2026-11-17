@@ -23,7 +23,9 @@ import java.util.Locale
 /** Phone presentation only. Never writes to Durable, a file, or a network endpoint. */
 class BobSpeech(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
     private val cleanupRegistry get() = NativeSpeechEngineLease.cleanupRegistry
-    private var networkConsent = false
+    private val admission get() = NativeSpeechEngineLease.admission
+    private val ticketOwner = SpeechAdmission.Owner()
+    private var activeTicket: SpeechAdmission.Ticket? = null
     private var configured: String? = null
     private fun configuration(): String = listOf(
         Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH).orEmpty(),
@@ -33,7 +35,7 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     ).joinToString("|")
     @ReactMethod fun configuration(promise: Promise) { main.post {
         promise.resolve(Arguments.createMap().apply {
-            putString("key", configuration()); putString("provider", Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH).orEmpty())
+            putString("key", configuration()) // Preferences only, NOT actual engine attestation.
         })
     } }
     private val main = Handler(Looper.getMainLooper())
@@ -46,7 +48,7 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     private var pending: Promise? = null
     private var parts = emptyList<String>()
     private var index = 0
-    private var foreground = context.lifecycleState == LifecycleState.RESUMED
+    @Volatile private var foreground = context.lifecycleState == LifecycleState.RESUMED
     private var focus: AudioFocusRequest? = null
     private var receiverRegistered = false
     private var timeout: Runnable? = null
@@ -55,7 +57,7 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
     private val noisy = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) main.post { finish("stopped") }
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) { admission.cancel(ticketOwner, ""); main.post { finish("stopped") } }
         }
     }
     init { context.addLifecycleEventListener(this) }
@@ -73,6 +75,7 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     }
     @Suppress("DEPRECATION")
     private fun finish(state: String, message: String? = null): Boolean {
+        activeTicket?.let(admission::release); activeTicket = null
         generation++
         timeout?.let { main.removeCallbacks(it) }; timeout = null
         val id = active; active = null
@@ -97,17 +100,26 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     @ReactMethod fun speak(text: String, id: String, promise: Promise) = speakInternal(text, id, null, false, promise)
     @ReactMethod fun speakConfigured(text: String, id: String, key: String, consent: Boolean, promise: Promise) = speakInternal(text, id, key, consent, promise)
     private fun rejectStop(promise: Promise) = promise.reject("speech", stopFailure, Arguments.createMap().apply { putBoolean("stopUnconfirmed", true) })
-    private fun speakInternal(text: String, id: String, key: String?, consent: Boolean, promise: Promise) { main.post {
-        if (NativeVoiceCapture.active) { promise.reject("speech", "Finish or cancel microphone capture before playback."); return@post }
-        if (key != null && key != configuration()) { promise.reject("speech", "Text-to-speech configuration changed. Review the provider again."); return@post }
-        if (!NativeSpeechEngineLease.stopForCapture()) { rejectStop(promise); return@post }
-        configured = key; networkConsent = consent && key != null
-        if (!foreground || context.currentActivity == null) { promise.reject("speech", "Open Bob to read a reply aloud."); return@post }
+    private fun speakInternal(text: String, id: String, key: String?, consent: Boolean, promise: Promise) {
+        // Public Android constructors may silently bind a fallback engine. Settings do
+        // not attest the recipient: old per-provider network consent is NOT sufficient.
+        if (consent) { promise.reject("speech", "Network TTS override is unavailable: Android may use an unidentified fallback engine. Install an offline voice."); return }
+        if (id.isBlank() || id.length > 100) { promise.reject("speech", "Invalid playback request."); return }
+        val ticket = admission.claim(ticketOwner, id)
+        if (ticket == null) { promise.reject("speech", "Speech module was closed."); return }
+        main.post {
+        if (!admission.accepts(ticket)) { promise.reject("speech", "Playback cancelled before initialization."); return@post }
+        if (!NativeSpeechEngineLease.cleanBeforePlayback()) { admission.release(ticket); rejectStop(promise); return@post }
+        fun reject(message: String) { admission.release(ticket); promise.reject("speech", message) }
+        if (NativeVoiceCapture.active) { reject("Finish or cancel microphone capture before playback."); return@post }
+        if (key != null && key != configuration()) { reject("Text-to-speech preferences changed. Review settings again."); return@post }
+        configured = key
+        if (!foreground || context.currentActivity == null) { reject("Open Bob to read a reply aloud."); return@post }
         val chunks = try { SpeechPolicy.chunks(text, minOf(3000, TextToSpeech.getMaxSpeechInputLength())) }
-            catch (_: Exception) { promise.reject("speech", "Choose a reply containing 1–100,000 characters."); return@post }
-        if (id.isBlank() || id.length > 100) { promise.reject("speech", "Invalid playback request."); return@post }
-        if (!finish("stopped")) { rejectStop(promise); return@post }
-        active = id; pending = promise; parts = chunks; index = 0
+            catch (_: Exception) { reject("Choose a reply containing 1–100,000 characters."); return@post }
+        if (!finish("stopped")) { admission.release(ticket); rejectStop(promise); return@post }
+        if (!admission.accepts(ticket)) { promise.reject("speech", "Playback cancelled before initialization."); return@post }
+        activeTicket = ticket; active = id; pending = promise; parts = chunks; index = 0
         val token = generation
         event(id, "starting")
         timeout = Runnable { if (token == generation) fail("Speech engine did not initialize. Check Android text-to-speech settings.") }.also { main.postDelayed(it, 15000) }
@@ -115,33 +127,34 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
             // Always post: Android may invoke a failure callback before the constructor returns.
             NativeSpeechEngineLease.owner = this
             engineLease.attach(TextToSpeech(context) { status -> main.post {
-                if (token != generation) return@post
+                if (token != generation || !admission.accepts(ticket)) return@post
                 timeout?.let { main.removeCallbacks(it) }; timeout = null
                 if (status != TextToSpeech.SUCCESS) { fail("No working speech engine. Install or configure one in Android text-to-speech settings."); return@post }
-                try { start(token) } catch (_: Exception) { fail("Speech could not start. Check your installed voice and Android speech settings.") }
+                try { start(token, ticket) } catch (_: Exception) { fail("Speech could not start. Check your installed voice and Android speech settings.") }
             } })
         } catch (_: Exception) { fail("Speech engine is unavailable. Check Android text-to-speech settings.") }
     } }
 
     @Suppress("DEPRECATION")
-    private fun start(token: Int) {
+    private fun start(token: Int, ticket: SpeechAdmission.Ticket) {
+        if (!admission.accepts(ticket)) return
         if (!foreground || NativeVoiceCapture.active) { finish("stopped"); return }
-        if (configured != null && configured != configuration()) { fail("Speech provider changed. Review it before playback."); return }
+        if (configured != null && configured != configuration()) { fail("Speech preferences changed. Review settings before playback."); return }
         val tts = engine ?: return
         val preferred = tts.defaultVoice
         val locale = Locale.getDefault()
         val voice = tts.voices.orEmpty().filter {
-            (networkConsent || !it.isNetworkConnectionRequired) && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language
+            SpeechPolicy.permitsVoice(it.isNetworkConnectionRequired) && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language
         }.sortedWith(compareByDescending<android.speech.tts.Voice> { it.name == preferred?.name }
             .thenByDescending { it.locale == locale }.thenByDescending { it.quality }.thenBy { it.name }).firstOrNull()
         if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) {
-            fail("No installed ${if (networkConsent) "provider" else "offline"} voice for ${locale.displayLanguage}. Download a voice in Android speech settings${if (!networkConsent) " or explicitly allow a provider voice for this reply" else ""}."); return
+            fail("No installed offline voice for ${locale.displayLanguage}. Download an offline voice in Android speech settings. Network override is unavailable because Android may select an unidentified fallback engine."); return
         }
         val rate = Settings.Secure.getInt(context.contentResolver, "tts_default_rate", 100) / 100f
         tts.setSpeechRate(rate.coerceIn(0.5f, 2f))
         if (tts.setAudioAttributes(attributes) != TextToSpeech.SUCCESS) { fail("Speech audio output is unavailable."); return }
         val listener = AudioManager.OnAudioFocusChangeListener { change ->
-            if (change != AudioManager.AUDIOFOCUS_GAIN) main.post { if (token == generation) finish("stopped") }
+            if (change != AudioManager.AUDIOFOCUS_GAIN) { admission.cancel(ticketOwner, ticket.id); main.post { if (token == generation) finish("stopped") } }
         }
         focusListener = listener
         val granted = if (Build.VERSION.SDK_INT >= 26) {
@@ -155,26 +168,27 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         receiverRegistered = true
         val listenerResult = tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) { main.post {
-                if (token == generation && utteranceId == "$active:$index") active?.let { event(it, "speaking") }
+                if (token == generation && admission.accepts(ticket) && utteranceId == "$active:$index") active?.let { event(it, "speaking") }
             } }
             override fun onDone(utteranceId: String?) { main.post {
-                if (token != generation || utteranceId != "$active:$index") return@post
+                if (token != generation || !admission.accepts(ticket) || utteranceId != "$active:$index") return@post
                 index++
-                if (index >= parts.size) finish("done") else enqueue()
+                if (index >= parts.size) finish("done") else enqueue(ticket)
             } }
             @Deprecated("Legacy engine callback")
             override fun onError(utteranceId: String?) { main.post {
-                if (token == generation && utteranceId == "$active:$index") fail("Speech playback failed. Check that the selected offline voice is installed.")
+                if (token == generation && admission.accepts(ticket) && utteranceId == "$active:$index") fail("Speech playback failed. Check that the selected offline voice is installed.")
             } }
             override fun onError(utteranceId: String?, errorCode: Int) = onError(utteranceId)
             override fun onStop(utteranceId: String?, interrupted: Boolean) { main.post {
-                if (token == generation && utteranceId == "$active:$index") finish("stopped")
+                if (token == generation && admission.accepts(ticket) && utteranceId == "$active:$index") finish("stopped")
             } }
         })
         if (listenerResult != TextToSpeech.SUCCESS) { fail("Speech progress reporting is unavailable."); return }
-        enqueue()
+        enqueue(ticket)
     }
-    private fun enqueue() {
+    private fun enqueue(ticket: SpeechAdmission.Ticket) {
+        if (!admission.accepts(ticket)) return
         if (!foreground || NativeVoiceCapture.active) { finish("stopped"); return }
         timeout?.let(main::removeCallbacks)
         // A broken provider must not hold an invisible, endless playback lease.
@@ -183,27 +197,39 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         timeout = Runnable { if (token == generation) fail("Speech provider stopped reporting progress. Try Stop, then read the reply again.") }
             .also { main.postDelayed(it, 60_000L + parts[index].length * 200L) }
         try {
-            if (engine?.speak(parts[index], TextToSpeech.QUEUE_FLUSH, null, "$active:$index") != TextToSpeech.SUCCESS) {
-                fail("The speech engine rejected this reply."); return
-            }
+            var result = TextToSpeech.ERROR
+            if (!admission.admit(ticket) {
+                engineLease.markPossibleAudio() // BEFORE the call, including ERROR/throw paths.
+                result = engine?.speak(parts[index], TextToSpeech.QUEUE_FLUSH, null, "$active:$index") ?: TextToSpeech.ERROR
+            }) return
+            if (result != TextToSpeech.SUCCESS) { fail("The speech engine rejected this reply."); return }
             pending?.resolve(null); pending = null // Admission only; done/error arrives through the listener.
         } catch (_: Exception) { fail("Speech playback is unavailable.") }
     }
-    @ReactMethod fun stop(id: String, promise: Promise) { main.post {
-        if ((id.isEmpty() || active == id) && !NativeSpeechEngineLease.stopForCapture()) rejectStop(promise)
-        else promise.resolve(null)
-    } }
-    @ReactMethod fun openSettings(promise: Promise) { main.post {
-        finish("stopped")
-        try {
-            context.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            promise.resolve(null)
-        } catch (_: Exception) { promise.reject("speech", "Open Android Settings and search for Text-to-speech output.") }
-    } }
+    internal fun hasCurrentTicket() = activeTicket?.let(admission::accepts) == true
+    @ReactMethod fun stop(id: String, promise: Promise) {
+        // Revoke on the caller's thread, NOT when the cleanup runnable finally runs.
+        val revoked = if (id.isEmpty()) admission.cancelAll() else admission.cancel(ticketOwner, id)
+        main.post {
+            if ((id.isEmpty() || revoked != null) && !NativeSpeechEngineLease.cleanRevoked()) rejectStop(promise)
+            else promise.resolve(null)
+        }
+    }
+    @ReactMethod fun openSettings(promise: Promise) {
+        admission.cancelAll()
+        main.post {
+            if (!NativeSpeechEngineLease.cleanRevoked()) { rejectStop(promise); return@post }
+            try {
+                context.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                promise.resolve(null)
+            } catch (_: Exception) { promise.reject("speech", "Open Android Settings and search for Text-to-speech output.") }
+        }
+    }
     override fun onHostResume() { foreground = true }
-    override fun onHostPause() { foreground = false; main.post { finish("stopped") } }
-    override fun onHostDestroy() { foreground = false; main.post { finish("stopped") } }
+    override fun onHostPause() { foreground = false; admission.cancel(ticketOwner, ""); main.post { finish("stopped") } }
+    override fun onHostDestroy() { foreground = false; admission.close(ticketOwner); main.post { finish("stopped") } }
     override fun invalidate() {
+        admission.close(ticketOwner)
         context.removeLifecycleEventListener(this)
         main.post { finish("stopped") }
         super.invalidate()
@@ -212,12 +238,20 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
 
 /** All potentially live TTS leases remain reachable across React module recreation. Main thread only. */
 internal object NativeSpeechEngineLease {
+    val admission = SpeechAdmission()
     val cleanupRegistry = SpeechEngineCleanup<TextToSpeech>()
     private val emptyLease = SpeechEngineLease<TextToSpeech>({ it.stop() == TextToSpeech.SUCCESS }, { it.shutdown() })
     var owner: BobSpeech? = null
     fun release(value: BobSpeech) { if (owner === value) owner = null }
-    fun stopForCapture(): Boolean {
+    fun cleanBeforePlayback(): Boolean {
         val speech = owner?.stopForCapture() ?: cleanupRegistry.cleanup(emptyLease)
+        val capture = NativeVoiceCapture.cleanupRetired()
+        return speech && capture
+    }
+    fun stopForCapture(): Boolean { admission.cancelAll(); return cleanBeforePlayback() }
+    fun cleanRevoked(): Boolean {
+        // A newer ticket admitted after Stop must not be stopped by stale queued cleanup.
+        val speech = if (owner?.hasCurrentTicket() == false) owner!!.stopForCapture() else cleanupRegistry.cleanup(emptyLease)
         val capture = NativeVoiceCapture.cleanupRetired()
         return speech && capture
     }

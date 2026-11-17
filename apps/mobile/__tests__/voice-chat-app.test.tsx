@@ -139,8 +139,11 @@ test.each([337,361].flatMap(width=>['light','dark'].map(scheme=>({width,scheme})
   const voiceButton=button(tree!,'Cancel voice capture');expect(StyleSheet.flatten(voiceButton.props.style)).toMatchObject({width:48,height:48,flexShrink:0,borderColor:tokens[scheme as 'light'|'dark'].colors.accent});
   const fixed=root(tree!).findByProps({testID:'voice-chat-fixed-controls'});
   const stop=fixed.findAll(node=>node.props.accessibilityLabel==='Stop voice'&&typeof node.props.onPress==='function')[0];expect(StyleSheet.flatten(stop.props.style).minHeight).toBe(48);
-  if(keyboard)expect(root(tree!).findByType(DraftInput).props.maxHeight).toBe(48);
-  const panel=root(tree!).findByType(VoiceChatPanel);expect(panel.props.maxHeight).toBeLessThanOrEqual((754-keyboard)*0.4);
+  expect(root(tree!).findByType(DraftInput).props.maxHeight).toBeGreaterThanOrEqual(Math.max(48,Math.ceil(26*fontScale+20)));
+  if(keyboard&&fontScale===2){expect(StyleSheet.flatten(root(tree!).findByProps({testID:'draft-attachment-previews'}).props.style).maxHeight).toBe(0);expect(StyleSheet.flatten(root(tree!).findByProps({testID:'composer-heading'}).props.style).height).toBe(48);}
+  const panel=root(tree!).findByType(VoiceChatPanel);expect(panel.props.maxHeight).toBeLessThanOrEqual(280);
+  const phase=root(tree!).findByProps({testID:'voice-chat-phase'});expect(phase.parent?.props.testID).not.toBe('voice-chat-details');
+  expect(root(tree!).findAllByProps({accessibilityLabel:'Allow provider voice once'})).toHaveLength(0);
   expect(draft(tree!)).toBe(input);expect(list(tree!)).toBe(history);expect(root(tree!).findByType(DraftInput).props.trailingWidth).toBe(160);
  }
 });
@@ -180,4 +183,30 @@ test('focus loss during asynchronous device admission fences auto-send before en
  await event('final','Do not send after focus loss');expect(posts).toHaveLength(0);
  await act(async()=>{for(const callback of lifecycle.get('blur')??[])callback();release({username:device,password:'synthetic-token'});await flush();});
  expect(posts).toHaveLength(0);expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();
+});
+
+test.each([337,361].flatMap(width=>['light','dark'].map(scheme=>({width,scheme}))))('scaled keyboard/files recovery keeps $width $scheme editor, caret and list alive',async({width,scheme})=>{
+ await AsyncStorage.setItem('appearance',scheme);jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale:2});
+ await mount();const input=draft(tree!),history=list(tree!);
+ await act(async()=>{input.props.onFocus();input.props.onChangeText('Unrelated draft remains');await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ await tap('Start Voice Chat');const capture=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0];
+ await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id:capture,state:'error',stopUnconfirmed:true,message:'Unconfirmed microphone cleanup'});await flush();});
+ expect(StyleSheet.flatten(root(tree!).findByProps({testID:'composer-heading'}).props.style).height).toBe(48);
+ expect(StyleSheet.flatten(root(tree!).findByProps({testID:'draft-attachment-previews'}).props.style).maxHeight).toBe(0);
+ expect(root(tree!).findByType(DraftInput).props.maxHeight).toBeGreaterThanOrEqual(72);
+ expect(StyleSheet.flatten(button(tree!,'Retry stopping playback').props.style).minHeight).toBe(48);
+ expect(draft(tree!)).toBe(input);expect(input.props.value).toBe('Unrelated draft remains');expect(input.props.caretHidden).toBe(false);expect(list(tree!)).toBe(history);
+ await tap('Retry stopping playback');
+ expect(StyleSheet.flatten(root(tree!).findByProps({testID:'draft-attachment-previews'}).props.style).maxHeight).toBe(136);
+ expect(draft(tree!)).toBe(input);expect(list(tree!)).toBe(history);expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);expect(posts).toHaveLength(0);
+});
+
+test('a constrained error keeps its cause in the live header, not hidden below explanatory copy',async()=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});await mount();
+ await act(async()=>{await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ await tap('Start Voice Chat');const id=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0];
+ await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'error',message:'Requested language model is not installed. Use Speech options.'});await flush();});
+ expect(root(tree!).findByProps({testID:'voice-chat-phase'}).props.children).toContain('model is not installed');
+ expect(StyleSheet.flatten(button(tree!,'Speech options').props.style)).toMatchObject({width:48,height:48});
+ expect(button(tree!,'Stop voice')).toBeDefined();expect(button(tree!,'Exit Voice Chat')).toBeDefined();expect(posts).toHaveLength(0);
 });

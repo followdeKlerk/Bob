@@ -68,4 +68,11 @@ class VoiceInputWiringTest {
         for (bad in listOf("MediaRecorder", "AudioRecord", "File(", "SharedPreferences", "Log.", "printStackTrace", "OkHttp", "openConnection", "startService", "HeadlessJs", "startForeground", "dev.omalauncher", "ProcessBuilder", "Proot", "compose.runtime")) assertFalse(bad, code.contains(bad))
         assertTrue(code.contains("override fun onBufferReceived(buffer: ByteArray?) {}"))
     }
+    @Test fun allRoutesSendTheDisclosedLocaleWithoutRegionRewriting() {
+        assertTrue(code.contains("RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.requested(plan.language)"))
+        assertTrue(code.indexOf("VoiceLanguage.requested(plan.language)") < code.indexOf("if (plan.mode == \"activity\")"))
+        assertTrue(code.contains("VoiceLanguage.supportedRequest(plan.language, pools)"))
+        assertTrue(code.contains("else begin(exact)")); assertTrue(code.contains("else begin(null)"))
+        assertFalse(code.contains("VoiceLanguage.mainRegion")); assertFalse(code.contains("begin(closest)"))
+    }
 }

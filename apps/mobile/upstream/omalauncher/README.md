@@ -67,7 +67,7 @@ not an installed-phone test.
 ## Extracted implementation and deliberate differences
 
 - `Speech.kt`: selected/non-Google service discovery, on-device checks, locale
-  matching/main-region fallback, final/partial results and activity-only recognition.
+  capability inspection, final/partial results and activity-only recognition. Bob preserves the requested locale and does not copy upstream’s guessed-region fallback.
   Adapted in `BobVoiceInput.kt`, `VoiceProviders.kt`, `VoiceInputPolicy.kt` and
   `BobVoiceRecognitionActivity.kt`. Bob owns Android permission, focus, separate
   stage deadlines, cancellation and process-wide capture/playback exclusion.
@@ -111,10 +111,12 @@ to a regular recognizer, remove the offline preference for missing language data
 or invoke another app's speech screen. Original `Speaker.kt` sorts but does not
 prohibit network voices. Bob's adaptation never silently follows those network
 fallbacks: each non-on-device recognition utterance needs named-provider consent;
-TTS first requires a voice reporting offline support and an unavailable voice
-exposes a separate, explicitly disclosed **per-reply** provider-voice choice.
-Consent is configuration-bound, revocable and not persisted as blanket permission.
-Provider/model changes fail closed. Bob itself saves/uploads no microphone audio;
+TTS requires a voice reporting offline support. There is **no network TTS override**:
+Android's public constructors may use a fallback engine, so the configured engine
+setting cannot attest the actual text recipient. Old provider-specific network
+consent is rejected in JS and native code, not silently broadened. Recognition
+consent remains configuration-bound, revocable and per-utterance. Provider/model
+changes fail closed. Bob itself saves/uploads no microphone audio;
 only final text uses normal chat delivery. Installed provider behavior remains
 Android/provider-dependent. Upstream plaintext process trace code remains dormant
 reference material, not a Bob logging path.
@@ -167,7 +169,7 @@ audio-device proof. Real provider, permission, Activity handoff, focus and speec
 quality still need owner-run device acceptance. No APK build, installation,
 deployment, service restart or audio activation is part of this implementation.
 
-### Recorded implementation checks
+### Historical initial-integration checks (c965091; not post-fix full gates)
 
 - **176/176 tests, eight focused mobile Jest suites**, including the real App's
   auto-send/outbox/receipt/playback callbacks, two turns, preserved draft and
@@ -189,3 +191,67 @@ One simultaneous Gradle/Jest attempt exceeded the pre-existing App harness's
 five-second test deadline and caused a downstream fixture failure. The identical
 Jest command passed when rerun alone; no deadlines/assertions were relaxed. These
 results do not replace physical-provider/audio/layout acceptance.
+
+
+## Independent-review HOLD corrections
+
+- **Network TTS:** the safe public-API policy is to disable the unprovable network
+  override, not broaden its consent. Native `speakConfigured(..., consent=true)`
+  rejects before engine construction; legacy JS network options also reject before
+  a native call. `SpeechPolicy.permitsVoice` never admits a network-required voice.
+  The preferences key is a change detector only, never actual-provider attestation.
+- **Cold engine cleanup:** `SpeechEngineLease` tracks any possible audio attempt.
+  Confirmed shutdown is sufficient only before any attempt; attempted speech still
+  requires confirmed Stop AND shutdown. The mark is inside atomic admission and
+  before the real `speak` call. Process-wide unresolved leases remain retained.
+- **Queued start:** `SpeechAdmission` synchronously revokes a thread-safe native
+  ticket at Stop/invalidate admission, before main-thread cleanup. Initialization
+  and each atomic chunk admission recheck it. Stale ID/module stops and queued old
+  cleanup cannot revoke a newer playback ticket.
+- **Composer:** the shared geometry budget includes heading, chrome/gaps, the
+  scaled text minimum plus its separate control row, attachments and essential
+  voice/recovery rows. Only decorative/preview/detail content collapses or scrolls.
+  Live phase and 48dp Stop/Exit/Retry controls stay outside scrolling details;
+  input/list identity, caret, unrelated draft and files remain intact.
+- **Locale:** the shared activity/service request adapter preserves BCP-47 region,
+  script and extensions. Capability lookup admits only the exact advertised request
+  or reports missing data; another advertised region is a suggestion, not an
+  automatic substitution or undisclosed change to the consent language.
+
+These are scoped fixes for independent re-review. The refreshed complete root,
+mobile and native gates remain the parent's responsibility before release; focused
+checks and browser/compiled-policy probes are not Android hardware acceptance.
+
+### Focused post-HOLD evidence (not refreshed full gates)
+
+- Mobile TypeScript passed. Ten affected Jest suites passed **240/240** with
+  `--detectOpenHandles`; native compilation and scoped Voice/Speech tests passed
+  **41/41** offline, serially rather than alongside Jest. The final focused runs
+  include the prepared **0.3.199 / 202** source metadata.
+- The original independent `LeaseProbe.java`, unchanged, now prints confirmed
+  cleanup with no retained never-used engine and zero speak calls; all five
+  requested locale strings equal the actual request-adapter outputs. This is a
+  compiled-policy probe, not an Android service/intent/device test.
+- The updated original browser adapter/current wrapper uses the actual editor,
+  Voice/recovery panels and attachment component plus the shared whole-composer
+  budget. **64/64** width/theme/font/keyboard/files/recovery cases have their
+  heading, live phase and essential 48dp controls in bounds, with no horizontal
+  overflow or page exceptions. The fixture's synthetic heading matches the App's
+  48/76dp navigation/avatar lane; it is not a full Android/Yoga/IME rendering.
+- The App regression additionally keeps native input/list identity, caret, draft
+  and files across scaled keyboard/recovery transitions and verifies that an error
+  cause remains in the live header rather than beneath explanatory copy.
+
+Reproduce the affected mobile suites from `apps/mobile`:
+
+```sh
+npm test -- --runInBand --runTestsByPath \
+  __tests__/App.test.tsx __tests__/voice-chat-app.test.tsx __tests__/voice-chat.test.ts \
+  __tests__/voice-input.test.ts __tests__/voice-input-button.test.tsx \
+  __tests__/speech.test.ts __tests__/speech-action.test.tsx __tests__/voice-speech-safety.test.ts \
+  __tests__/draft-input.test.tsx __tests__/composer-geometry.test.ts --detectOpenHandles
+```
+
+Use the scoped native compile/test command above only after Jest finishes. No
+APK/release build, installation, deployment or real microphone/TTS activation was
+performed. Independent re-review and refreshed full validation are still required.

@@ -78,10 +78,10 @@ test('an exact-history fetch failure retains its own answer claim and can recove
  let attempts=0;read.mockImplementation(async path=>{if(path.includes('/operations/'))return settlement();if(++attempts===1)throw Error('Offline history');return answer();});
  await speak();expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();jest.advanceTimersByTime(2000);await flush();expect(NativeModules.BobSpeech.speak).toHaveBeenCalledTimes(1);
 });
-test('native playback failure remains visible; provider-voice fallback needs one explicit, config-bound consent',async()=>{
- NativeModules.BobSpeech.speak.mockRejectedValueOnce(Error('No offline voice'));await speak();expect(session.snapshot().phase).toBe('error');expect(session.canUseProviderVoice()).toBe(true);
- const retry=session.allowProviderVoice();await flush();const buttons=(Alert.alert as jest.Mock).mock.calls.at(-1)[2];expect((Alert.alert as jest.Mock).mock.calls.at(-1)[1]).toContain('network');
- buttons[1].onPress();await retry;expect(NativeModules.BobSpeech.speakConfigured).toHaveBeenCalledWith('The completed reply.',expect.any(String),'tts-v1',true);
+test('native playback failure stays visible without offering an unprovable provider-network override',async()=>{
+ NativeModules.BobSpeech.speak.mockRejectedValueOnce(Error('No offline voice'));await speak();
+ expect(session.snapshot().phase).toBe('error');expect(session.snapshot().message).toBe('No offline voice');
+ expect(NativeModules.BobSpeech.configuration).not.toHaveBeenCalled();expect(NativeModules.BobSpeech.speakConfigured).not.toHaveBeenCalled();
 });
 test('recorded public-text projection never reads hidden reasoning, tool results, status or images',()=>{
  expect(completedVoiceText({id:1,kind:'pi.assistant',model:[{role:'toolResult',content:'secret result'},{role:'assistant',content:[{type:'text',text:'Visible'}, {type:'thinking',thinking:'hidden'},{type:'redactedThinking',data:'hidden'}, {type:'image',data:'image'}]}]},1,7)).toBe('Visible');
@@ -103,9 +103,4 @@ test('a delayed interruption Stop cannot start capture in a newly selected voice
  await speak();let release!:()=>void;NativeModules.BobSpeech.stop.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
  const pressing=session.press();session.configure('other-chat/visit',true,true);release();await pressing;
  expect(NativeModules.BobVoiceInput.start).toHaveBeenCalledTimes(1);
-});
-test('provider voice consent is serialized and revocable while open',async()=>{
- NativeModules.BobSpeech.speak.mockRejectedValueOnce(Error('No offline voice'));await speak();
- const choosing=session.allowProviderVoice();void session.allowProviderVoice();await flush();expect(Alert.alert).toHaveBeenCalledTimes(1);
- session.cancel(true);(Alert.alert as jest.Mock).mock.calls[0][2][1].onPress();await choosing;expect(NativeModules.BobSpeech.speakConfigured).not.toHaveBeenCalled();
 });

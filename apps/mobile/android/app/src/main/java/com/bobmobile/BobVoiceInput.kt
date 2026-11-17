@@ -122,7 +122,7 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.mainRegion(plan.language))
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.requested(plan.language))
                 .putExtra("com.google.recognition.extra.MUTE_AUDIO_BEEPS", true)
             if (plan.mode == "activity") {
                 if (!admission.handoff(ticket)) { end(current, "cancelled"); promise.reject("voice", "Speech screen handoff was cancelled."); return }
@@ -181,10 +181,12 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
                     override fun onSupportResult(support: RecognitionSupport) {
                         if (started || !live()) return
                         val pools = if (plan.mode == "onDevice") support.installedOnDeviceLanguages else support.installedOnDeviceLanguages + support.onlineLanguages + support.supportedOnDeviceLanguages
-                        val closest = VoiceLanguage.closest(plan.language, pools)
-                        if (closest == null && pools.isNotEmpty() || plan.mode == "onDevice" && closest == null && support.supportedOnDeviceLanguages.isNotEmpty()) {
-                            started = true; end(current, "error", message = VoiceInputPolicy.error(13))
-                        } else begin(closest)
+                        val exact = VoiceLanguage.supportedRequest(plan.language, pools)
+                        if (exact == null && (pools.isNotEmpty() || plan.mode == "onDevice" && support.supportedOnDeviceLanguages.isNotEmpty())) {
+                            val alternative = VoiceLanguage.closest(plan.language, pools)
+                            val suggestion = alternative?.let { " This provider advertises $it instead. Choose that Android language explicitly, then review Speech options again." }.orEmpty()
+                            started = true; end(current, "error", message = VoiceInputPolicy.error(13) + suggestion)
+                        } else begin(exact) // Unknown capabilities keep the exact initial tag; never guess a region.
                     }
                     override fun onError(error: Int) { if (error == 12 || error == 13) { if (!started && live()) { started = true; end(current, "error", message = VoiceInputPolicy.error(error)) } } else begin(null) }
                 }) } catch (_: Exception) { begin(null) }

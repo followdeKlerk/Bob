@@ -51,6 +51,7 @@ import {MenuReadCache} from './menu-read-cache';
 import {VoiceInputButton} from './components/voice-input-button';
 import {VoiceChatButton,VoiceChatPanel,SpeechRecoveryControl} from './components/voice-chat-controls';
 import {useVoiceChat} from './use-voice-chat';
+import {composerGeometry} from './composer-geometry';
 import type {VoiceInterest} from './voice-chat';
 import {SideDrawer,type SessionAction} from './components/side-drawer';
 import {workstationLabel,cleanWorkstationAlias} from './workstation-label';
@@ -324,8 +325,9 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     sameDevice:async interest=>{const credential=await Keychain.getGenericPassword({service:`bob.${interest.backend.backendId}`});return !!credential&&credential.username===interest.deviceId;},
   }});
   const playbackState=useSyncExternalStore(subscribeSpeech,speechState,speechState);
-  const voicePanelHeight=Math.max(120,Math.min(280,(windowSize.height-keyboardInset-insets.top-insets.bottom)*0.4));
-  const voiceComposerBudget=(voiceChat.state.open?voicePanelHeight:0)+(playbackState.phase==='stop-unconfirmed'?180:0);
+  const [composerHeadingHeight,setComposerHeadingHeight]=useState(76);
+  const voiceGeometry=composerGeometry({height:windowSize.height,keyboard:keyboardInset,top:insets.top,bottom:insets.bottom,fontScale:windowSize.fontScale,heading:composerHeadingHeight,attachments:attachments.length>0,voice:voiceChat.state.open,recovery:playbackState.phase==='stop-unconfirmed'});
+  const audioComposer=voiceChat.state.open||playbackState.phase==='stop-unconfirmed';
   const modelRequest=useRef(0);
   useEffect(()=>{modelRequest.current++;},[scope,active,backend?.endpoint]);
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
@@ -1005,23 +1007,23 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
 
           </PersistentMotionSurface>
           <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'} importantForAccessibility={screen==='Chat'?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
-            <View testID="composer-heading" style={styles.composerHeading}>
-              <View style={{flex:1,minWidth:0}}>{ordinaryChat&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
+            <View testID="composer-heading" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0&&!voiceGeometry.constrained)setComposerHeadingHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composerHeading,audioComposer&&voiceGeometry.constrained&&{height:48}]}>
+              <View style={{flex:1,minWidth:0}}>{audioComposer&&voiceGeometry.constrained&&<Text numberOfLines={1} accessibilityLabel={attachments.length?`${attachments.length} draft attachments retained; previews collapsed during voice`:'Voice Chat'} style={{fontSize:13,lineHeight:18,color:colors.muted}}>{attachments.length?`${attachments.length} attached`:playbackState.phase==='stop-unconfirmed'?'Audio recovery':'Voice Chat'}</Text>}{ordinaryChat&&!(audioComposer&&voiceGeometry.constrained)&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?'Saved draft could not be loaded. It has not been overwritten.':'Draft could not be saved. Keep this conversation open and retry.'}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={()=>{if(draftVisit.current!==currentDraftVisit)return;if(draftError==='load'){if(!draftReady.current)setDraftLoadAttempt(value=>value+1);}else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);}}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&<Text style={styles.caption}>{conversationProfile.error??'Checking conversation capabilities…'}</Text>}</View>
               <ChatNavigation showTrigger={active&&screen==='Chat'} open={active&&navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
             </View>
             <View testID="composer-row" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerRowHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={styles.composerRow}>
             <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
-              {attachments.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
+              {attachments.length>0&&<ScrollView testID="draft-attachment-previews" accessibilityElementsHidden={audioComposer&&voiceGeometry.attachmentHeight===0} importantForAccessibility={audioComposer&&voiceGeometry.attachmentHeight===0?'no-hide-descendants':'auto'} style={{maxHeight:audioComposer?voiceGeometry.attachmentHeight:136,overflow:'hidden'}} keyboardShouldPersistTaps="handled"><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
                 {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={file.drawingData?{uri:file.drawingData}:{uri:file.uri}} onOpen={file.drawingData&&ordinaryChat?()=>{setDrawingEditor(true);}:undefined} disabled={!ordinaryChat||!!pending} onRemove={()=>{
                   const current=scope;
                   setDraftAttachments(previous=>({...previous,[current]:(previous[current]??[]).filter(item=>item.id!==file.id)}));
                   void NativeModules.BobFiles.removeAttachment(file.id).catch(()=>{});
                 }}/>) }
-              </ScrollView>}
-              <SpeechRecoveryControl/>
-              <VoiceChatPanel state={voiceChat.state} session={voiceChat.session} maxHeight={voicePanelHeight}/>
+              </ScrollView></ScrollView>}
+              <SpeechRecoveryControl maxHeight={audioComposer?voiceGeometry.recoveryMax:180}/>
+              <VoiceChatPanel state={voiceChat.state} session={voiceChat.session} maxHeight={voiceGeometry.voiceMax}/>
               <DraftInput key="draft-editor" scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={160}
-                maxHeight={Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)-voiceComposerBudget))}
+                maxHeight={audioComposer?voiceGeometry.draftMax:Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
                 trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript} onBegin={()=>voiceChat.session.cancel(true)} onExternalChange={setDictationExternal}/><VoiceChatButton state={voiceChat.state} session={voiceChat.session} disabled={!voiceOwnerActive||!foreground||!sendReady||!!pending}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
               />

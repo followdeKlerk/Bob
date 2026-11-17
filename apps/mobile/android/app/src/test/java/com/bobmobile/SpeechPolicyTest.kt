@@ -22,4 +22,11 @@ class SpeechPolicyTest {
         }
         assertEquals(SpeechPolicy.MAX_TEXT, SpeechPolicy.chunks("x".repeat(SpeechPolicy.MAX_TEXT), 3000).sumOf { it.length })
     }
+    @Test fun unavailableConfiguredEngineNeverAuthorizesANetworkFallbackRecipient() {
+        // Android can bind B after A fails. Voice admission cannot depend on preferences A.
+        for (configuredA in listOf("uninstalled-A", "unbindable-A", "")) {
+            assertFalse(configuredA, SpeechPolicy.permitsVoice(networkRequired = true))
+            assertTrue(SpeechPolicy.permitsVoice(networkRequired = false))
+        }
+    }
 }

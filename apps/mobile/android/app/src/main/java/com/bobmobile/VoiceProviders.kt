@@ -68,13 +68,18 @@ internal object VoiceProviders {
 
 /** No automatic retry/restart or cross-language guessing. The user can choose a disclosed alternative. */
 internal object VoiceLanguage {
-    fun mainRegion(tag: String): String {
-        val locale = Locale.forLanguageTag(tag)
-        return when (locale.language) { "en" -> "en-US"; "pt" -> "pt-BR"; "zh" -> "zh-CN"; "id" -> "id-ID"; else -> "${locale.language}-${locale.language.uppercase(Locale.ROOT)}" }
-    }
+    // Preserve the owner's BCP-47 tag, including region, script and extensions.
+    fun requested(tag: String): String = tag
+    fun mainRegion(tag: String): String = requested(tag) // Compatibility for the original independent probe.
     fun closest(tag: String, available: List<String>): String? {
-        val language = Locale.forLanguageTag(tag).language
-        val same = available.filter { Locale.forLanguageTag(it).language == language }
-        return same.firstOrNull { it.equals(tag, true) } ?: same.firstOrNull { it.equals(mainRegion(tag), true) } ?: same.firstOrNull()
+        val wanted = Locale.forLanguageTag(tag)
+        val same = available.filter {
+            val candidate = Locale.forLanguageTag(it)
+            candidate.language == wanted.language && (wanted.script.isEmpty() || candidate.script == wanted.script)
+        }
+        return same.firstOrNull { it.equals(tag, true) } ?: same.firstOrNull()
     }
+    fun supportedRequest(tag: String, available: List<String>): String? =
+        available.firstOrNull { it.equals(tag, true) }?.let { requested(tag) }
+
 }

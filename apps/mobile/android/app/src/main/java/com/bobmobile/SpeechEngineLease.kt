@@ -4,18 +4,22 @@ package com.bobmobile
 internal class SpeechEngineLease<E>(private val stop: (E) -> Boolean, private val shutdown: (E) -> Unit) {
     var engine: E? = null
         private set
+    private var possibleAudio = false
+    fun markPossibleAudio() { check(engine != null); possibleAudio = true }
     fun attach(value: E) {
         check(engine == null) { "Previous speech engine cleanup is unresolved" }
-        engine = value
+        engine = value; possibleAudio = false
     }
     fun cleanup(): Boolean {
         val current = engine ?: return true
         val stopped = try { stop(current) } catch (_: Exception) { false }
         // Independent attempt: a throwing stop must not skip shutdown.
         val shutDown = try { shutdown(current); true } catch (_: Exception) { false }
-        val cleaned = stopped && shutDown
+        // stop() legitimately returns ERROR before service connection. A never-used
+        // engine can retire after shutdown, but ANY speak attempt requires both.
+        val cleaned = shutDown && (stopped || !possibleAudio)
         if (cleaned) engine = null
-        // Conservatively retain on EITHER failure, even when void shutdown returned normally.
+        // Potentially audible engines retain on EITHER failure, even after shutdown.
         // Repeated stops cannot become a false success by forgetting this engine. Some broken
         // engines may require a full process close before dictation is safe again.
         return cleaned

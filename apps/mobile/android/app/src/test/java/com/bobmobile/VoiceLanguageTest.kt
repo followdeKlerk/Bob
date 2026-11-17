@@ -4,19 +4,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VoiceLanguageTest {
-    @Test fun installedSameLanguageModelsPreferExactThenHomeRegion() {
-        assertEquals("en-US", VoiceLanguage.closest("en-DE", listOf("de-DE", "en-GB", "en-US")))
-        assertEquals("en-GB", VoiceLanguage.closest("en-GB", listOf("en-US", "en-GB")))
-        assertEquals("de-DE", VoiceLanguage.closest("de-AT", listOf("de-CH", "de-DE")))
-        assertNull(VoiceLanguage.closest("fr-FR", listOf("en-US", "de-DE")))
-        assertNull(VoiceLanguage.closest("en-US", emptyList()))
+    @Test fun requestedAdapterParametersPreserveEveryRegionScriptAndExtension() {
+        for (tag in listOf("ja-JP", "ko-KR", "hi-IN", "sv-SE", "en-GB", "zh-Hant-TW", "sr-Latn-RS", "en-GB-u-nu-latn")) {
+            // This is the exact value adapter passed into EXTRA_LANGUAGE by the shared
+            // activity/service intent builder, including pre-support-lookup API paths.
+            assertEquals(tag, VoiceLanguage.requested(tag))
+            assertEquals(tag, VoiceLanguage.supportedRequest(tag, listOf(tag)))
+            assertEquals(tag, VoiceLanguage.mainRegion(tag))
+        }
     }
-    @Test fun regionDefaultsAreUsableAndNotInventedEnEnOrZhZh() {
-        assertEquals("en-US", VoiceLanguage.mainRegion("en-DE"))
-        assertEquals("de-DE", VoiceLanguage.mainRegion("de-AT"))
-        assertEquals("pt-BR", VoiceLanguage.mainRegion("pt"))
-        assertEquals("zh-CN", VoiceLanguage.mainRegion("zh"))
-        assertEquals("id-ID", VoiceLanguage.mainRegion("id"))
+    @Test fun onlyAdvertisedExactRequestIsAdmittedAndAlternativesAreSuggestionsNotGuesses() {
+        assertNull(VoiceLanguage.supportedRequest("en-GB", listOf("en-US")))
+        assertEquals("en-US", VoiceLanguage.closest("en-GB", listOf("de-DE", "en-US")))
+        assertNull(VoiceLanguage.closest("ja-JP", listOf("ko-KR")))
+        assertNull(VoiceLanguage.closest("zh-Hant-TW", listOf("zh-Hans-CN")))
+        assertEquals("zh-Hant-HK", VoiceLanguage.closest("zh-Hant-TW", listOf("zh-Hans-CN", "zh-Hant-HK")))
+        assertNull(VoiceLanguage.supportedRequest("ja-JP", emptyList()))
+        assertNull(VoiceLanguage.closest("hi-IN", emptyList()))
     }
     @Test fun nativeCaptureLeaseCannotBeReplacedOrReleasedByAnotherModule() {
         val first = Any(); val second = Any()

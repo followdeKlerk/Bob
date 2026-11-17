@@ -1,10 +1,9 @@
 // Auto-final submission and automatic reply reading extracted from Omalauncher
 // VoiceScreen/VoiceSession (MIT, Copyright (c) 2026 Simon Schubert and contributors).
 // Bob owns delivery and completion: no launcher, Linux, local agent, or second sender.
-import {Alert,NativeModules} from 'react-native';
 import {VoiceInputSession,type VoicePhase,type VoiceDetails} from './voice-input';
 import {replyText} from './reply-text';
-import {speechSnapshot,speechState,startSpeech,stopSpeech,type SpeechOptions} from './speech';
+import {speechSnapshot,speechState,startSpeech,stopSpeech} from './speech';
 import type {Backend} from './use-mobile-runtime';
 
 export type VoiceInterest={requestId:string;deviceId:string;backend:Backend;chat:number};
@@ -41,7 +40,6 @@ export class VoiceChatSession {
  private played=new Set<string>();
  private claimed?:{interest:VoiceInterest;answer:number};
  private disposed=false;
- private providerConsent=false;
  constructor(private changed:(state:VoiceChatState)=>void,private readonly port:VoiceChatPort){
   this.capture=new VoiceInputSession(phase=>{
    if(this.state.open&&this.state.phase!=='waiting'&&this.state.phase!=='speaking')this.publish({phase});
@@ -150,11 +148,11 @@ export class VoiceChatSession {
    }
   }
  }
- private async play(text:string,epoch:number,options:SpeechOptions={}){
+ private async play(text:string,epoch:number){
   if(this.epoch!==epoch||!this.active)return;
   const id=`voice-chat-${++voiceSequence}`;this.playing=id;
   this.capture.cancel();this.publish({phase:'speaking',message:'Reading the completed reply. Tap the voice button to interrupt and speak again.'});
-  const admitted=await startSpeech(id,text,{...options,onError:message=>{if(this.epoch===epoch)this.publish({phase:'error',message});}});
+  const admitted=await startSpeech(id,text,{onError:message=>{if(this.epoch===epoch)this.publish({phase:'error',message});}});
   if(this.epoch!==epoch){if(speechState().phase!=='stop-unconfirmed')void stopSpeech(id);return;}
   if(!admitted&&speechSnapshot()!==id){this.playing=undefined;if(this.state.phase!=='error')this.publish({phase:'error',message:'Reply playback did not start. The text remains in chat.'});}
  }
@@ -169,23 +167,5 @@ export class VoiceChatSession {
  async stop(){
   this.cancel(false);
   if(speechState().phase==='stop-unconfirmed')await stopSpeech();
- }
- /** Explicit one-reply fallback only. No stored network consent, no hidden downgrade. */
- canUseProviderVoice(){return !!this.reply&&!!NativeModules.BobSpeech?.speakConfigured&&speechState().phase!=='stop-unconfirmed';}
- async allowProviderVoice(){
-  const reply=this.reply,epoch=this.epoch;
-  if(this.providerConsent||!reply||!this.active||!NativeModules.BobSpeech?.configuration||!NativeModules.BobSpeech?.speakConfigured)return;
-  this.providerConsent=true;
-  try {
-  const config=await NativeModules.BobSpeech.configuration();
-  if(typeof config?.key!=='string'||!config.key)throw Error('The selected TTS configuration could not be confirmed.');
-  if(this.epoch!==epoch||!this.active)return;
-  const allow=await new Promise<boolean>(resolve=>Alert.alert('Allow provider voice for this reply?',`${config.provider||'Android’s selected TTS provider'} may receive the completed reply text over the network. This choice applies to this reply only.`,[
-   {text:'Cancel',style:'cancel',onPress:()=>resolve(false)},{text:'Allow once',onPress:()=>resolve(true)},
-  ],{cancelable:true,onDismiss:()=>resolve(false)}));
-  if(!allow||this.epoch!==epoch||!this.active||!await this.port.sameDevice(reply.interest)||this.epoch!==epoch)return;
-  await this.play(reply.text,epoch,{configuration:config.key,networkConsent:true});
-  }catch(error){if(this.epoch===epoch&&this.active)this.publish({phase:'error',message:String((error as Error).message??error)});}
-  finally{this.providerConsent=false;}
  }
 }

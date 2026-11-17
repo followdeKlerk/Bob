@@ -130,7 +130,7 @@ export class VoiceInputSession {
     mode=provider.mode;
    }
    if(mode!=='onDevice'&&mode!=='platform'&&mode!=='activity')throw Error('No Android speech recognizer is available. Enable an installed speech recognition service in Android Settings; typing still works.');
-   this.describe({provider:provider?.label??mode});
+   this.describe({provider:provider?`${provider.label} (${provider.language})`:mode});
    const network=provider?.networkCapable??mode!=='onDevice';
    const consent=network?await this.deps.consent(provider):false;if(!current())return;
    if(network&&!consent){this.cancel();return;}

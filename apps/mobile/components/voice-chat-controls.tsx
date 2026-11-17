@@ -1,7 +1,8 @@
 import React,{useSyncExternalStore} from 'react';
 import {subscribeSpeech,speechState,stopSpeech} from '../speech';
-import {ScrollView,View} from 'react-native';
-import {Headphones,Square,X} from 'lucide-react-native';
+import {ScrollView,View,useWindowDimensions} from 'react-native';
+import {voicePanelMetrics} from '../composer-geometry';
+import {Headphones,Square,X,Settings2} from 'lucide-react-native';
 import {Button} from './ui/button';
 import {Text} from './app-text';
 import {useTheme} from '../theme';
@@ -21,32 +22,36 @@ export function VoiceChatButton({state,session,disabled}:{state:VoiceChatState;s
 }
 export function VoiceChatPanel({state,session,maxHeight}:{state:VoiceChatState;session:VoiceChatSession;maxHeight:number}){
  const {colors}=useTheme();
- if(!state.open)return null;
- const phases={idle:'Tap the headphones to speak',preparing:'Preparing microphone…',listening:'Listening — sends automatically when you finish',finishing:'Finishing recognition…',external:'Using your chosen speech screen…',waiting:'Waiting for the completed reply…',speaking:'Reading the completed reply…',error:'Voice needs attention'};
- const action=(label:string,onPress:()=>void,disabled=false)=><Button variant="ghost" disabled={disabled} accessibilityLabel={label} onPress={onPress} style={{minHeight:48,height:'auto',minWidth:48,paddingHorizontal:12,paddingVertical:8,flexShrink:1}}><Text numberOfLines={2} style={{color:colors.accent,fontSize:13,flexShrink:1}}>{label}</Text></Button>;
- return <View testID="voice-chat-panel" style={{maxHeight}}><ScrollView style={{maxHeight:Math.max(40,maxHeight-80)}} contentContainerStyle={{paddingHorizontal:12,paddingTop:8,paddingBottom:4,gap:4}} keyboardShouldPersistTaps="handled">
-  <Text style={{color:colors.muted,fontSize:12}}>One utterance sends a new message; Bob reads its completed reply. Your draft stays separate. Tap for every new capture.</Text>
-  <Text accessibilityRole="header" style={{color:colors.foreground,fontSize:13}}>Voice Chat · {phases[state.phase]}</Text>
-  {!!state.provider&&<Text style={{color:colors.muted,fontSize:12}}>{state.provider}</Text>}
-  {!!state.partial&&<Text testID="voice-chat-partial" accessibilityLabel={state.partial} numberOfLines={3} style={{color:colors.foreground,fontSize:13}}>{state.partial}</Text>}
-  {!!state.message&&<Text testID="voice-chat-message" accessibilityLiveRegion="polite" style={{color:colors.muted,fontSize:12}}>{state.message}</Text>}
-  <View style={{flexDirection:'row',flexWrap:'wrap'}}>
-   {action('Speech options',()=>void session.press(true),state.phase==='waiting')}
-   {state.phase==='error'&&session.canUseProviderVoice()&&action('Allow provider voice once',()=>void session.allowProviderVoice())}
+ const metrics=voicePanelMetrics(useWindowDimensions().fontScale);
+ if(!state.open||maxHeight<=0)return null;
+ const phases={idle:'Tap headphones to speak',preparing:'Preparing microphone',listening:'Listening · auto-send',finishing:'Finishing recognition',external:'Chosen speech screen',waiting:'Waiting for reply',speaking:'Reading reply',error:'Voice needs attention'};
+ const livePhase=state.phase==='error'&&state.message?`Voice: ${state.message}`:phases[state.phase];
+ const action=(label:string,text:string,onPress:()=>void)=><Button variant="ghost" accessibilityLabel={label} onPress={onPress} style={{minHeight:48,height:'auto',minWidth:48,paddingHorizontal:12,paddingVertical:8,flexShrink:1}}><Text numberOfLines={1} style={{color:colors.accent,fontSize:13,lineHeight:18,flexShrink:1}}>{text}</Text></Button>;
+ return <View testID="voice-chat-panel" style={{maxHeight}}>
+  <View style={{paddingHorizontal:12,paddingTop:8,maxHeight:metrics.phase}}>
+   <Text testID="voice-chat-phase" accessibilityRole="header" accessibilityLabel={`Voice Chat: ${phases[state.phase]}${state.phase==='error'&&state.message?`: ${state.message}`:''}`} accessibilityLiveRegion="polite" numberOfLines={2} style={{color:colors.foreground,fontSize:13,lineHeight:18}}>{livePhase}</Text>
   </View>
- </ScrollView><View testID="voice-chat-fixed-controls" style={{flexDirection:'row',justifyContent:'space-between',paddingHorizontal:12}}>
-  {action('Stop voice',()=>void session.stop())}
-  {action('Exit Voice Chat',()=>session.cancel(true))}
- </View></View>;
+  <ScrollView testID="voice-chat-details" accessibilityElementsHidden={maxHeight<=metrics.phase+metrics.actions} importantForAccessibility={maxHeight<=metrics.phase+metrics.actions?'no-hide-descendants':'auto'} style={{maxHeight:Math.max(0,maxHeight-metrics.phase-metrics.actions),overflow:'hidden'}} contentContainerStyle={{paddingHorizontal:12,paddingBottom:4,gap:4}} keyboardShouldPersistTaps="handled">
+   {!!state.provider&&<Text style={{color:colors.muted,fontSize:12}}>{state.provider}</Text>}
+   {!!state.partial&&<Text testID="voice-chat-partial" accessibilityLabel={state.partial} numberOfLines={3} style={{color:colors.foreground,fontSize:13}}>{state.partial}</Text>}
+   {!!state.message&&<Text testID="voice-chat-message" style={{color:colors.muted,fontSize:12}}>{state.message}</Text>}
+   <Text style={{color:colors.muted,fontSize:12}}>One utterance sends a new message; Bob reads its completed reply. Your draft stays separate. Tap for every new capture.</Text>
+  </ScrollView>
+  <View testID="voice-chat-fixed-controls" style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:12}}>
+   {action('Stop voice','Stop',()=>void session.stop())}
+   <Button variant="ghost" size="icon" accessibilityLabel="Speech options" disabled={state.phase==='waiting'} onPress={()=>void session.press(true)} style={{width:48,height:48,padding:0}}><Settings2 size={20} color={colors.accent}/></Button>
+   {action('Exit Voice Chat','Exit',()=>session.cancel(true))}
+  </View>
+ </View>;
 }
 
 /** Recovery is not owned by a virtualized reply cell or even an open voice panel. */
-export function SpeechRecoveryControl(){
+export function SpeechRecoveryControl({maxHeight=180}:{maxHeight?:number}){
  const {colors}=useTheme();
  const state=useSyncExternalStore(subscribeSpeech,speechState,speechState);
  if(state.phase!=='stop-unconfirmed')return null;
- return <View testID="speech-stop-recovery" style={{paddingHorizontal:12,paddingTop:8,maxHeight:180}}>
-  <Text numberOfLines={3} accessibilityLiveRegion="polite" accessibilityLabel="Audio cleanup is unconfirmed. Microphone capture is blocked until cleanup succeeds." style={{color:colors.foreground,fontSize:13}}>Audio cleanup unconfirmed. Retry before speaking.</Text>
-  <Button variant="ghost" accessibilityLabel="Retry stopping playback" onPress={()=>void stopSpeech()} style={{minHeight:48,height:'auto',minWidth:48,padding:12}}><Text style={{color:colors.accent,fontSize:13}}>Retry Stop</Text></Button>
+ return <View testID="speech-stop-recovery" style={{paddingHorizontal:12,paddingTop:8,maxHeight}}>
+  <Text numberOfLines={2} accessibilityLiveRegion="polite" accessibilityLabel="Audio cleanup is unconfirmed. Microphone capture is blocked until cleanup succeeds." style={{color:colors.foreground,fontSize:13,lineHeight:18}}>Audio cleanup unconfirmed.</Text>
+  <Button variant="ghost" accessibilityLabel="Retry stopping playback" onPress={()=>void stopSpeech()} style={{minHeight:48,height:'auto',minWidth:48,paddingHorizontal:12,paddingVertical:8}}><Text style={{color:colors.accent,fontSize:13,lineHeight:18}}>Retry Stop</Text></Button>
  </View>;
 }

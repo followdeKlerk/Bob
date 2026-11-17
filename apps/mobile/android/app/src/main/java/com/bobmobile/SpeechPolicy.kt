@@ -2,6 +2,8 @@ package com.bobmobile
 
 /** Bounded UTF-16 chunks; never split a surrogate pair. No storage or networking. */
 internal object SpeechPolicy {
+    // Public TTS APIs cannot attest the connected engine. No per-provider network exception.
+    fun permitsVoice(networkRequired: Boolean) = !networkRequired
     const val MAX_TEXT = 100_000
     fun chunks(text: String, limit: Int): List<String> {
         require(text.isNotBlank() && text.length <= MAX_TEXT) { "Reply must contain 1–100,000 characters." }

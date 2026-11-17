@@ -52,6 +52,11 @@ export function markAudioCleanupUnconfirmed(message:string){
  publish({id:state.id??'audio-recovery',phase:'stop-unconfirmed',message});
 }
 export async function startSpeech(id:string,text:string,options:SpeechOptions={}):Promise<boolean>{
+ if(options.networkConsent){
+  const message='Network TTS override is unavailable: Android may use an unidentified fallback engine. Install an offline voice.';
+  if(options.onError)options.onError(message);else Alert.alert('Read aloud unavailable',message);
+  return false;
+ }
  const spoken=speechText(text);
  if(!spoken)return false;
  const bridge=NativeModules.BobSpeech;
@@ -60,7 +65,7 @@ export async function startSpeech(id:string,text:string,options:SpeechOptions={}
  const playback=`${id}-${++sequence}`,current=++revision;
  ensureEvents();request=playback;playbackError=options.onError;publish({id,phase:'starting'});
  try{
-  if(options.configuration&&bridge.speakConfigured)await bridge.speakConfigured(spoken,playback,options.configuration,options.networkConsent===true);
+  if(options.configuration&&bridge.speakConfigured)await bridge.speakConfigured(spoken,playback,options.configuration,false);
   else await bridge.speak(spoken,playback);
   return current===revision&&(request===playback||state.phase==='idle'&&!state.message);
  }catch(error){
