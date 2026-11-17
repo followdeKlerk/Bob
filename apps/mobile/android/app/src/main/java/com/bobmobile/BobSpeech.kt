@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.facebook.react.bridge.*
@@ -17,9 +18,24 @@ import com.facebook.react.common.LifecycleState
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.util.Locale
 
+// Speaker engine/language/rate and queued playback adapted from Omalauncher Speaker.kt (MIT).
+// Copyright (c) 2026 Simon Schubert and contributors. See upstream/omalauncher/source/LICENSE.
 /** Phone presentation only. Never writes to Durable, a file, or a network endpoint. */
 class BobSpeech(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
-    private companion object { val cleanupRegistry = SpeechEngineCleanup<TextToSpeech>() }
+    private val cleanupRegistry get() = NativeSpeechEngineLease.cleanupRegistry
+    private var networkConsent = false
+    private var configured: String? = null
+    private fun configuration(): String = listOf(
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH).orEmpty(),
+        Locale.getDefault().toLanguageTag(),
+        Settings.Secure.getString(context.contentResolver, "tts_default_rate").orEmpty(),
+        Settings.Secure.getString(context.contentResolver, "tts_default_locale").orEmpty()
+    ).joinToString("|")
+    @ReactMethod fun configuration(promise: Promise) { main.post {
+        promise.resolve(Arguments.createMap().apply {
+            putString("key", configuration()); putString("provider", Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH).orEmpty())
+        })
+    } }
     private val main = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val engineLease = SpeechEngineLease<TextToSpeech>({ it.stop() == TextToSpeech.SUCCESS }, { it.shutdown() })
@@ -47,11 +63,12 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
     @ReactMethod fun addListener(name: String) {}
     @ReactMethod fun removeListeners(count: Double) {}
 
-    private fun event(id: String, state: String, message: String? = null) {
+    private fun event(id: String, state: String, message: String? = null, stopUnconfirmed: Boolean = false) {
         if (!context.hasActiveReactInstance()) return
         context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("BobSpeechState", Arguments.createMap().apply {
             putString("id", id); putString("state", state)
             if (message != null) putString("message", message)
+            putBoolean("stopUnconfirmed", stopUnconfirmed)
         })
     }
     @Suppress("DEPRECATION")
@@ -69,24 +86,34 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         } catch (_: Exception) {}
         focus = null; focusListener = null
         if (receiverRegistered) { try { context.unregisterReceiver(noisy) } catch (_: Exception) {}; receiverRegistered = false }
-        if (id != null) event(id, if (failure != null) "error" else state, failure)
-        if (failure != null) promise?.reject("speech", failure) else promise?.resolve(null)
+        if (cleaned) NativeSpeechEngineLease.release(this)
+        if (id != null) event(id, if (failure != null) "error" else state, failure, !cleaned)
+        if (failure != null) promise?.reject("speech", failure, Arguments.createMap().apply { putBoolean("stopUnconfirmed", !cleaned) }) else promise?.resolve(null)
         return cleaned
     }
     private fun fail(message: String) = finish("error", message)
 
-    @ReactMethod fun speak(text: String, id: String, promise: Promise) { main.post {
+    internal fun stopForCapture(): Boolean = finish("stopped")
+    @ReactMethod fun speak(text: String, id: String, promise: Promise) = speakInternal(text, id, null, false, promise)
+    @ReactMethod fun speakConfigured(text: String, id: String, key: String, consent: Boolean, promise: Promise) = speakInternal(text, id, key, consent, promise)
+    private fun rejectStop(promise: Promise) = promise.reject("speech", stopFailure, Arguments.createMap().apply { putBoolean("stopUnconfirmed", true) })
+    private fun speakInternal(text: String, id: String, key: String?, consent: Boolean, promise: Promise) { main.post {
+        if (NativeVoiceCapture.active) { promise.reject("speech", "Finish or cancel microphone capture before playback."); return@post }
+        if (key != null && key != configuration()) { promise.reject("speech", "Text-to-speech configuration changed. Review the provider again."); return@post }
+        if (!NativeSpeechEngineLease.stopForCapture()) { rejectStop(promise); return@post }
+        configured = key; networkConsent = consent && key != null
         if (!foreground || context.currentActivity == null) { promise.reject("speech", "Open Bob to read a reply aloud."); return@post }
         val chunks = try { SpeechPolicy.chunks(text, minOf(3000, TextToSpeech.getMaxSpeechInputLength())) }
             catch (_: Exception) { promise.reject("speech", "Choose a reply containing 1–100,000 characters."); return@post }
         if (id.isBlank() || id.length > 100) { promise.reject("speech", "Invalid playback request."); return@post }
-        if (!finish("stopped")) { promise.reject("speech", stopFailure); return@post }
+        if (!finish("stopped")) { rejectStop(promise); return@post }
         active = id; pending = promise; parts = chunks; index = 0
         val token = generation
         event(id, "starting")
         timeout = Runnable { if (token == generation) fail("Speech engine did not initialize. Check Android text-to-speech settings.") }.also { main.postDelayed(it, 15000) }
         try {
             // Always post: Android may invoke a failure callback before the constructor returns.
+            NativeSpeechEngineLease.owner = this
             engineLease.attach(TextToSpeech(context) { status -> main.post {
                 if (token != generation) return@post
                 timeout?.let { main.removeCallbacks(it) }; timeout = null
@@ -98,17 +125,20 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
 
     @Suppress("DEPRECATION")
     private fun start(token: Int) {
-        if (!foreground) { finish("stopped"); return }
+        if (!foreground || NativeVoiceCapture.active) { finish("stopped"); return }
+        if (configured != null && configured != configuration()) { fail("Speech provider changed. Review it before playback."); return }
         val tts = engine ?: return
         val preferred = tts.defaultVoice
-        val locale = preferred?.locale ?: Locale.getDefault()
+        val locale = Locale.getDefault()
         val voice = tts.voices.orEmpty().filter {
-            !it.isNetworkConnectionRequired && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language
+            (networkConsent || !it.isNetworkConnectionRequired) && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && it.locale.language == locale.language
         }.sortedWith(compareByDescending<android.speech.tts.Voice> { it.name == preferred?.name }
             .thenByDescending { it.locale == locale }.thenByDescending { it.quality }.thenBy { it.name }).firstOrNull()
         if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) {
-            fail("No installed offline voice for ${locale.displayLanguage}. Download a voice in Android text-to-speech settings, then try again."); return
+            fail("No installed ${if (networkConsent) "provider" else "offline"} voice for ${locale.displayLanguage}. Download a voice in Android speech settings${if (!networkConsent) " or explicitly allow a provider voice for this reply" else ""}."); return
         }
+        val rate = Settings.Secure.getInt(context.contentResolver, "tts_default_rate", 100) / 100f
+        tts.setSpeechRate(rate.coerceIn(0.5f, 2f))
         if (tts.setAudioAttributes(attributes) != TextToSpeech.SUCCESS) { fail("Speech audio output is unavailable."); return }
         val listener = AudioManager.OnAudioFocusChangeListener { change ->
             if (change != AudioManager.AUDIOFOCUS_GAIN) main.post { if (token == generation) finish("stopped") }
@@ -145,7 +175,13 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         enqueue()
     }
     private fun enqueue() {
-        if (!foreground) { finish("stopped"); return }
+        if (!foreground || NativeVoiceCapture.active) { finish("stopped"); return }
+        timeout?.let(main::removeCallbacks)
+        // A broken provider must not hold an invisible, endless playback lease.
+        // Generous per-chunk bound also accommodates slow installed voices.
+        val token = generation
+        timeout = Runnable { if (token == generation) fail("Speech provider stopped reporting progress. Try Stop, then read the reply again.") }
+            .also { main.postDelayed(it, 60_000L + parts[index].length * 200L) }
         try {
             if (engine?.speak(parts[index], TextToSpeech.QUEUE_FLUSH, null, "$active:$index") != TextToSpeech.SUCCESS) {
                 fail("The speech engine rejected this reply."); return
@@ -154,7 +190,7 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         } catch (_: Exception) { fail("Speech playback is unavailable.") }
     }
     @ReactMethod fun stop(id: String, promise: Promise) { main.post {
-        if ((id.isEmpty() || active == id) && !finish("stopped")) promise.reject("speech", stopFailure)
+        if ((id.isEmpty() || active == id) && !NativeSpeechEngineLease.stopForCapture()) rejectStop(promise)
         else promise.resolve(null)
     } }
     @ReactMethod fun openSettings(promise: Promise) { main.post {
@@ -171,5 +207,18 @@ class BobSpeech(private val context: ReactApplicationContext) : ReactContextBase
         context.removeLifecycleEventListener(this)
         main.post { finish("stopped") }
         super.invalidate()
+    }
+}
+
+/** All potentially live TTS leases remain reachable across React module recreation. Main thread only. */
+internal object NativeSpeechEngineLease {
+    val cleanupRegistry = SpeechEngineCleanup<TextToSpeech>()
+    private val emptyLease = SpeechEngineLease<TextToSpeech>({ it.stop() == TextToSpeech.SUCCESS }, { it.shutdown() })
+    var owner: BobSpeech? = null
+    fun release(value: BobSpeech) { if (owner === value) owner = null }
+    fun stopForCapture(): Boolean {
+        val speech = owner?.stopForCapture() ?: cleanupRegistry.cleanup(emptyLease)
+        val capture = NativeVoiceCapture.cleanupRetired()
+        return speech && capture
     }
 }

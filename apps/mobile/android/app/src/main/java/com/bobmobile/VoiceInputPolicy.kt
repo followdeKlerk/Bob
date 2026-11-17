@@ -13,7 +13,7 @@ internal class VoiceInputPolicy {
         }
         fun permitted(mode: String, onDevice: Boolean, platform: Boolean, consent: Boolean): Boolean = when (mode) {
             "onDevice" -> onDevice
-            "platform" -> platform && !onDevice && consent
+            "platform" -> platform && consent
             else -> false
         }
         fun error(code: Int): String = when (code) {
@@ -22,7 +22,7 @@ internal class VoiceInputPolicy {
             6, 7 -> "No speech was recognized. Tap the mic and try again."
             8 -> "Android speech recognition is busy. Wait a moment, then tap the mic again."
             9 -> "Microphone permission is unavailable. Check Bob’s Microphone permission in Android Settings."
-            12, 13 -> "This speech engine has no installed model for your language. Check Android speech settings. No online fallback was started."
+            12, 13 -> "This speech engine has no installed model for your language. Use Speech options to choose the selected service or speech screen, or download the language model in Android speech settings. No online fallback was started."
             else -> "Android speech recognition was interrupted or unavailable. Tap the mic to try again."
         }
     }

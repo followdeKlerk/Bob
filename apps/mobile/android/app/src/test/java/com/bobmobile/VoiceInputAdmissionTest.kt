@@ -52,4 +52,27 @@ class VoiceInputAdmissionTest {
         gate.focus(true); val ready = gate.claim("after-dialogs")!!; assertTrue(gate.accepts(ready))
         gate.cancel(ready.id); assertFalse(gate.accepts(ready))
     }
+    @Test fun onlyAnExplicitHandoffMayBorrowForegroundAndItStillNeedsFocusedReturn() {
+        val admission = VoiceInputAdmission(true, true)
+        val ticket = admission.claim("external")!!
+        assertTrue(admission.handoff(ticket))
+        assertNull(admission.foreground(false)); assertNull(admission.focus(false))
+        assertTrue(admission.ownsHandoff(ticket)); assertFalse(admission.accepts(ticket))
+        assertNull(admission.claim("overlap"))
+        admission.foreground(true)
+        assertFalse(admission.accepts(ticket))
+        admission.focus(true)
+        assertTrue(admission.accepts(ticket))
+        assertEquals(ticket, admission.cancel("external"))
+        assertFalse(admission.ownsHandoff(ticket)); assertFalse(admission.accepts(ticket))
+    }
+    @Test fun externalHandoffIsNotRestoredAfterScopeCancelOrModuleClose() {
+        val admission = VoiceInputAdmission(true, true)
+        val ticket = admission.claim("old")!!
+        assertTrue(admission.handoff(ticket))
+        assertEquals(ticket, admission.close())
+        admission.foreground(true); admission.focus(true)
+        assertFalse(admission.ownsHandoff(ticket)); assertFalse(admission.accepts(ticket))
+        assertNull(admission.claim("new"))
+    }
 }

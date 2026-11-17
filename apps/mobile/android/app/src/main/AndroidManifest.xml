@@ -28,6 +28,7 @@
     <queries>
       <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
       <intent><action android:name="android.speech.RecognitionService" /></intent>
+      <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
       <intent>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
@@ -71,6 +72,7 @@
       </activity>
       <service android:name=".BobUpdateDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
       <activity android:name=".BobUpdateInstallActivity" android:exported="false" />
+      <activity android:name=".BobVoiceRecognitionActivity" android:exported="false" android:excludeFromRecents="true" />
       <activity android:name=".BobPreviewActivity" android:exported="false" />
       <activity android:name=".BobCaptureActivity" android:exported="false" android:screenOrientation="portrait" />
       <activity android:name=".BobInteractiveActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />

@@ -12,7 +12,7 @@ class VoiceInputPolicyTest {
         assertFalse(VoiceInputPolicy.permitted("onDevice", false, true, true)) // Never downgrade.
         assertFalse(VoiceInputPolicy.permitted("platform", false, true, false))
         assertTrue(VoiceInputPolicy.permitted("platform", false, true, true))
-        assertFalse(VoiceInputPolicy.permitted("platform", true, true, true)) // Availability changed: review again.
+        assertTrue(VoiceInputPolicy.permitted("platform", true, true, true)) // Explicitly chosen alternative may coexist with on-device.
         assertFalse(VoiceInputPolicy.permitted("platform", false, false, true))
         assertFalse(VoiceInputPolicy.permitted("unknown", true, true, true))
     }
