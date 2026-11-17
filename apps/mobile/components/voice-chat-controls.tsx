@@ -1,6 +1,6 @@
 import React,{useSyncExternalStore} from 'react';
 import {subscribeSpeech,speechState,stopSpeech} from '../speech';
-import {ScrollView,View,useWindowDimensions} from 'react-native';
+import {Alert,Pressable,ScrollView,View,useWindowDimensions} from 'react-native';
 import {voicePanelMetrics} from '../composer-geometry';
 import {Headphones,Square,X,Settings2} from 'lucide-react-native';
 import {Button} from './ui/button';
@@ -27,12 +27,13 @@ export function VoiceChatPanel({state,session,maxHeight}:{state:VoiceChatState;s
  const metrics=voicePanelMetrics(useWindowDimensions().fontScale);
  if(!state.open||maxHeight<=0)return null;
  const phases={idle:'Tap headphones to speak',preparing:'Preparing microphone',listening:'Listening · auto-send',finishing:'Finishing recognition',external:'Chosen speech screen',waiting:'Waiting for reply',speaking:'Reading reply',error:'Voice needs attention'};
- const livePhase=state.message?(state.phase==='error'?`Voice: ${state.message}`:state.message):phases[state.phase];
+ const error=state.phase==='error'?state.message:undefined;
+ const livePhase=error?`Voice error · tap for details\n${error}`:state.message??phases[state.phase];
  const action=(label:string,text:string,onPress:()=>void)=><Button variant="ghost" accessibilityLabel={label} onPress={onPress} style={{minHeight:48,height:'auto',minWidth:48,paddingHorizontal:12,paddingVertical:8,flexShrink:1}}><Text style={{color:colors.accent,fontSize:13,lineHeight:18,flexShrink:1}}>{text}</Text></Button>;
  return <View testID="voice-chat-panel" style={{maxHeight}}>
-  <View style={{paddingHorizontal:12,paddingTop:8,maxHeight:metrics.phase}}>
+  <Pressable disabled={!error} accessible={!!error} accessibilityRole={error?'button':undefined} accessibilityLabel={error?'Read full voice error':undefined} accessibilityHint={error?'Opens the complete error and recovery steps.':undefined} hitSlop={8} onPress={()=>{if(error)Alert.alert('Voice error',error,[{text:'Close'}]);}} style={{paddingHorizontal:12,paddingTop:8,maxHeight:metrics.phase}}>
    <Text testID="voice-chat-phase" accessibilityRole="header" accessibilityLabel={`Voice Chat: ${livePhase}`} accessibilityLiveRegion="polite" numberOfLines={2} style={{color:colors.foreground,fontSize:13,lineHeight:18}}>{livePhase}</Text>
-  </View>
+  </Pressable>
   <ScrollView testID="voice-chat-details" accessibilityElementsHidden={maxHeight<=metrics.phase+metrics.actions} importantForAccessibility={maxHeight<=metrics.phase+metrics.actions?'no-hide-descendants':'auto'} style={{maxHeight:Math.max(0,maxHeight-metrics.phase-metrics.actions),overflow:'hidden'}} contentContainerStyle={{paddingHorizontal:12,paddingBottom:4,gap:4}} keyboardShouldPersistTaps="handled">
    {!!state.provider&&<Text style={{color:colors.muted,fontSize:12}}>{state.provider}</Text>}
    {!!state.partial&&<Text testID="voice-chat-partial" accessibilityLabel={state.partial} numberOfLines={3} style={{color:colors.foreground,fontSize:13}}>{state.partial}</Text>}

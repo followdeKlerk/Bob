@@ -1,7 +1,7 @@
 jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View,createAnimatedComponent:(component:any)=>component},LinearTransition:{duration:(duration:number)=>({reduceMotion:(reduceMotion:string)=>({duration,reduceMotion})})},ReduceMotion:{System:'system'},cancelAnimation:jest.fn(),useSharedValue:(value:any)=>require('react').useRef({value}).current,useAnimatedProps:(fn:any)=>fn(),withSpring:(value:any)=>value,withTiming:(value:any)=>value,Easing:{out:(value:any)=>value,cubic:jest.fn()}}));
 import React from 'react';
 import Renderer,{act} from 'react-test-renderer';
-import {AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View} from 'react-native';
+import {Alert,AppState,DeviceEventEmitter,NativeModules,PermissionsAndroid,Platform,StyleSheet,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import App from '../App';
@@ -331,14 +331,30 @@ test.each([337,361].flatMap(width=>['light','dark'].map(scheme=>({width,scheme})
  expect(draft(tree!)).toBe(input);expect(list(tree!)).toBe(history);expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);expect(posts).toHaveLength(0);
 });
 
-test('a constrained error keeps its cause in the live header, not hidden below explanatory copy',async()=>{
- jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:754,scale:1,fontScale:2});await mount();
- await act(async()=>{await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+test.each([337,361].flatMap(width=>[1,2].map(fontScale=>({width,fontScale}))))('constrained $width / scale $fontScale error opens complete visible recovery text without expanding normal chrome',async({width,fontScale})=>{
+ const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale});await mount();
+ const input=draft(tree!),history=list(tree!);
+ await act(async()=>{input.props.onChangeText('Keep this draft');await root(tree!).findByType(DrawingEditor).props.onAdd('data:image/png;base64,fixture');DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
  await tap('Start Voice Chat');const id=NativeModules.BobVoiceInput.startConfigured.mock.calls.at(-1)[0];
- await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'error',message:'Requested language model is not installed. Use Speech options.'});await flush();});
- expect(root(tree!).findByProps({testID:'voice-chat-phase'}).props.children).toContain('model is not installed');
+ const panelMax=root(tree!).findByType(VoiceChatPanel).props.maxHeight;
+ expect(root(tree!).findByProps({testID:'voice-chat-phase'}).props.numberOfLines).toBe(2);
+ expect(button(tree!,'Read full voice error')).toBeUndefined();
+ const message='Requested language model is not installed. The selected provider could not complete recognition. Download the requested model in Android settings, or use Speech options to choose another language and provider. Tap the headphones to try again. Typing still works.';
+ await act(async()=>{DeviceEventEmitter.emit('BobVoiceInputState',{id,state:'error',message});await flush();});
+ const phase=root(tree!).findByProps({testID:'voice-chat-phase'});
+ expect(phase.props.children).toContain('tap for details');expect(phase.props.children).toContain('model is not installed');
+ const disclosure=button(tree!,'Read full voice error');expect(disclosure.props.accessibilityRole).toBe('button');expect(disclosure.props.disabled).toBe(false);
+ expect(disclosure.props.hitSlop).toBe(8);
+ expect(root(tree!).findByType(VoiceChatPanel).props.maxHeight).toBe(panelMax);
+ await tap('Read full voice error');
+ // The entire message, including trailing recovery instructions, is native dialog BODY text,
+ // not just a truncated label or screen-reader-only accessibility description.
+ expect(alert).toHaveBeenCalledWith('Voice error',message,[{text:'Close'}]);
+ expect(alert.mock.calls[0][1]).toContain('Tap the headphones to try again. Typing still works.');
  expect(StyleSheet.flatten(button(tree!,'Speech options').props.style)).toMatchObject({width:48,height:48});
  expect(button(tree!,'Stop voice')).toBeDefined();expect(button(tree!,'Exit Voice Chat')).toBeDefined();expect(posts).toHaveLength(0);
+ expect(draft(tree!)).toBe(input);expect(input.props.value).toBe('Keep this draft');expect(list(tree!)).toBe(history);
 });
 
 const recoveryMatrix=[337,361].flatMap(width=>['light','dark'].flatMap(scheme=>[1,2].flatMap(fontScale=>[false,true].map(recovery=>({width,scheme,fontScale,recovery})))));
