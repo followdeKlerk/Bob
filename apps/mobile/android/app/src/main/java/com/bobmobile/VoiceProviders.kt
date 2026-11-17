@@ -32,7 +32,7 @@ internal object VoiceProviders {
         val info = context.packageManager.getPackageInfo(component.packageName, 0)
         "${info.lastUpdateTime}:${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()}"
     }.getOrDefault("system")
-    fun options(context: Context): List<VoiceProvider> {
+    fun options(context: Context, requestedLanguage: String = Locale.getDefault().toLanguageTag()): List<VoiceProvider> {
         val pm = context.packageManager
         val picked = runCatching { Settings.Secure.getString(context.contentResolver, "voice_recognition_service") }.getOrNull()?.let(ComponentName::unflattenFromString)
         val services = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), PackageManager.GET_META_DATA)
@@ -48,7 +48,7 @@ internal object VoiceProviders {
         val activity = activities.firstOrNull { it.packageName == picked?.packageName }
             ?: activities.firstOrNull { it.packageName == resolved?.packageName && it.name == resolved?.name }
             ?: activities.firstOrNull()
-        val language = Locale.getDefault().toLanguageTag()
+        val language = requestedLanguage
         fun plan(mode: String, component: ComponentName, label: String) = VoiceProvider(mode, component, language,
             listOf(mode, component.flattenToString(), stamp(context, component), language, picked?.flattenToString().orEmpty()).joinToString("|"), label)
         val local = device?.let { plan("onDevice", it, "On-device recognition") }
@@ -69,6 +69,8 @@ internal object VoiceProviders {
 /** No automatic retry/restart or cross-language guessing. The user can choose a disclosed alternative. */
 internal object VoiceLanguage {
     // Preserve the owner's BCP-47 tag, including region, script and extensions.
+    fun valid(tag: String): Boolean = tag.length in 2..100 && tag.all { it.isLetterOrDigit() || it == '-' } &&
+        Locale.forLanguageTag(tag).let { it.language.isNotEmpty() && it.toLanguageTag().equals(tag, true) }
     fun requested(tag: String): String = tag
     fun mainRegion(tag: String): String = requested(tag) // Compatibility for the original independent probe.
     fun closest(tag: String, available: List<String>): String? {

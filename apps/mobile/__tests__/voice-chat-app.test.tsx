@@ -104,6 +104,125 @@ test.each(['light','dark'] as const)('actual App: two %s Voice Chat turns auto-s
  expect(new Set(posts.map(post=>post.requestId)).size).toBe(2);expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('KEEP THIS UNSENT DRAFT');expect(input.props.caretHidden).toBe(false);expect(list(mounted)).toBe(history);expect(attachment()).toHaveLength(initialFiles);
 });
 
+const optionsMatrix=([337,361] as const).flatMap(width=>['light','dark'].flatMap(scheme=>[1,2].map(fontScale=>({width,scheme,fontScale}))));
+test.each(optionsMatrix)('actual App Speech options $width $scheme $fontScale: readable bounded choices without changing draft',async({width,scheme,fontScale})=>{
+ await AsyncStorage.setItem('appearance',scheme);
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width,height:754,scale:1,fontScale});
+ const mounted=await mount();const input=draft(mounted),history=list(mounted);
+ await act(async()=>{input.props.onChangeText('Unsent draft');});
+ const native=NativeModules.BobVoiceInput as any;
+ native.options.mockImplementation(async(language:string|null)=>[{mode:'onDevice',key:`local|${language??'en-PL'}`,label:'Google speech engine on-device',language:language??'en-PL',networkCapable:false}]);
+ await tap('Start Voice Chat');await event('error','No installed model. Use Speech options.');
+ await tap('Speech options');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const card=mounted.root.findByProps({testID:'speech-options'});
+ expect(StyleSheet.flatten(card.props.style).maxHeight).toBeLessThanOrEqual(754);
+ expect(StyleSheet.flatten(card.props.style).backgroundColor).toBe(tokens[scheme as 'light'|'dark'].colors.background);
+ expect(option('English (US) · en-US')).toBeTruthy();expect(option('English (UK) · en-GB')).toBeTruthy();
+ expect(StyleSheet.flatten(option('English (US) · en-US').props.style).minHeight).toBeGreaterThanOrEqual(48);
+ await act(async()=>{option('English (UK) · en-GB').props.onPress();await flush();});
+ expect(native.options).toHaveBeenCalledWith('en-GB');expect(native.startConfigured).toHaveBeenCalledTimes(1);
+ await act(async()=>{option('On-device · en-GB').props.onPress();await flush();});
+ expect(native.startConfigured).toHaveBeenCalledWith(expect.any(String),'local|en-GB','en-GB',false);
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Unsent draft');expect(list(mounted)).toBe(history);
+ expect(posts).toHaveLength(0);
+});
+
+test('closing speech options and late provider lookup cannot admit capture',async()=>{
+ const mounted=await mount();await tap('Start Voice Chat');await event('error','Missing model');
+ let resolve!:(plans:any[])=>void;const waiting=new Promise<any[]>(r=>{resolve=r;});
+ const native=NativeModules.BobVoiceInput as any;
+ native.options.mockImplementation((language:string|null)=>language==='en-US'?waiting:Promise.resolve([{mode:'onDevice',key:'local|en-PL',label:'Local',language:'en-PL',networkCapable:false}]));
+ await tap('Speech options');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ await act(async()=>{option('English (US) · en-US').props.onPress();await flush();});
+ await act(async()=>{option('Close speech options').props.onPress();await flush();});
+ resolve([{mode:'onDevice',key:'local|en-US',label:'Local',language:'en-US',networkCapable:false}]);
+ await act(async()=>flush());expect(native.startConfigured).toHaveBeenCalledTimes(1);expect(posts).toHaveLength(0);
+});
+
+test('speech options accept a manually requested regional tag without treating it as installed',async()=>{
+ const mounted=await mount(),input=draft(mounted);await tap('Start Voice Chat');await event('error','Missing language model');
+ const native=NativeModules.BobVoiceInput as any;
+ native.options.mockImplementation(async(language:string|null)=>[{mode:'onDevice',key:`local|${language??'en-PL'}`,label:'Local',language:language??'en-PL',networkCapable:false}]);
+ await tap('Speech options');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const tag=mounted.root.findByProps({accessibilityLabel:'Other speech language tag'});
+ await act(async()=>{tag.props.onChangeText('zh-Hant-TW-u-nu-latn');await flush();});
+ await act(async()=>{option('Request entered language').props.onPress();await flush();});
+ expect(native.options).toHaveBeenCalledWith('zh-Hant-TW-u-nu-latn');expect(native.startConfigured).toHaveBeenCalledTimes(1);
+ await act(async()=>{option('On-device · zh-Hant-TW-u-nu-latn').props.onPress();await flush();});
+ expect(native.startConfigured).toHaveBeenCalledWith(expect.any(String),'local|zh-Hant-TW-u-nu-latn','zh-Hant-TW-u-nu-latn',false);
+ expect(draft(mounted)).toBe(input);expect(posts).toHaveLength(0);
+});
+
+test.each(['light','dark'] as const)('actual App %s draft failure recovery opens themed speech options, preserving native draft and list',async scheme=>{
+ await AsyncStorage.setItem('appearance',scheme);const mounted=await mount(),input=draft(mounted),history=list(mounted),editor=root(mounted).findByType(DraftInput);
+ await act(async()=>input.props.onChangeText('Retain this draft'));
+ await tap('Dictate message');await event('error','No model for en-PL. Use Speech options.');
+ const buttonInModal=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const recovery=mounted.root.findByProps({testID:'dictation-recovery'});
+ expect(StyleSheet.flatten(recovery.props.style).backgroundColor).toBe(tokens[scheme].colors.background);
+ expect(buttonInModal('Open speech options from dictation recovery')).toBeTruthy();
+ await act(async()=>{buttonInModal('Open speech options from dictation recovery').props.onPress();await flush();});
+ expect(mounted.root.findByProps({testID:'speech-options'})).toBeTruthy();
+ await act(async()=>{buttonInModal('Close speech options').props.onPress();await flush();});
+ expect(NativeModules.BobVoiceInput.startConfigured).toHaveBeenCalledTimes(1);
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Retain this draft');expect(root(mounted).findByType(DraftInput)).toBe(editor);expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
+});
+
+test.each(['light','dark'] as const)('actual App %s named network consent is explicit each turn, dismissable and keeps draft/list untouched',async scheme=>{
+ await AsyncStorage.setItem('appearance',scheme);const mounted=await mount(),input=draft(mounted),history=list(mounted);
+ await act(async()=>input.props.onChangeText('Unsent draft'));
+ const bridge=NativeModules.BobVoiceInput as any;
+ bridge.options.mockResolvedValue([{mode:'platform',key:'service|en-GB',label:'Named Google speech service',language:'en-GB',networkCapable:true}]);
+ await tap('Start Voice Chat');
+ const card=mounted.root.findByProps({testID:'speech-network-consent'});
+ expect(StyleSheet.flatten(card.props.style).backgroundColor).toBe(tokens[scheme].colors.background);
+ const text=(node:any):string=>node.children.map((child:any)=>typeof child==='string'?child:text(child)).join(' ');
+ const disclosure=text(card);
+ expect(disclosure).toContain('Named Google speech service');
+ expect(disclosure).toContain('en-GB');
+ expect(disclosure).toContain('may send microphone audio over the network');
+ expect(bridge.startConfigured).not.toHaveBeenCalled();
+ const inModal=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ await act(async()=>{inModal('Cancel network speech').props.onPress();await flush();});
+ expect(bridge.startConfigured).not.toHaveBeenCalled();await tap('Speak to Bob');
+ await act(async()=>{inModal('Allow network speech for this utterance').props.onPress();await flush();});
+ expect(bridge.startConfigured).toHaveBeenCalledWith(expect.any(String),'service|en-GB','en-GB',true);
+ expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Unsent draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
+});
+
+test('background or Stop while network consent is open revokes it; late Allow cannot capture',async()=>{
+ const mounted=await mount(),bridge=NativeModules.BobVoiceInput as any;
+ bridge.options.mockResolvedValue([{mode:'activity',key:'screen|en-GB',label:'Named screen',language:'en-GB',networkCapable:true}]);
+ await tap('Start Voice Chat');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const staleAllow=option('Allow network speech for this utterance').props.onPress;
+ await tap('Stop voice');await act(async()=>{staleAllow();await flush();});expect(bridge.startConfigured).not.toHaveBeenCalled();
+ await tap('Speak to Bob');const secondAllow=option('Allow network speech for this utterance').props.onPress;
+ await act(async()=>{(AppState as any).currentState='background';for(const callback of lifecycle.get('change')??[])callback('background');await flush();secondAllow();await flush();});
+ expect(bridge.startConfigured).not.toHaveBeenCalled();expect(posts).toHaveLength(0);
+});
+
+test('old consent Allow and old picker provider callbacks cannot authorize a newer dialog',async()=>{
+ const mounted=await mount(),bridge=NativeModules.BobVoiceInput as any;
+ bridge.options.mockResolvedValue([{mode:'platform',key:'service|en-GB',label:'Named provider',language:'en-GB',networkCapable:true}]);
+ await tap('Start Voice Chat');
+ const option=(label:string)=>mounted.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];
+ const staleAllow=option('Allow network speech for this utterance').props.onPress;
+ await act(async()=>{option('Cancel network speech').props.onPress();await flush();});
+ await tap('Speak to Bob');
+ await act(async()=>{staleAllow();await flush();});expect(bridge.startConfigured).not.toHaveBeenCalled();
+ await act(async()=>{option('Cancel network speech').props.onPress();await flush();});
+ await tap('Speech options');
+ await act(async()=>{option('English (UK) · en-GB').props.onPress();await flush();});
+ const staleProvider=option('Speech service · en-GB').props.onPress;
+ await act(async()=>{option('Back to languages').props.onPress();await flush();staleProvider();await flush();});
+ expect(bridge.startConfigured).not.toHaveBeenCalled();expect(mounted.root.findByProps({testID:'speech-options'})).toBeTruthy();
+ await act(async()=>{option('Close speech options').props.onPress();await flush();});expect(posts).toHaveLength(0);
+});
+
 test('draft dictation still inserts only text and needs the separate Send action',async()=>{
  const mounted=await mount();const input=draft(mounted);await act(async()=>input.props.onChangeText('Typed'));
  await tap('Dictate message');await event('final','dictated draft');expect(input.props.value).toBe('Typed dictated draft');expect(posts).toHaveLength(0);expect(NativeModules.BobSpeech.speak).not.toHaveBeenCalled();

@@ -41,8 +41,10 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
     @ReactMethod fun removeListeners(count: Double) {}
     private fun windowFocused() = !invalidated && foreground && context.lifecycleState == LifecycleState.RESUMED && context.currentActivity?.let { !it.isFinishing && !it.isDestroyed && it.hasWindowFocus() } == true
     @ReactMethod fun windowFocused(promise: Promise) { main.post { promise.resolve(windowFocused()) } }
-    @ReactMethod fun options(promise: Promise) { main.post {
-        try { promise.resolve(Arguments.createArray().apply { VoiceProviders.options(context).forEach { plan -> pushMap(Arguments.createMap().apply {
+    @ReactMethod fun options(language: String?, promise: Promise) { main.post {
+        try {
+            val tag = language?.takeIf { VoiceLanguage.valid(it) } ?: if (language == null) null else throw IllegalArgumentException("Invalid speech language")
+            promise.resolve(Arguments.createArray().apply { VoiceProviders.options(context, tag ?: java.util.Locale.getDefault().toLanguageTag()).forEach { plan -> pushMap(Arguments.createMap().apply {
             putString("mode", plan.mode); putString("key", plan.key); putString("label", plan.label); putString("language", plan.language); putBoolean("networkCapable", plan.networkCapable)
         }) } }) } catch (_: Exception) { promise.reject("voice", "Could not inspect Android speech providers. Check Android speech settings.") }
     } }
@@ -88,11 +90,11 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
             launch(ticket, plan, platformConsent, promise)
         }
     }
-    @ReactMethod fun startConfigured(id: String, key: String, consent: Boolean, promise: Promise) {
+    @ReactMethod fun startConfigured(id: String, key: String, language: String, consent: Boolean, promise: Promise) {
         val ticket = admission.claim(id)
         if (ticket == null) { promise.reject("voice", "Bob’s window is not focused or recognition is busy."); return }
         main.post {
-            val plan = runCatching { VoiceProviders.options(context).firstOrNull { it.key == key } }.getOrNull()
+            val plan = runCatching { if (VoiceLanguage.valid(language)) VoiceProviders.options(context, language).firstOrNull { it.key == key && it.language == language } else null }.getOrNull()
             launch(ticket, plan, consent, promise)
         }
     }
@@ -180,13 +182,16 @@ class BobVoiceInput(private val context: ReactApplicationContext) : ReactContext
                 try { engine.checkRecognitionSupport(intent, context.mainExecutor, object : RecognitionSupportCallback {
                     override fun onSupportResult(support: RecognitionSupport) {
                         if (started || !live()) return
-                        val pools = if (plan.mode == "onDevice") support.installedOnDeviceLanguages else support.installedOnDeviceLanguages + support.onlineLanguages + support.supportedOnDeviceLanguages
+                        val installed = support.installedOnDeviceLanguages
+                        val pools = if (plan.mode == "onDevice") installed else installed + support.onlineLanguages
                         val exact = VoiceLanguage.supportedRequest(plan.language, pools)
-                        if (exact == null && (pools.isNotEmpty() || plan.mode == "onDevice" && support.supportedOnDeviceLanguages.isNotEmpty())) {
+                        if (plan.mode == "onDevice" && exact == null && VoiceLanguage.supportedRequest(plan.language, support.supportedOnDeviceLanguages) != null) {
+                            started = true; end(current, "error", message = "The requested ${plan.language} model is supported but not installed on this device. Download it in Android speech settings or choose another language explicitly. No online fallback was started.")
+                        } else if (exact == null && (pools.isNotEmpty() || plan.mode == "onDevice" && support.supportedOnDeviceLanguages.isNotEmpty())) {
                             val alternative = VoiceLanguage.closest(plan.language, pools)
-                            val suggestion = alternative?.let { " This provider advertises $it instead. Choose that Android language explicitly, then review Speech options again." }.orEmpty()
+                            val suggestion = alternative?.let { " This provider advertises $it instead. Choose that language explicitly in Speech options; its model may still need downloading." }.orEmpty()
                             started = true; end(current, "error", message = VoiceInputPolicy.error(13) + suggestion)
-                        } else begin(exact) // Unknown capabilities keep the exact initial tag; never guess a region.
+                        } else begin(exact) // Unknown capabilities keep the exact requested tag; never guess a region.
                     }
                     override fun onError(error: Int) { if (error == 12 || error == 13) { if (!started && live()) { started = true; end(current, "error", message = VoiceInputPolicy.error(error)) } } else begin(null) }
                 }) } catch (_: Exception) { begin(null) }

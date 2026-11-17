@@ -1,5 +1,5 @@
-import {Alert,AppState,NativeEventEmitter,NativeModules,PermissionsAndroid,Platform,type AppStateStatus} from 'react-native';
-import {VoiceInputSession,connectVoiceInput,PLATFORM_VOICE_NOTICE} from '../voice-input';
+import {AppState,NativeEventEmitter,NativeModules,PermissionsAndroid,Platform,type AppStateStatus} from 'react-native';
+import {VoiceInputSession,connectVoiceInput,type VoiceProvider} from '../voice-input';
 import {stopSpeech,subscribeSpeech,speechSnapshot} from '../speech';
 jest.mock('../speech',()=>({stopSpeech:jest.fn(async()=>true),subscribeSpeech:jest.fn(()=>jest.fn()),speechSnapshot:jest.fn(()=>null)}));
 const native={windowFocused:jest.fn(async()=>true),availability:jest.fn(),start:jest.fn(),finish:jest.fn(),cancel:jest.fn(),addListener:jest.fn(),removeListeners:jest.fn()};
@@ -8,7 +8,7 @@ const deferred=<T,>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T
 const flush=async()=>{for(let n=0;n<10;n++)await Promise.resolve();};
 beforeEach(()=>{
  jest.useFakeTimers();jest.clearAllMocks();jest.replaceProperty(Platform,'OS','android');
- NativeModules.BobVoiceInput=native;
+ NativeModules.BobVoiceInput=native;delete (native as any).options;delete (native as any).startConfigured;
  native.windowFocused.mockResolvedValue(true);native.availability.mockResolvedValue('onDevice');native.start.mockResolvedValue(null);native.finish.mockResolvedValue(null);native.cancel.mockResolvedValue(null);
  jest.spyOn(PermissionsAndroid,'request').mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
  Object.defineProperty(AppState,'currentState',{configurable:true,value:'active',writable:true});
@@ -43,16 +43,20 @@ test('pending permission cannot start after scope switch, background or cancella
 test.each([PermissionsAndroid.RESULTS.DENIED,PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN])('permission %s never captures',async result=>{
  jest.mocked(PermissionsAndroid.request).mockResolvedValue(result);await session.press();expect(native.start).not.toHaveBeenCalled();expect(error).toHaveBeenCalledWith(expect.stringContaining(result==='never_ask_again'?'Settings':'denied'));
 });
-test('platform recognition has a clear, per-utterance network disclosure before permission and start',async()=>{
- native.availability.mockResolvedValue('platform');const alert=jest.spyOn(Alert,'alert');
- const work=session.press();await flush();expect(alert).toHaveBeenCalledWith('Use Android speech engine?',PLATFORM_VOICE_NOTICE,expect.any(Array),expect.any(Object));
- expect(PLATFORM_VOICE_NOTICE).toContain('may send audio');expect(PermissionsAndroid.request).not.toHaveBeenCalled();expect(native.start).not.toHaveBeenCalled();
- alert.mock.calls[0][2]![1].onPress!();await work;expect(native.start).toHaveBeenCalledWith(expect.any(String),'platform',true);
- session.cancel();const again=session.press();await flush();expect(alert).toHaveBeenCalledTimes(2);alert.mock.calls[1][2]![0].onPress!();await again;expect(native.start).toHaveBeenCalledTimes(1);
+const namedProvider={mode:'platform' as const,key:'selected-service|en-PL',label:'Selected service',language:'en-PL',networkCapable:true};
+function namedNetwork(){const startConfigured=jest.fn(async(_id:string,_key:string,_language:string,_consent:boolean)=>{});Object.assign(native,{options:jest.fn(async()=>[namedProvider]),startConfigured});return startConfigured;}
+test('named provider requires explicit, renewed per-utterance consent before permission or start',async()=>{
+ const startConfigured=namedNetwork();const decisions=[deferred<boolean>(),deferred<boolean>()];let request=0;const consent=jest.fn((_provider:VoiceProvider,_signal:AbortSignal):Promise<boolean>=>decisions[request++].promise);
+ session.setConsent(consent);const work=session.press();await flush();expect(consent).toHaveBeenCalledWith(namedProvider,expect.any(AbortSignal));
+ expect(PermissionsAndroid.request).not.toHaveBeenCalled();expect(startConfigured).not.toHaveBeenCalled();
+ decisions[0].resolve(true);await work;expect(startConfigured).toHaveBeenCalledWith(expect.any(String),namedProvider.key,'en-PL',true);
+ session.cancel();const again=session.press();await flush();expect(consent).toHaveBeenCalledTimes(2);decisions[1].resolve(false);await again;expect(startConfigured).toHaveBeenCalledTimes(1);
 });
-test('cancelled/stale platform disclosure and native rejection never trigger hidden fallback',async()=>{
- native.availability.mockResolvedValue('platform');const alert=jest.spyOn(Alert,'alert');const work=session.press();await flush();session.configure('new',true);alert.mock.calls[0][2]![1].onPress!();await work;expect(native.start).not.toHaveBeenCalled();
- native.availability.mockResolvedValue('onDevice');native.start.mockRejectedValue(Error('No installed model'));await session.press();expect(native.start).toHaveBeenCalledTimes(1);expect(error).toHaveBeenLastCalledWith('No installed model');
+test('stale consent, changed scope and unavailable named provider never approve a hidden fallback',async()=>{
+ const startConfigured=namedNetwork();const decision=deferred<boolean>();session.setConsent(()=>decision.promise);
+ const work=session.press();await flush();session.configure('new',true);decision.resolve(true);await work;expect(startConfigured).not.toHaveBeenCalled();
+ delete (native as any).options;delete (native as any).startConfigured;native.availability.mockResolvedValue('platform');
+ await session.press();expect(native.start).not.toHaveBeenCalled();expect(error).toHaveBeenLastCalledWith(expect.stringContaining('Named speech-provider consent'));
 });
 test('unavailable bridge/engine provide guidance without permission or capture',async()=>{
  native.availability.mockResolvedValue('unavailable');await session.press();expect(error).toHaveBeenCalledWith(expect.stringContaining('No Android speech recognizer'));expect(PermissionsAndroid.request).not.toHaveBeenCalled();
@@ -107,15 +111,15 @@ test('blur before native admission and during a queued start fences both late re
 test('own platform consent and microphone dialogs can blur safely; admission waits for verified native window focus',async()=>{
  const listeners:Record<string,Function>={};const remove=jest.fn();
  jest.spyOn(AppState,'addEventListener').mockImplementation((name,callback)=>{listeners[name]=callback;return {remove};});
- const disconnect=connectVoiceInput(session);const alert=jest.spyOn(Alert,'alert');const permission=deferred<any>();
- native.availability.mockResolvedValue('platform');native.windowFocused.mockResolvedValue(false);jest.mocked(PermissionsAndroid.request).mockReturnValueOnce(permission.promise);
- const work=session.press();await flush();listeners.blur();expect(native.start).not.toHaveBeenCalled();
- alert.mock.calls[0][2]![1].onPress!();await flush();listeners.blur();permission.resolve(PermissionsAndroid.RESULTS.GRANTED);await flush();
- expect(native.windowFocused).toHaveBeenCalled();expect(native.start).not.toHaveBeenCalled();expect(native.cancel).not.toHaveBeenCalled();
+ const disconnect=connectVoiceInput(session);const startConfigured=namedNetwork(),permission=deferred<any>(),consent=deferred<boolean>();
+ session.setConsent(()=>consent.promise);native.windowFocused.mockResolvedValue(false);jest.mocked(PermissionsAndroid.request).mockReturnValueOnce(permission.promise);
+ const work=session.press();await flush();listeners.blur();expect(startConfigured).not.toHaveBeenCalled();
+ consent.resolve(true);await flush();listeners.blur();permission.resolve(PermissionsAndroid.RESULTS.GRANTED);await flush();
+ expect(native.windowFocused).toHaveBeenCalled();expect(startConfigured).not.toHaveBeenCalled();expect(native.cancel).not.toHaveBeenCalled();
  native.windowFocused.mockResolvedValue(true);listeners.focus();await work;
- expect(native.start).toHaveBeenCalledTimes(1);expect(native.start).toHaveBeenCalledWith(expect.any(String),'platform',true);
- listeners.blur();session.receive({id:currentId(),state:'final',text:'after shade'});listeners.focus();await flush();
- expect(transcript).not.toHaveBeenCalled();expect(native.start).toHaveBeenCalledTimes(1);disconnect();
+ expect(startConfigured).toHaveBeenCalledWith(expect.any(String),namedProvider.key,'en-PL',true);
+ listeners.blur();session.receive({id:startConfigured.mock.calls[0][0],state:'final',text:'after shade'});listeners.focus();await flush();
+ expect(transcript).not.toHaveBeenCalled();expect(startConfigured).toHaveBeenCalledTimes(1);disconnect();
 });
 test.each(['background','scope','cancel','unmount'])('%s while own dialog focus is returning aborts the wait and cannot later start',async cause=>{
  const listeners:Record<string,Function>={};const removed=jest.fn();
@@ -148,11 +152,11 @@ test('each setup, ready, listening and finalization wait is bounded independentl
 test('configured selected service receives provider-specific disclosure and a pinned key; partials are visible but never final',async()=>{
  const provider={mode:'platform',key:'selected-provider-v2|en-US',label:'Selected non-Google service',language:'en-US',networkCapable:true};
  const options=jest.fn(async()=>[provider]),startConfigured=jest.fn(async(_id:string,_key:string,_consent:boolean)=>{});
- Object.assign(native,{options,startConfigured});const alert=jest.spyOn(Alert,'alert'),details=jest.fn();
- const configured=new VoiceInputSession(changed,transcript,error,undefined,details);configured.configure('selected/chat',true);
- const work=configured.press();await flush();expect(String(alert.mock.calls[0][1])).toContain(provider.label);expect(String(alert.mock.calls[0][1])).toContain('may send audio');
- alert.mock.calls[0][2]![1].onPress!();await work;const id=startConfigured.mock.calls[0][0];
- expect(startConfigured).toHaveBeenCalledWith(id,provider.key,true);expect(native.start).not.toHaveBeenCalled();
+ Object.assign(native,{options,startConfigured});const details=jest.fn(),approval=deferred<boolean>(),request=jest.fn(()=>approval.promise);
+ const configured=new VoiceInputSession(changed,transcript,error,undefined,details);configured.configure('selected/chat',true);configured.setConsent(request);
+ const work=configured.press();await flush();expect(request).toHaveBeenCalledWith(provider,expect.any(AbortSignal));expect(startConfigured).not.toHaveBeenCalled();
+ approval.resolve(true);await work;const id=startConfigured.mock.calls[0][0];
+ expect(startConfigured).toHaveBeenCalledWith(id,provider.key,provider.language,true);expect(native.start).not.toHaveBeenCalled();
  configured.receive({id,state:'partial',text:'Visible partial'});expect(details).toHaveBeenCalledWith(expect.objectContaining({partial:'Visible partial'}));expect(transcript).not.toHaveBeenCalled();
  configured.receive({id,state:'error',message:'No model. Use Speech options.'});expect(startConfigured).toHaveBeenCalledTimes(1);expect(error).toHaveBeenCalledWith(expect.stringContaining('Speech options'));
  configured.dispose();delete (native as any).options;delete (native as any).startConfigured;
@@ -160,16 +164,44 @@ test('configured selected service receives provider-specific disclosure and a pi
 test('activity-only provider handoff is explicit, bounded and revocable; focus regain never restarts capture',async()=>{
  const provider={mode:'activity',key:'speech-screen-v1|en-US',label:'Activity-only speech',language:'en-US',networkCapable:true};
  const startConfigured=jest.fn(async(_id:string,_key:string,_consent:boolean)=>{});Object.assign(native,{options:jest.fn(async()=>[provider]),startConfigured});
- const alert=jest.spyOn(Alert,'alert');const work=session.press();await flush();alert.mock.calls[0][2]![1].onPress!();await work;
+ session.setConsent(async()=>true);await session.press();
  const id=startConfigured.mock.calls[0][0];expect(session.ownsExternal()).toBe(true);session.background();session.blur();
  expect(native.cancel).not.toHaveBeenCalled();session.configure('new/chat',true);expect(native.cancel).toHaveBeenCalledWith(id);expect(session.ownsExternal()).toBe(false);
  session.receive({id,state:'final',text:'revoked external result'});expect(transcript).not.toHaveBeenCalled();expect(startConfigured).toHaveBeenCalledTimes(1);
  delete (native as any).options;delete (native as any).startConfigured;
 });
 
-test('Speech options cancels the old capture instead of accidentally finalizing/sending it',async()=>{
+test('Speech options cancels the old capture without starting a replacement until explicit selection',async()=>{
  await session.press();const id=currentId();session.receive({id,state:'listening'});
  await session.press(true);
- expect(native.finish).not.toHaveBeenCalled();expect(native.cancel).toHaveBeenCalledWith(id);expect(native.start).toHaveBeenCalledTimes(2);
+ expect(native.finish).not.toHaveBeenCalled();expect(native.cancel).toHaveBeenCalledWith(id);expect(native.start).toHaveBeenCalledTimes(1);
  session.receive({id,state:'final',text:'Discarded old utterance'});expect(transcript).not.toHaveBeenCalled();
+ expect(error).toHaveBeenCalledWith(expect.stringContaining('updated Bob Android build'));
+});
+
+test.each((['onDevice','platform','activity'] as const).flatMap(mode=>['en-US','en-GB'].map(language=>({mode,language}))))('en-PL default, explicit $language on $mode route, retained next tap; cancellation and consent fenced',async({mode,language})=>{
+ const plan=(language:string)=>({mode,key:`${mode}|provider|${language}`,label:`Provider ${mode}`,language,networkCapable:mode!=='onDevice'});
+ const options=jest.fn(async(language:string|null)=>[plan(language??'en-PL')]);const startConfigured=jest.fn(async(_id:string,_key:string,_language:string,_consent:boolean)=>{});
+ Object.assign(native,{options,startConfigured});
+ const select=deferred<any>();const picker=jest.fn(async(_initial:string,load:(language:string)=>Promise<any[]>,signal:AbortSignal)=>{
+  expect(_initial).toBe('en-PL');expect(signal.aborted).toBe(false);const [choice]=await load(language);select.resolve(choice);return choice;
+ });session.setPicker(picker);
+ const decisions=[deferred<boolean>(),deferred<boolean>()];let request=0;const consent=jest.fn(():Promise<boolean>=>decisions[request++].promise);session.setConsent(consent);
+ const first=session.press(true);await flush();expect(picker).toHaveBeenCalledTimes(1);
+ expect(options).toHaveBeenCalledWith(null);expect(options).toHaveBeenCalledWith(language);
+ if(mode!=='onDevice'){expect(consent).toHaveBeenCalledTimes(1);expect(startConfigured).not.toHaveBeenCalled();decisions[0].resolve(true);}
+ await first;expect(startConfigured).toHaveBeenCalledWith(expect.any(String),plan(language).key,language,mode!=='onDevice');
+ session.receive({id:startConfigured.mock.calls[0][0],state:'error',message:'No installed model. Download a model in Android settings or choose another language explicitly.'});
+ const again=session.press();await flush();if(mode!=='onDevice'){expect(consent).toHaveBeenCalledTimes(2);decisions[1].resolve(false);}await again;
+ expect(options).toHaveBeenCalledWith(language);expect(startConfigured).toHaveBeenCalledTimes(mode==='onDevice'?2:1);expect(native.start).not.toHaveBeenCalled();
+ delete (native as any).options;delete (native as any).startConfigured;
+});
+
+test('cancel, scope A-B-A and late picker choice never start recognition',async()=>{
+ const plan={mode:'onDevice' as const,key:'local|en-US',label:'Local',language:'en-US',networkCapable:false};
+ Object.assign(native,{options:jest.fn(async()=>[plan]),startConfigured:jest.fn(async()=>{})});
+ const selected=deferred<any>();session.setPicker(async()=>selected.promise);
+ const work=session.press(true);await flush();session.configure('other',true);session.configure('backend/chat',true);selected.resolve(plan);await work;
+ expect((native as any).startConfigured).not.toHaveBeenCalled();expect(native.start).not.toHaveBeenCalled();expect(transcript).not.toHaveBeenCalled();
+ delete (native as any).options;delete (native as any).startConfigured;
 });

@@ -13,6 +13,10 @@ class VoiceLanguageTest {
             assertEquals(tag, VoiceLanguage.mainRegion(tag))
         }
     }
+    @Test fun explicitTagValidationKeepsScriptRegionAndExtensionsWithoutGuessing() {
+        for (tag in listOf("en-PL", "en-US", "en-GB", "zh-Hant-TW", "en-GB-u-nu-latn")) assertTrue(tag, VoiceLanguage.valid(tag))
+        for (tag in listOf("", "en_US", "und", "en-", "de-DE|provider", "en-PL;network")) assertFalse(tag, VoiceLanguage.valid(tag))
+    }
     @Test fun onlyAdvertisedExactRequestIsAdmittedAndAlternativesAreSuggestionsNotGuesses() {
         assertNull(VoiceLanguage.supportedRequest("en-GB", listOf("en-US")))
         assertEquals("en-US", VoiceLanguage.closest("en-GB", listOf("de-DE", "en-US")))

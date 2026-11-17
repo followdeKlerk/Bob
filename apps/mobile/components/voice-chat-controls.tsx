@@ -7,18 +7,20 @@ import {Button} from './ui/button';
 import {Text} from './app-text';
 import {useTheme} from '../theme';
 import type {VoiceChatSession,VoiceChatState} from '../voice-chat';
+import {useSpeechOptions} from './speech-options';
 
 export function VoiceChatButton({state,session,disabled}:{state:VoiceChatState;session:VoiceChatSession;disabled:boolean}){
  const {colors}=useTheme();
+ const options=useSpeechOptions(session.capture);
  const capturing=['preparing','listening','finishing','external'].includes(state.phase);
  const label=state.phase==='listening'?'Finish speaking to Bob':capturing?'Cancel voice capture':state.open?'Speak to Bob':'Start Voice Chat';
  const Icon=state.phase==='listening'?Square:capturing?X:Headphones;
  const blocked=disabled||state.phase==='waiting';
- return <Button variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{disabled:blocked,selected:state.open}}
+ return <>{options}<Button variant="ghost" size="icon" accessibilityLabel={label} accessibilityState={{disabled:blocked,selected:state.open}}
   accessibilityHint="Voice Chat automatically sends your finished speech as its own message and reads the completed reply. Tap again for each new turn. Draft dictation is the separate microphone."
   disabled={blocked} onPress={()=>void session.press()} style={{width:48,height:48,padding:0,flexShrink:0,borderRadius:24,borderWidth:state.open?2:0,borderColor:colors.accent,backgroundColor:state.open?colors.selectedSurface:'transparent',opacity:blocked?0.4:1}}>
   <Icon size={20} strokeWidth={1.8} color={state.open?colors.accent:colors.muted}/>
- </Button>;
+ </Button></>;
 }
 export function VoiceChatPanel({state,session,maxHeight}:{state:VoiceChatState;session:VoiceChatSession;maxHeight:number}){
  const {colors}=useTheme();

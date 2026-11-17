@@ -16,7 +16,7 @@ class VoiceInputWiringTest {
             "plan == null", "plan.networkCapable && !consent", "NativeSpeechEngineLease.stopForCapture()", "NativeVoiceCapture.claim(this)")) {
             assertTrue(gate, launch.indexOf(gate) in 0 until create)
         }
-        assertTrue(source.contains("VoiceProviders.options(context).firstOrNull { it.key == key }"))
+        assertTrue(source.contains("VoiceProviders.options(context, language).firstOrNull { it.key == key && it.language == language }"))
         assertTrue(providers.contains("Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(context)"))
         assertTrue(providers.contains("RecognitionService.SERVICE_META_DATA"))
         assertTrue(providers.contains("pickedOther && selectedService"))
@@ -41,7 +41,7 @@ class VoiceInputWiringTest {
             val start = source.substringAfter("@ReactMethod fun $method").substringBefore("private fun launch(")
             assertTrue(start.indexOf("val ticket = admission.claim(id)") < start.indexOf("main.post {"))
         }
-        assertTrue(source.contains("support.installedOnDeviceLanguages else"))
+        assertTrue(source.contains("val installed = support.installedOnDeviceLanguages"))
         assertFalse(source.contains("ERROR_LANGUAGE_UNAVAILABLE ->")) // no automatic engine/model/network retry
         assertTrue(source.contains("if (live()) event(ticket.id, \"partial\""))
     }
@@ -70,6 +70,9 @@ class VoiceInputWiringTest {
     }
     @Test fun allRoutesSendTheDisclosedLocaleWithoutRegionRewriting() {
         assertTrue(code.contains("RecognizerIntent.EXTRA_LANGUAGE, VoiceLanguage.requested(plan.language)"))
+        assertTrue(code.contains("@ReactMethod fun options(language: String?, promise: Promise)"))
+        assertTrue(code.contains("@ReactMethod fun startConfigured(id: String, key: String, language: String, consent: Boolean, promise: Promise)"))
+        assertTrue(providers.contains("fun options(context: Context, requestedLanguage: String"))
         assertTrue(code.indexOf("VoiceLanguage.requested(plan.language)") < code.indexOf("if (plan.mode == \"activity\")"))
         assertTrue(code.contains("VoiceLanguage.supportedRequest(plan.language, pools)"))
         assertTrue(code.contains("else begin(exact)")); assertTrue(code.contains("else begin(null)"))

@@ -1,4 +1,4 @@
-import {Alert,AppState,NativeEventEmitter,NativeModules,PermissionsAndroid,Platform} from 'react-native';
+import {AppState,NativeEventEmitter,NativeModules,PermissionsAndroid,Platform} from 'react-native';
 import {stopSpeech,subscribeSpeech,speechSnapshot,markAudioCleanupUnconfirmed} from './speech';
 
 export type VoicePhase='idle'|'preparing'|'listening'|'finishing'|'external';
@@ -6,16 +6,9 @@ export type VoiceProvider={mode:'onDevice'|'platform'|'activity';key:string;labe
 export type VoiceDetails={partial:string;provider?:string;external:boolean};
 type Mode='onDevice'|'platform'|'activity';
 type VoiceEvent={id:string;state:'listening'|'finishing'|'external'|'partial'|'final'|'cancelled'|'error';text?:string;message?:string;stopUnconfirmed?:boolean};
-type VoiceNative={options?:()=>Promise<VoiceProvider[]>;startConfigured?:(id:string,key:string,consent:boolean)=>Promise<void>;windowFocused:()=>Promise<boolean>;availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
-export const PLATFORM_VOICE_NOTICE='On-device recognition is unavailable. Android’s selected speech engine may send audio to its provider over the network. Bob does not upload or save audio. Continue for this utterance?';
+type VoiceNative={options?:(language:string|null)=>Promise<VoiceProvider[]>;startConfigured?:(id:string,key:string,language:string,consent:boolean)=>Promise<void>;windowFocused:()=>Promise<boolean>;availability:()=>Promise<Mode|'unavailable'>;start:(id:string,mode:Mode,platformConsent:boolean)=>Promise<void>;finish:(id:string)=>Promise<void>;cancel:(id:string)=>Promise<void>};
 const native=():VoiceNative|undefined=>NativeModules.BobVoiceInput;
 let sequence=0;
-function platformConsent(provider?:VoiceProvider):Promise<boolean>{
- return new Promise(resolve=>Alert.alert('Use Android speech engine?',provider?`${provider.label} (${provider.language}). This provider may send audio over the network, even when offline is preferred. Bob does not upload or save audio. Allow for this utterance?`:PLATFORM_VOICE_NOTICE,[
-  {text:'Cancel',style:'cancel',onPress:()=>resolve(false)},
-  {text:'Continue',onPress:()=>resolve(true)},
- ],{cancelable:true,onDismiss:()=>resolve(false)}));
-}
 /** Wait only for our consent/permission UI to return focus; never opens a recognizer. */
 function waitForWindowFocus(bridge:VoiceNative,signal:AbortSignal):Promise<void>{
  return new Promise((resolve,reject)=>{
@@ -42,7 +35,6 @@ const voiceDependencies={
    ?'Microphone permission is blocked. Enable Microphone in Android Settings → Apps → Bob → Permissions, then tap the mic again.'
    :'Microphone permission was denied. Tap the mic to try again; typing still works.');
  },
- consent:platformConsent,
  stopSpeech,
  waitForWindowFocus,
  foreground:()=>AppState.currentState==='active',
@@ -59,6 +51,11 @@ export class VoiceInputSession {
  private disposed=false;
  private dialog:AbortController|null=null;
  private external=false;
+ private selected?:VoiceProvider;
+ private picker?: (initial:string,load:(language:string)=>Promise<VoiceProvider[]>,signal:AbortSignal)=>Promise<VoiceProvider|undefined>;
+ private consent?: (provider:VoiceProvider,signal:AbortSignal)=>Promise<boolean>;
+ setPicker(picker:typeof this.picker){this.picker=picker;}
+ setConsent(consent:typeof this.consent){this.consent=consent;}
  private details:VoiceDetails={partial:'',external:false};
  private describe(change:Partial<VoiceDetails>){this.details={...this.details,...change};if(!this.disposed)this.observe?.(this.details);}
  ownsExternal(){return this.external;}
@@ -66,6 +63,7 @@ export class VoiceInputSession {
  attach(){this.disposed=false;}
  configure(scope:string,enabled:boolean){
   if(this.scope!==scope||!enabled)this.cancel();
+  if(this.scope!==scope)this.selected=undefined; // Remember choices for this chat visit only.
   this.scope=scope;this.enabled=enabled;
  }
  private publish(phase:VoicePhase){this.phase=phase;if(!this.disposed)this.changed(phase);}
@@ -120,19 +118,23 @@ export class VoiceInputSession {
   this.describe({partial:'',provider:undefined});this.deadline(40000);
   let dialog:AbortController|undefined;
   try{
-   const providers=bridge.options?await bridge.options():undefined;if(!current())return;
-   let provider=providers?.[0];
+   if(chooseProvider&&!bridge.options)throw Error('Speech options require an updated Bob Android build. No microphone was started.');
+   const initial=bridge.options?await bridge.options(chooseProvider?null:this.selected?.language??null):undefined;if(!current())return;
+   let provider=chooseProvider?initial?.[0]:this.selected?initial?.find(plan=>plan.key===this.selected?.key):initial?.[0];
+   if(!chooseProvider&&this.selected&&!provider)throw Error('Speech provider configuration changed. Open Speech options to review it; no fallback was started.');
    let mode=provider?.mode??await bridge.availability();if(!current())return;
    dialog=new AbortController();this.dialog=dialog;
-   if(chooseProvider&&providers?.length){
-    provider=await new Promise<VoiceProvider|undefined>(resolve=>Alert.alert('Speech options','Choose a provider for this utterance. Alternatives are never started automatically.',providers.slice(0,3).map(plan=>({text:plan.label,onPress:()=>resolve(plan)})),{cancelable:true,onDismiss:()=>resolve(undefined)}));
-    if(!current())return;if(!provider){this.cancel();return;}
-    mode=provider.mode;
+   if(chooseProvider){
+    if(!this.picker)throw Error('Speech options are not available on this screen. No microphone was started.');
+    const chosen=await this.picker(initial?.[0]?.language??'',language=>bridge.options!(language),dialog.signal);
+    if(!current())return;if(!chosen){this.cancel();return;}
+    provider=chosen;this.selected=chosen;mode=provider.mode;
    }
    if(mode!=='onDevice'&&mode!=='platform'&&mode!=='activity')throw Error('No Android speech recognizer is available. Enable an installed speech recognition service in Android Settings; typing still works.');
    this.describe({provider:provider?`${provider.label} (${provider.language})`:mode});
    const network=provider?.networkCapable??mode!=='onDevice';
-   const consent=network?await this.deps.consent(provider):false;if(!current())return;
+   if(network&&(!provider||!this.consent))throw Error('Named speech-provider consent is unavailable. No microphone was started.');
+   const consent=network?await this.consent!(provider!,dialog.signal):false;if(!current())return;
    if(network&&!consent){this.cancel();return;}
    await this.deps.permission();if(!current())return;
    await this.deps.waitForWindowFocus(bridge,dialog.signal);if(!current())return;
@@ -143,8 +145,10 @@ export class VoiceInputSession {
    this.external=mode==='activity';this.describe({external:this.external});
    if(this.external)this.publish('external');
    this.deadline(this.external?65000:15000);
-   if(provider&&bridge.startConfigured)await bridge.startConfigured(this.id!,provider.key,consent);
-   else await bridge.start(this.id!,mode,consent);
+   if(provider){
+    if(!bridge.startConfigured)throw Error('Speech configuration requires an updated Bob Android build. No microphone was started.');
+    await bridge.startConfigured(this.id!,provider.key,provider.language,consent);
+   }else await bridge.start(this.id!,mode,consent);
   }catch(error){if((error as {userInfo?:{stopUnconfirmed?:boolean}})?.userInfo?.stopUnconfirmed)markAudioCleanupUnconfirmed('Audio cleanup is unconfirmed. Retry Stop before speaking.');if(current()){this.cancel();this.error(error instanceof Error?error.message:'Dictation is unavailable. Try again or type your message.');}}
   finally{if(this.dialog===dialog)this.dialog=null;dialog?.abort();}
  }
