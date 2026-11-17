@@ -117,8 +117,8 @@ android {
         resValue "string", "project_id", firebaseConfigured ? firebaseConfig.project_info.project_id : ""
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 205
-        versionName "0.3.202"
+        versionCode 206
+        versionName "0.3.203"
     }
     signingConfigs {
         release {

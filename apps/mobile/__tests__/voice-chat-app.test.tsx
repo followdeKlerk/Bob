@@ -535,3 +535,26 @@ test.each(['light','dark'] as const)('Settings → Voice in %s explains recognit
  await act(async()=>{root(mounted).findAllByType(ChatNavigation)[0].props.onSelect('Chat');await flush();});
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Keep settings draft');expect(list(mounted)).toBe(history);
 });
+
+test.each([false,true])('capability checking is silent while admission stays disabled; constrained=%s',async constrained=>{
+ jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:337,height:constrained?640:754,scale:1,fontScale:constrained?2:1});
+ const fetch=(globalThis.fetch as jest.Mock).getMockImplementation()!;let resolve!:(value:any)=>void;
+ const metadata=new Promise(done=>{resolve=done;});
+ (globalThis.fetch as jest.Mock).mockImplementation(async(input:any,options:any)=>{
+  if(String(input).endsWith('/chats'))return{ok:true,status:200,json:async()=>({items:[]})};
+  if(String(input).endsWith('/configure'))return{ok:true,status:200,json:async()=>metadata};
+  return fetch(input,options);
+ });
+ await mount();if(constrained)await act(async()=>{DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:280});await flush();});
+ const input=draft(tree!),history=list(tree!);
+ const silent=()=>{
+  expect(root(tree!).findAllByType(NativeText).some(node=>React.Children.toArray(node.props.children).some(child=>typeof child==='string'&&child.includes('Checking conversation capabilities')))).toBe(false);
+  expect(root(tree!).findAllByProps({accessibilityLabel:'Checking chat. Open composer recovery'})).toHaveLength(0);
+ };
+ silent();expect(button(tree!,'Send message').props.disabled).toBe(true);expect(input.props.editable).toBe(false);
+ await act(async()=>{root(tree!).findByType(ChatNavigation).props.onSelect('Settings');await flush();});await act(async()=>{root(tree!).findByType(SettingsHome).props.onOpen('Conversation settings');await flush();});silent();
+ await act(async()=>{root(tree!).findAllByType(ChatNavigation)[0].props.onSelect('Chat');await flush();resolve({});await flush();});
+ expect(draft(tree!)).toBe(input);expect(list(tree!)).toBe(history);expect(input.props.editable).toBe(true);
+ await act(async()=>{input.props.onChangeText('Retained draft');await flush();});
+ expect(input.props.value).toBe('Retained draft');expect(button(tree!,'Send message').props.disabled).toBe(false);expect(posts).toHaveLength(0);
+});

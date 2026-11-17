@@ -118,3 +118,14 @@ test.each([337,361].flatMap(width=>[1,2].flatMap(fontScale=>[false,true].flatMap
   await act(async()=>tree.update(editor(!keyboardOpen)));expect(tree.root.findByType(TextInput)).toBe(input);expect(input.props.value).toBe(value);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test('empty inline and expanded drafts have no visible placeholder but retain accessible labels',async()=>{
+ let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<DraftInput scope="quiet" value="" onChangeText={()=>{}}/>);});
+ try{
+  const input=tree.root.findByProps({accessibilityLabel:'Message draft'});expect(input.props.placeholder).toBeUndefined();expect(input.props.value).toBe('');
+  act(()=>input.props.onContentSizeChange({nativeEvent:{contentSize:{height:240}}}));
+  act(()=>tree.root.findByProps({accessibilityLabel:'Expand message editor'}).props.onPress());
+  expect(tree.root.findByProps({accessibilityLabel:'Expanded message draft'}).props.placeholder).toBeUndefined();
+  expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(input);
+ }finally{await act(async()=>tree.unmount());}
+});
