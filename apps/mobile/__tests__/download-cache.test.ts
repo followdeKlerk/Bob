@@ -42,7 +42,8 @@ test('defaults only apply to an absent policy; opt-out survives process reopen a
  rows.set('history:legacy:3','left over after interrupted old cleanup');
  expect(await history.readHistoryCache('history:legacy:3')).toBeUndefined();
  expect(await policy.readChatListCache('chats:other')).toBeUndefined();
- expect((await policy.getCacheUsage()).totalBytes).toBe(0);
+ expect((await policy.getCacheUsage()).totalBytes).toBe(Buffer.byteLength('left over after interrupted old cleanup'));
+ expect(rows.has('history:legacy:3')).toBe(true);
  expect(storage.clear).not.toHaveBeenCalled();
 });
 
@@ -128,9 +129,13 @@ test('chunk scans use small ownership-filtered batches and keep legacy rows sepa
 
 test('a failed scan batch falls back to individual reads without discarding readable conversations',async()=>{
  chunked('history:alpha:1','first');chunked('history:alpha:2','unreadable');chunked('history:alpha:3','third');
- storage.getMany.mockRejectedValueOnce(Error('synthetic batch failure'));
+ storage.getMany.mockRejectedValue(Error('synthetic batch failure'));
  storage.getItem.mockImplementation(async key=>{if(key==='chunked:history:alpha:2:saved:0')throw Error('synthetic row failure');return rows.get(key)??null;});
+ await expect(policy.getCacheUsage()).rejects.toThrow('Some cached data could not be measured');
+ expect(rows.has('chunked:history:alpha:2:saved:0')).toBe(true);
+ await policy.writeChatListCache('chats:alpha','list');
  const usage=await policy.getCacheUsage();expect(usage.history.conversations).toBe(2);
+ storage.getMany.mockImplementation(async keys=>Object.fromEntries(keys.map(key=>[key,rows.get(key)??null])));
  expect(await history.readHistoryCache('history:alpha:1')).toBe('first');expect(await history.readHistoryCache('history:alpha:3')).toBe('third');
  expect(payloadKeys().some(key=>key.includes('history:alpha:2'))).toBe(false);
 });
@@ -267,15 +272,16 @@ test('strict ownership preserves drafts, queue, Notes, pairings, credentials, se
  expect(storage.clear).not.toHaveBeenCalled();
 });
 
-test('usage cleans orphan/incomplete/corrupt generations and counts UTF-8 payloads including manifests once per conversation',async()=>{
+test('usage counts all stored UTF-8 payloads without cleaning orphan/incomplete/corrupt generations',async()=>{
  rows.set('chats:alpha','列表😀');rows.set('history:alpha:1','old legacy é');chunked('history:alpha:1','界😀\ud800');chunked('history-pages:alpha:1','pages 🐈');
  rows.set('chunked:history:alpha:1:abandoned:0','remove me');
  rows.set('chunked:history:beta:2','not a manifest');rows.set('chunked:history:beta:2:bad:0','remove me');
  rows.set('chunked:history:beta:3',JSON.stringify({version:1,generation:'missing',parts:2}));rows.set('chunked:history:beta:3:missing:0','half');
  const usage=await policy.getCacheUsage();
  const historyBytes=[...rows].filter(([key])=>key.startsWith('history:')||key.startsWith('chunked:history')).reduce((n,[,value])=>n+Buffer.byteLength(value,'utf8'),0);
- expect(usage).toEqual({chatLists:{bytes:Buffer.byteLength('列表😀'),entries:1},history:{bytes:historyBytes,conversations:1},totalBytes:historyBytes+Buffer.byteLength('列表😀')});
- expect([...rows.keys()].some(key=>/abandoned|beta/.test(key))).toBe(false);
+ expect(usage).toEqual({chatLists:{bytes:Buffer.byteLength('列表😀'),entries:1},history:{bytes:historyBytes,conversations:3},totalBytes:historyBytes+Buffer.byteLength('列表😀')});
+ expect([...rows.keys()].some(key=>/abandoned|beta/.test(key))).toBe(true);
+ expect(storage.removeMany).not.toHaveBeenCalled();
  expect(await history.readHistoryCache('history:alpha:1')).toBe('界😀\ud800');
 });
 
@@ -313,6 +319,8 @@ test('the aggregate history safety ceiling includes UTF-8 chunk/manifests regard
  const payload='界'.repeat(16*1024*1024); // 48 MiB shared fixture, three identities = 144 MiB.
  chunked('history:alpha:1',payload);chunked('history-pages:beta:2',payload);chunked('history:gamma:3',payload);
  rows.set(lruKey,JSON.stringify(['alpha:1','beta:2','gamma:3']));
+ expect((await policy.getCacheUsage()).history.bytes).toBeGreaterThan(policy.HISTORY_CACHE_MAX_BYTES);
+ await policy.updateCachePreferences({maxConversations:50});
  const usage=await policy.getCacheUsage();
  expect(usage.history.bytes).toBeLessThanOrEqual(policy.HISTORY_CACHE_MAX_BYTES);expect(usage.history.conversations).toBe(2);
  expect(rows.has('chunked:history:alpha:1')).toBe(false);expect(rows.has('chunked:history-pages:beta:2')).toBe(true);
@@ -353,7 +361,7 @@ test('usage errors reach controls and unreadable optional payload rows can be re
  await expect(policy.getCacheUsage()).rejects.toThrow('storage unavailable');
  rows.set('history:alpha:1','oversized legacy');
  storage.getItem.mockImplementation(async key=>{if(key==='history:alpha:1')throw Error('row too large');return rows.get(key)??null;});
- expect((await policy.getCacheUsage()).totalBytes).toBe(0);expect(rows.has('history:alpha:1')).toBe(false);
+ await expect(policy.getCacheUsage()).rejects.toThrow('Some cached data could not be measured');expect(rows.has('history:alpha:1')).toBe(true);
  await history.writeHistoryCache('history:alpha:1','network recovery');
  expect(await history.readHistoryCache('history:alpha:1')).toBe('network recovery');
 });
@@ -407,4 +415,51 @@ test('indexed published generation also prevents a collision when the later mani
  expect(storage.getMany).toHaveBeenCalledWith(expect.arrayContaining([`chunked:${key}`]));expect(reads).toBe(1);
  expect(JSON.parse(rows.get(`chunked:${key}`)!).generation).not.toBe(previous.generation);
  expect(await history.readHistoryCache(key)).toBe('replacement');
+});
+
+test('Android measures metadata without transferring payloads or mutating cached data; failures remain visible',async()=>{
+ const {NativeModules,Platform}=require('react-native');const previous=NativeModules.BobPlatform;
+ const snapshot=jest.fn().mockResolvedValue([
+  {key:'chunked:history:alpha:1',bytes:44,manifest:JSON.stringify({version:1,generation:'saved',parts:1})},
+  {key:'chunked:history:alpha:1:saved:0',bytes:128*1024*1024},
+  {key:'chats:alpha',bytes:12},
+ ]);
+ const os=jest.replaceProperty(Platform,'OS','android');NativeModules.BobPlatform={downloadedCacheSnapshot:snapshot};
+ try{
+  const usage=await policy.getCacheUsage();expect(usage.history).toEqual({bytes:128*1024*1024+44,conversations:1});expect(usage.chatLists).toEqual({bytes:12,entries:1});
+  expect(storage.getAllKeys).not.toHaveBeenCalled();expect(storage.getMany).not.toHaveBeenCalled();
+  expect(storage.getItem.mock.calls.map(([key])=>key)).toEqual([preferencesKey]);expect(storage.removeMany).not.toHaveBeenCalled();expect(storage.setItem).not.toHaveBeenCalled();
+  snapshot.mockRejectedValueOnce(Error('schema unavailable'));await expect(policy.getCacheUsage()).rejects.toThrow('schema unavailable');
+  snapshot.mockResolvedValueOnce([{key:'notes:alpha',bytes:12}]);await expect(policy.getCacheUsage()).rejects.toThrow('Invalid cache measurement row');
+ }finally{NativeModules.BobPlatform=previous;os.restore();}
+});
+
+test('native metadata inventory retains complete published chunks during cold writer cleanup',async()=>{
+ const {NativeModules,Platform}=require('react-native');const previous=NativeModules.BobPlatform,os=jest.replaceProperty(Platform,'OS','android');
+ chunked('history:alpha:1','complete existing history');rows.set('chunked:history:alpha:1:orphan:0','orphan');rows.set('draft:alpha:1','protected draft');
+ NativeModules.BobPlatform={downloadedCacheSnapshot:jest.fn(async()=>[...rows].filter(([key])=>key.startsWith('chunked:')).map(([key,value])=>({key,bytes:Buffer.byteLength(value),...(key==='chunked:history:alpha:1'?{manifest:value}:{})})))};
+ try{
+  const before=new Map(rows);await policy.getCacheUsage();expect(rows).toEqual(before);
+  await policy.writeChatListCache('chats:alpha','list');
+  expect(await history.readHistoryCache('history:alpha:1')).toBe('complete existing history');expect(rows.get('draft:alpha:1')).toBe('protected draft');
+  expect(rows.has('chunked:history:alpha:1:orphan:0')).toBe(false);
+ }finally{NativeModules.BobPlatform=previous;os.restore();}
+});
+
+test.each(['whitespace','extra-field'])('native writer resolves complete %s manifests without mistaking omitted values for corruption',async shape=>{
+ const {NativeModules,Platform}=require('react-native');const previous=NativeModules.BobPlatform,os=jest.replaceProperty(Platform,'OS','android');
+ chunked('history:alpha:1','preserve me');const key='chunked:history:alpha:1',saved=rows.get(key)!;
+ rows.set(key,shape==='whitespace'?saved+' '.repeat(256):JSON.stringify({...JSON.parse(saved),extra:'x'.repeat(300)}));
+ NativeModules.BobPlatform={downloadedCacheSnapshot:jest.fn(async()=>[...rows].filter(([name])=>name.startsWith('chunked:')).map(([name,value])=>({key:name,bytes:Buffer.byteLength(value)})))};
+ try{
+  const before=new Map(rows);await policy.getCacheUsage();expect(rows).toEqual(before);expect(storage.getItem).not.toHaveBeenCalledWith(key);
+  await policy.writeChatListCache('chats:alpha','unrelated list');expect(rows.get(key)).toBe(before.get(key));expect(await history.readHistoryCache('history:alpha:1')).toBe('preserve me');
+ }finally{NativeModules.BobPlatform=previous;os.restore();}
+});
+test('failed native manifest resolution aborts indexing without deleting any cached group',async()=>{
+ const {NativeModules,Platform}=require('react-native');const previous=NativeModules.BobPlatform,os=jest.replaceProperty(Platform,'OS','android');chunked('history:alpha:1','preserve me');
+ NativeModules.BobPlatform={downloadedCacheSnapshot:jest.fn(async()=>[...rows].map(([key,value])=>({key,bytes:Buffer.byteLength(value)})))};
+ const get=storage.getItem.getMockImplementation()!;storage.getItem.mockImplementation(async key=>{if(key==='chunked:history:alpha:1')throw Error('manifest temporarily unavailable');return get(key);});
+ try{const before=new Map(rows);await policy.writeChatListCache('chats:alpha','unrelated');expect(rows).toEqual(before);expect(storage.removeMany).not.toHaveBeenCalled();}
+ finally{NativeModules.BobPlatform=previous;os.restore();}
 });

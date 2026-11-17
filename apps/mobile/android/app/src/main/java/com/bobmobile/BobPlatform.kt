@@ -95,6 +95,17 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
             catch (e: Exception) { promise.reject("diagnostics", "Unable to read app diagnostics", e) }
         }.start()
     }
+    @ReactMethod fun downloadedCacheSnapshot(promise: Promise) {
+        Thread {
+            try {
+                val result = Arguments.createArray()
+                for (row in DownloadedCacheSnapshot.read(context)) result.pushMap(Arguments.createMap().apply {
+                    putString("key", row.key); putDouble("bytes", row.bytes.toDouble())
+                })
+                promise.resolve(result)
+            } catch (e: Exception) { promise.reject("cache_measurement", "Unable to measure downloaded cache", e) }
+        }.start()
+    }
     @ReactMethod fun copyText(text: String, promise: Promise) {
         try {
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

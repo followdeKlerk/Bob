@@ -109,6 +109,7 @@ android {
     }
     defaultConfig {
         applicationId "com.bobmobile"
+        testInstrumentationRunner "android.test.InstrumentationTestRunner"
         buildConfigField "boolean", "BOB_PUSH_CONFIGURED", firebaseConfigured.toString()
         manifestPlaceholders.bobPushConfigured = firebaseConfigured.toString()
         resValue "string", "google_app_id", firebaseConfigured ? firebaseClient.client_info.mobilesdk_app_id : ""
@@ -152,6 +153,9 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
     implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
+    // Platform instrumentation support belongs to the test APK only.
+    androidTestCompileOnly files("${android.sdkDirectory}/platforms/android-${rootProject.ext.compileSdkVersion}/optional/android.test.runner.jar",
+        "${android.sdkDirectory}/platforms/android-${rootProject.ext.compileSdkVersion}/optional/android.test.base.jar")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     // The version of react-native is set by the React Native Gradle Plugin

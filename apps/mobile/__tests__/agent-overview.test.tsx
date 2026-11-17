@@ -19,7 +19,7 @@ test('metadata polling only runs while visible and foreground; hidden results ca
  await act(async()=>tree.update(<Probe request={request}/>));const signal=request.mock.calls[0][1] as AbortSignal;
  await act(async()=>tree.update(<Probe backend={b} request={request}/>));expect(signal.aborted).toBe(true);expect(latest.sessions[0].conversationId).toBe(20);
  await act(async()=>old.resolve(page('a')));expect(latest.sessions[0].conversationId).toBe(20);
- await act(async()=>tree.update(<Probe backend={b} visible={false} request={request}/>));expect(latest.sessions).toEqual([]);
+ await act(async()=>tree.update(<Probe backend={b} visible={false} request={request}/>));expect(latest.sessions[0].conversationId).toBe(20);
  const count=request.mock.calls.length;await act(async()=>jest.advanceTimersByTime(10000));expect(request).toHaveBeenCalledTimes(count);
  await act(async()=>tree.unmount());
 });
@@ -62,5 +62,15 @@ test('filter switching cancels old responses, resets pagination and scopes archi
  await act(async()=>tree.update(<Probe request={request} filter="archived"/>));expect(latest.sessions).toEqual([]);const signal=request.mock.calls[1][1];
  await act(async()=>tree.update(<Probe request={request} filter="trash"/>));expect(signal.aborted).toBe(true);expect(request.mock.calls[2][0]).toBe('agent-overview?filter=trash');expect(latest.sessions[0].trashed).toBe(true);
  await act(async()=>pending.resolve(page('a',7)));expect(latest.sessions[0].conversationId).toBe(20);
+ await act(async()=>tree.unmount());
+});
+
+test('reopening Sessions paints retained rows before the network returns, independently of cache storage',async()=>{
+ const delayed=deferred<AgentOverviewPage>(),request=jest.fn().mockResolvedValueOnce(page()).mockReturnValueOnce(delayed.promise);let tree!:Renderer.ReactTestRenderer;
+ await act(async()=>{tree=Renderer.create(<Probe request={request}/>);});
+ const rows=latest.sessions;
+ await act(async()=>tree.update(<Probe request={request} visible={false}/>));expect(latest.sessions).toBe(rows);
+ await act(async()=>tree.update(<Probe request={request}/>));expect(latest.sessions).toBe(rows);expect(latest.loading).toBe(true);
+ await act(async()=>delayed.resolve(page('a',30)));expect(latest.sessions[0].conversationId).toBe(30);
  await act(async()=>tree.unmount());
 });

@@ -53,5 +53,5 @@ export function useAgentOverview(backend:Backend|undefined,visible:boolean,reque
  },[scope,visible,version]);
  const retry=useCallback(()=>refresh.current(),[]);
  const loadMore=useCallback(()=>{if(state?.next&&!state.loading){pages.current++;setVersion(value=>value+1);}},[state?.next,state?.loading]);
- return {sessions:visible&&state?.scope===scope?state.sessions:[],loading:visible&&(!state||state.scope!==scope||state.loading),error:state?.scope===scope?state.error:undefined,next:state?.scope===scope?state.next:undefined,retry,loadMore};
+ return {sessions:state?.scope===scope?state.sessions:[],loading:visible&&(!state||state.scope!==scope||state.loading),error:state?.scope===scope?state.error:undefined,next:state?.scope===scope?state.next:undefined,retry,loadMore};
 }

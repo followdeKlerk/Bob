@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {NativeModules,Platform} from 'react-native';
 
 export type CachePreferences = {chatLists:boolean;history:boolean;maxConversations:number};
 export type CacheUsage = {chatLists:{bytes:number;entries:number};history:{bytes:number;conversations:number};totalBytes:number};
@@ -90,8 +91,29 @@ async function removeRows(names:string[]):Promise<void> {
   }
  }catch(error){inventory=undefined;throw error;}
 }
-async function scan():Promise<Map<string,Row>> {
+async function scan(publish=true):Promise<Map<string,Row>> {
  const rows=new Map<string,Row>();
+ if(Platform.OS==='android' && NativeModules.BobPlatform?.downloadedCacheSnapshot){
+  const snapshot:unknown=await NativeModules.BobPlatform.downloadedCacheSnapshot();
+  if(!Array.isArray(snapshot))throw Error('Invalid cache measurement');
+  for(const item of snapshot){
+   const parsed=typeof item?.key==='string'?address(item.key):undefined;
+   if(!parsed || !Number.isSafeInteger(item.bytes) || item.bytes<0)throw Error('Invalid cache measurement row');
+   rows.set(item.key,{...parsed,bytes:item.bytes});
+  }
+  if(publish){
+   // Byte-count snapshots deliberately omit ALL values. Resolve the actual
+   // manifests before destructive bookkeeping; an omitted/failed read must
+   // never be mistaken for corrupt metadata and delete valid history.
+   for(const [key,row] of rows)if(row.chunked&&row.part===undefined){
+    const raw=await AsyncStorage.getItem(key);
+    if(raw===null)throw Error('Cache manifest changed during indexing');
+    row.manifest=parseManifest(raw);
+   }
+   inventory=rows;
+  }
+  return rows;
+ }
  async function one(key:string){
   try{const value=await AsyncStorage.getItem(key);if(value!==null)rows.set(key,record(key,value));}
   catch{rows.set(key,{...address(key)!,bytes:0,unreadable:true});}
@@ -116,7 +138,7 @@ async function scan():Promise<Map<string,Row>> {
   if(!parsed.chunked){await flush();await one(key);continue;}
   batch.push(key);if(batch.length===SCAN_BATCH_SIZE)await flush();
  }
- await flush();inventory=rows;return rows;
+ await flush();if(publish)inventory=rows;return rows;
 }
 async function cleanOrphans():Promise<void> {
  const rows=inventory!;
@@ -210,10 +232,15 @@ export function getCacheUsage():Promise<CacheUsage> {
  // unbounded queue of duplicate scans, or reuse one across clear/policy epochs.
  if(usageFlight?.generation===epoch)return usageFlight.job;
  const job=serial(async()=>{
-  const p=await loadPreferences();inventory=undefined;await indexed();await enforce(p);
+  await loadPreferences();
+  // Measurement is observational: no orphan deletion or policy enforcement.
+  // Android returns byte counts, not entire transcripts. Do not replace the
+  // writer's inventory with an observational snapshot.
+  const rows=await scan(false);
+  if([...rows.values()].some(row=>row.unreadable))throw Error('Some cached data could not be measured');
   const usage:CacheUsage={chatLists:{bytes:0,entries:0},history:{bytes:0,conversations:0},totalBytes:0};
   const chats=new Set<string>(), histories=new Set<string>();
-  for(const row of inventory!.values()){
+  for(const row of rows.values()){
    usage[row.category].bytes+=row.bytes;
    (row.category==='chatLists'?chats:histories).add(row.identity);
   }
