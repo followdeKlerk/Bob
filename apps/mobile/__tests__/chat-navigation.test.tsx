@@ -53,9 +53,9 @@ test('native modal supports Back, backdrop, close and accessibility escape; all 
 
  expect(scroll.findAllByProps({accessibilityLabel:'Sessions'})).toHaveLength(0);
  expect(scroll.findAllByProps({accessibilityLabel:'Agents'})).toHaveLength(0);
- const destinations=['Notes','Workstations','Agents','Terminal','Tools','Settings'];
+ const destinations=['Notes','Workstations','Agents','Terminal','Tools','Todos','Settings'];
  for(const destination of destinations){
-  const row=scroll.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination)&&typeof node.props.onPress==='function')[0];
+  const row=scroll.findAll(node=>node.props.accessibilityLabel===(destination==='Agents'?'Agents and Sessions':destination==='Todos'?'Tasks':destination)&&typeof node.props.onPress==='function')[0];
   expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(48);
   expect(StyleSheet.flatten(row.props.style).height).toBeUndefined();
   expect(row.findAllByType(Text).every(text=>!text.props.numberOfLines&&text.props.allowFontScaling!==false)).toBe(true);
@@ -157,7 +157,7 @@ test('menu omits Chat and separates workspace/app destinations without a false s
  await act(async()=>{tree=Renderer.create(<ChatNavigation open onOpen={()=>{}} onClose={()=>{}} onSelect={()=>{}}/>);});
  const scroll=tree.root.findByType(ScrollView);
  const rows=scroll.findAll(node=>typeof node.props.onPress==='function'&&node.props.accessibilityRole==='button');
- expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Agents and Sessions','Terminal','Notes','Workstations','Tools','Settings']);
+ expect([...new Set(rows.map(node=>node.props.accessibilityLabel))]).toEqual(['Agents and Sessions','Terminal','Notes','Workstations','Tools','Tasks','Settings']);
  const headers=scroll.findAllByType(Text).filter(node=>node.props.accessibilityRole==='header').map(node=>node.props.children);
  expect(headers).toEqual(['Workspace','App']);
  expect(rows.every(row=>!row.props.accessibilityState.selected)).toBe(true);

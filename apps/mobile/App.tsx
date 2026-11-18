@@ -15,6 +15,8 @@ import {emptyConversationMessage} from './empty-conversation';
 import {readOnlyProfile,conversationProfileRecord,conversationReadOnlyMessage,useConversationProfile,type ChatProfile} from './retired-chat-profile';
 import {DiagnosticCard,type DiagnosticRequest} from './components/diagnostic-card';
 import {DiagnosticBoundary} from './components/diagnostic-boundary';
+import {StartupRecovery} from './components/startup-recovery';
+import {recordAppEvent} from './app-diagnostics';
 import {openSpeechSettings,speechState,subscribeSpeech,stopSpeech} from './speech';
 import {SPEECH_CAPTURE_HELP} from './components/speech-options';
 import 'react-native-get-random-values';
@@ -32,13 +34,17 @@ import {AppMotionProvider} from './app-motion';
 import {PebblePresence} from './components/pebble-presence';
 import {composerActivity} from './composer-activity';
 import {MotionSurface,PersistentMotionSurface} from './components/motion-surface';
+import {OverlayHost,useOverlayHost,useOverlayScope} from './components/overlay-host';
+import {useModalTransition} from './components/modal-transition';
+import {MessageEntrance,MessageEntrances} from './components/message-entrance';
+import {KeyboardLayout,KeyboardComposer,KeyboardCapsule,nativeKeyboardLayout} from './components/keyboard-layout';
 import {InlineSurface} from './components/inline-surface';
 import {visualDisplayHeight} from './visual-display-capability';
 import {ConversationSettings,type ConversationChange,type SavedConversationSettings} from './components/conversation-settings';
 import {ThemeProvider} from './theme-provider';
 import {AppearanceSettings} from './components/appearance-settings';
 import {CacheSettings} from './components/cache-settings';
-import {ToolsScreen} from './components/tools-screen';
+import {ToolsScreen,ToolsPresentationCache} from './components/tools-screen';
 import {LibraryCard,SkillLibraryList} from './components/library-sections';
 import {cacheGeneration,readChatListCache,writeChatListCache} from './download-cache';
 import {SettingsHome} from './components/settings-home';
@@ -81,6 +87,7 @@ import {PlusMenu} from './components/plus-menu';
 import {AttachmentThumbnail,type DraftAttachment} from './components/attachment-thumbnail';
 import {DrawingEditor} from './components/drawing-editor';
 import {useScopedSnapshot} from './use-scoped-snapshot';
+import {useLibraryDrafts,useLibraryOperations,type LibraryChange} from './use-library-editor';
 import {useChatFollow} from './use-chat-follow';
 import {ModelPicker,type ModelChoice} from './components/model-picker';
 import {linkToolResults} from './tool-results';
@@ -96,6 +103,7 @@ import {
   NativeModules,
   useWindowDimensions,
   DeviceEventEmitter,
+  Animated as NativeAnimated,
   Keyboard,
   PermissionsAndroid,
   Platform,
@@ -170,7 +178,7 @@ function textOf(value: unknown): string {
       .join('\n');
   return JSON.stringify(value);
 }
-function SessionMain({target,active,command,destination,shell,menuReads,updatesOpen=false,onUpdates,onUpdatesVisible}:{updatesOpen?:boolean;menuReads:MenuReadCache;target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
+function SessionMain({target,active,command,destination,shell,menuReads,updatesOpen=false,onUpdates,onUpdatesVisible,onEditorReady}:{onEditorReady?:()=>void;updatesOpen?:boolean;menuReads:MenuReadCache;target?:SessionTarget;active:boolean;command:number;destination:SessionDestination;shell:SessionShell;onUpdates?:()=>void;onUpdatesVisible?:(value:{scope:string;visible:boolean})=>void}) {
   const {backends,setBackends,notifyEnabled,setNotifyEnabled,phoneTools,phoneLocation,keepConnected}=shell;
   const {outbox,backgroundOutbox,outgoing,outboxError,backgroundReady,networkErrors,drainOutbox,drainLatest,drafts,settingsDrafts,draftAttachments,setDraftAttachments,reportLoaded}=shell.runtime;
   const backend=backends.find(value=>value.backendId===target?.backendId),chat=target?.chat;
@@ -195,7 +203,15 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const sectionTransport=JSON.stringify([backend?.backendId,backend?.endpoint,shell.connectionRevisions[backend?.backendId??'']??0]);
   const sectionOwner=useRef(sectionTransport);sectionOwner.current=sectionTransport;
   const [library,setLibrary]=useScopedSnapshot<any>(sectionTransport);
+  const libraryDrafts=useLibraryDrafts(sectionTransport),libraryOps=useLibraryOperations(backend?.backendId??'',sectionTransport);
+  const {instructions,setInstructions,skillName,setSkillName,skillText,setSkillText,skillDescription,setSkillDescription,skillEnabled,setSkillEnabled,skillEditing,setSkillEditing,templateName,setTemplateName,templateText,setTemplateText}=libraryDrafts;
   const [chatListBackend,setChatListBackend]=useState('');
+  // Retained sessions each hold their own catalog; confirmed changes must reach
+  // every copy without changing ownership or discarding restrictive evidence.
+  useEffect(()=>shell.metadata.subscribe(event=>{
+    if(event.scope!==sectionTransport)return;
+    setChats(previous=>previous.map(item=>item.id===event.id?preserveReadOnlyProfile(item,{...item,meta:event.meta}):item));
+  }),[sectionTransport,shell.metadata]);
   const [actionsMore,setActionsMore]=useState(false);
   const [attachmentPicker,setAttachmentPicker]=useState<{scope:string;tab:'gallery'|'files';limit:number}>();
   const [drawingEditor,setDrawingEditor]=useState(false);
@@ -222,14 +238,6 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     [welcomeHelp, setWelcomeHelp] = useState(false),
     [welcomeManual, setWelcomeManual] = useState(false),
     [screen, setScreen] = useState('Chat'),
-    [instructions, setInstructions] = useState(''),
-    [skillName, setSkillName] = useState(''),
-    [skillText, setSkillText] = useState(''),
-    [skillDescription, setSkillDescription] = useState(''),
-    [skillEnabled, setSkillEnabled] = useState(true),
-    [skillEditing,setSkillEditing] = useState(false),
-    [templateName, setTemplateName] = useState(''),
-    [templateText, setTemplateText] = useState(''),
     [chatInstructions, setChatInstructions] = useState(''),
     [usesDefaultInstructions,setUsesDefaultInstructions]=useState(true),
     [workingDirectory, setWorkingDirectory] = useState(''),
@@ -281,6 +289,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const conversationProfile=useConversationProfile(scope,knownProfile,()=>request(`chats/${chat}/configure`,'GET',undefined,backend));
   const readOnly=readOnlyProfile(conversationProfile.profile);
   const ordinaryChat=conversationProfile.known&&!readOnly;
+  useEffect(()=>{if(!active||screen!=='Chat'||!composerReady||!ordinaryChat)return;const frame=requestAnimationFrame(()=>onEditorReady?.());return()=>cancelAnimationFrame(frame);},[active,screen,composerReady,ordinaryChat,onEditorReady]);
   const readOnlyMessage=conversationReadOnlyMessage(conversationProfile.profile);
   const [composerRecovery,setComposerRecovery]=useState<{visit:object}>();
   const composerNotices:ComposerNotice[]=[
@@ -356,6 +365,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     else if(composerReady)void persistDraft(scope,draft,renderedDraftWriteVersion);
   };
   const modelRequest=useRef(0);
+  const [toolsPresentation]=useState(()=>new ToolsPresentationCache());
   useEffect(()=>{modelRequest.current++;},[scope,active,backend?.endpoint]);
   useEffect(()=>{setModelPickerTarget(undefined);setAttachmentPicker(undefined);setActions(false);setDrawingEditor(false);sectionTrail.current=[];},[scope]);
   useEffect(()=>{if(!ordinaryChat){setModelPickerTarget(undefined);setDrawingEditor(false);setAttachmentPicker(undefined);setActions(false);}},[ordinaryChat]);
@@ -364,6 +374,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   const pendingOperations=useRef(new Map<string,string>());
   const parentFollow=useChatFollow<Entry>(scope,true,active),childFollow=useChatFollow<Entry>(`${scope}:child:${child}`,true,active);
   const parentList=parentFollow.list,childList=childFollow.list;
+  const messageEntrances=useMemo(()=>new MessageEntrances(),[scope]);
   const parentHistory=useStoredHistory(backend?.backendId,chat,(path,signal)=>request(path,'GET',undefined,backend,signal),{refreshOnForeground:!continuous});
   const historyLatest=useRef(parentHistory);historyLatest.current=parentHistory;
   const childHistory=useStoredHistory(backend?.backendId,child,(path,signal)=>request(path,'GET',undefined,backend,signal));
@@ -384,7 +395,9 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     const cacheEpoch=cacheGeneration();
     const patch=action==='rename'?{title}:action==='pin'?{pinned:true}:action==='unpin'?{pinned:false}:action==='archive'?{archived:true}:action==='unarchive'?{archived:false}:{trashed:false,archived:false};
     const result=await request(`chats/${id}${action==='delete'?'':'/metadata'}`,action==='delete'?'DELETE':'PUT',action==='delete'?undefined:patch,b);
-    if(!isVisible()||selectedBackend.current!==b.backendId)return;
+    if(!isVisible()||selectedBackend.current!==b.backendId||sectionOwner.current!==sectionTransport)return;
+    if(result?.id!==Number(id)||!result.meta||typeof result.meta.title!=='string'||['pinned','archived','trashed'].some(key=>result.meta[key]!==undefined&&typeof result.meta[key]!=='boolean'))throw Error('Conversation metadata response could not be confirmed. Refresh sessions.');
+    shell.metadata.publish(sectionTransport,Number(id),result.meta);
     setChats(previous=>{const items=previous.map(item=>item.id===Number(id)?preserveReadOnlyProfile(item,{...item,meta:result.meta}):item);void writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);return items;});
     if(action==='delete'&&chat===Number(id)){const next=chats.find(item=>item.id!==Number(id)&&!item.meta?.trashed&&!item.meta?.archived);setChat(next?.id);}
   }
@@ -396,6 +409,31 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     const settle=b&&method!=='GET'&&invalidated?menuReads.beginMutation(menuReadScope(b),invalidated):undefined;
     try{return await requestBackend(path,method,body,b,signal);}finally{settle?.();}
   };
+  const observeLibrary=(value:any)=>{setLibrary(value);libraryDrafts.observe(value);};
+  async function readLibrary(b=backend){return libraryOps.read(()=>request('library','GET',undefined,b));}
+  async function changeLibrary(change:LibraryChange,onConfirmed?:()=>void){
+    if(!isVisible()||!backend||libraryOps.blocked||sectionLoading)return;
+    const b=backend,transport=sectionTransport;
+    const confirmed=await libraryOps.mutate(change,()=>request('library','PATCH',change,b),()=>request('library','GET',undefined,b),value=>{if(sectionOwner.current===transport)observeLibrary(value);});
+    if(confirmed&&mounted.current&&sectionOwner.current===transport)onConfirmed?.();
+  }
+  function saveTemplate(){
+    if(!templateName.trim())throw Error('Name the template');
+    const base=libraryDrafts.templateBase;
+    if(base?.name!==templateName&&Object.hasOwn(library?.templates??{},templateName))throw Error('That template already exists. Choose Edit for it before replacing its message.');
+    return changeLibrary({field:'template',name:templateName,expected:base?.name===templateName?base.value:null,value:templateText},()=>libraryDrafts.acknowledgeTemplate(templateName,templateText));
+  }
+  function saveLibrarySkill(){
+    const base=libraryDrafts.skillBase;
+    if(base?.name!==skillName&&Object.hasOwn(library?.skills??{},skillName))throw Error('That skill already exists. Choose Edit before replacing it.');
+    const value={description:skillDescription||skillName,markdown:skillText,enabled:skillEnabled};
+    return changeLibrary({field:'skill',name:skillName,expected:base?.name===skillName?base.value:null,value},()=>libraryDrafts.acknowledgeSkill(skillName,value));
+  }
+  function deleteTemplate(name:string,text:string){
+    if(libraryOps.blocked||!isVisible())return;
+    const ticket=sectionRequest.current;
+    Alert.alert('Delete this template?',`Delete “${name}”? This cannot be undone. Your composer draft will not change.`,[{text:'Cancel',style:'cancel'},{text:'Delete template',style:'destructive',onPress:()=>{if(isVisible()&&sectionRequest.current===ticket)run(()=>changeLibrary({field:'template',name,expected:text,value:null}));}}]);
+  }
   const run=(f:()=>Promise<void>)=>{if(isVisible())void f().catch(e=>{if(isVisible())Alert.alert('Bob',String(e.message??e));});};
   async function reconcilePending(b=backend,id=chat,current=scope) {
     if(!b||!id)return;
@@ -412,7 +450,8 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     if (!backend) return;
     setLibrary(undefined); setModels([]); setScreen(previous=>previous==='Workstations'||previous==='Agents'?previous:'Chat'); setSkillName(''); setSkillText(''); setApiKey(''); setModelId('');
     setStatus('Connecting');
-    const b=backend,cacheEpoch=cacheGeneration();let cancelled=false;setChats([]);setChatListBackend(b.backendId);setChatCursor(undefined);
+    const b=backend,cacheEpoch=cacheGeneration(),metadataVersion=shell.metadata.version();let cancelled=false;setChats([]);setChatListBackend(b.backendId);setChatCursor(undefined);
+    const applyMetadata=(rows:Chat[],after:number)=>shell.metadata.since(sectionTransport,after).reduce((items,event)=>items.map(item=>item.id===event.id?preserveReadOnlyProfile(item,{...item,meta:event.meta}):item),rows);
     void (async()=>{
       let cached:Chat[]=[];
       try{
@@ -433,11 +472,11 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
         }))cached=parsed;
       }catch{/* The chat list cache is optional; always try the authoritative load. */}
       if(cancelled)return;
-      setChats(cached);
+      cached=applyMetadata(cached,metadataVersion);setChats(cached);
       try {
         const result=await request('chats','GET',undefined,b);
         if(cancelled)return;
-        const items=mergeChatRows(cached,result.items);
+        const items=applyMetadata(mergeChatRows(cached,result.items),metadataVersion);
         setChats(items);setChatCursor(result.next);if(!identity.current)setStatus('Ready · select a conversation');
         void writeChatListCache(`chats:${b.backendId}`,JSON.stringify(items),cacheEpoch);
       }catch{if(!cancelled)setStatus('Offline • cached history');}
@@ -457,23 +496,31 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
       b = backend;
     const cache=snapshotPersistence(`history:${current}`);
     const cacheLifecycle=AppState.addEventListener('change',state=>{if(state!=='active')void cache.flush();});
-    void (async () => {
-      const [cached, op] = await Promise.all([
-        readHistoryCache(`history:${current}`),
-        AsyncStorage.getItem(`pending:${current}`).catch(()=>null),
-      ]);
-      if (cancelled||identity.current !== current) return;
-      if (cached) {
-        try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(previous=>previous??snapshot);setStatus('Cached • reconnecting');}}catch{}
-      }
-      setPending(op ?? undefined);
+    // Optional history shares a serialized cache queue with scans/writes. It
+    // must not delay pending-operation recovery, editor hydration or connecting.
+    // A late cache can fill an empty view, never overwrite an authoritative one
+    // or replace an already-connected status with "reconnecting".
+    let authoritative=false;
+    void readHistoryCache(`history:${current}`).then(cached=>{
+      if(cancelled||identity.current!==current||authoritative||!cached)return;
+      try{const snapshot=JSON.parse(cached);if(Array.isArray(snapshot.entries)&&snapshot.docs&&typeof snapshot.docs==='object'){setView(previous=>previous??snapshot);setStatus('Cached • reconnecting');}}catch{}
+    });
+    const pendingRecovery=AsyncStorage.getItem(`pending:${current}`).catch(()=>null).then(op=>{
+      if(cancelled||identity.current!==current)return;
+      setPending(op??undefined);
       if(op)pendingOperations.current.set(current,op);else pendingOperations.current.delete(current);
       setPendingLoadedVisit(currentDraftVisit);
+    });
+    void (async () => {
       try {
         const credential = await Keychain.getGenericPassword({
           service: `bob.${b.backendId}`,
         });
         if (!credential) throw Error('Missing credential');
+        // Keep operation recovery ahead of reconnect reconciliation. Credential
+        // lookup can overlap it, but a late pending read must not resurrect an
+        // operation the stream already reconciled.
+        await pendingRecovery;
         if(cancelled||identity.current!==current)return;
         const es = chatSnapshotStream(`${b.endpoint}/v1/chats/${chat}/events`,{Authorization:'Bearer '+credential.password,'x-bob-backend':b.backendId},{backendId:b.backendId,chat},raw => {
           if (cancelled||identity.current !== current) return;
@@ -485,7 +532,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
             return;
           }
           if(!Array.isArray(data.view?.entries)||!data.view?.docs||typeof data.view.docs!=='object'||Array.isArray(data.view.docs))throw Error('Invalid snapshot shape');
-          lastRaw=raw;setView(previous=>reuseSnapshotEntries(previous,data.view));
+          authoritative=true;lastRaw=raw;setView(previous=>reuseSnapshotEntries(previous,data.view));
           setStatus('Connected');
           cache.push(data.view,!data.view.docs?.['pi.live']?.run);
         },nextStatus=>{if(identity.current===current)setStatus(nextStatus);},()=>{void reconcilePending(b,chat,current).catch(()=>{});void historyLatest.current.refresh().catch(()=>{});void drainLatest.current(true,b.backendId);},snapshotLifecycle,continuousLatest.current);
@@ -632,7 +679,6 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   function enqueueChatMessage(text:string,files:DraftAttachment[],mode:'steer'|'followUp',questionId?:string,voiceDeviceId?:string):OutgoingMessage {
     if(!composerReady||!sendReady||!canWriteConversation()||!backend||!chat||pending||pendingOperations.current.has(scope))throw Error('This conversation is not ready to send. Nothing was enqueued.');
     revokeVoiceVisit(!!voiceDeviceId);
-    parentFollow.resume();
     const current=scope,op=uuid();
     // Voice's captured pairing uses the existing device-bound foreground lane. Native
     // handoff must not rebind this request to a cached/different pairing credential.
@@ -640,6 +686,9 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     const item:OutgoingMessage={id:op,scope:current,...(voiceDeviceId?{foregroundDeviceId:voiceDeviceId}:{}),foregroundUnsent:!voiceDeviceId&&(!backgroundOutbox||foregroundOnly)?true:undefined,foregroundOnly,backend,chat,createdAt:Date.now(),afterEntryId:Math.max(0,...(view?.entries??[]).map(entry=>entry.id),...(parentHistory.page?.items??[]).map(entry=>entry.id)),localId:Math.min(-Date.now(),...outbox.items.map(item=>item.localId-1)),files,
       message:Message.parse({requestId:op,...(questionId?{questionId}:{}),text,mode,allowSubagents:true,
         ...(visualWidth>0?{display:{inline:{width:Math.floor(visualWidth),height:visualDisplayHeight(view?.docs?.['bob.display'])},fullscreen:{width:Math.max(1,Math.floor(windowSize.width-insets.left-insets.right)),height:Math.max(1,Math.floor(windowSize.height-insets.top-insets.bottom))}}}:{})})};
+    // Decoration is local to a genuinely new visible send; a paused reader
+    // keeps their anchor. Retry/reconciliation never arms an entrance.
+    if(active&&foreground&&screen==='Chat'&&parentFollow.following)messageEntrances.arm(op);
     const saved=outbox.add(item);
     // Dispatch before awaiting storage, as in ordinary Send; foreground-only items
     // are deliberately ignored by native enqueue and retain the canonical JS lane.
@@ -772,7 +821,10 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     if(tab==='Settings'||tab==='Notes'||tab==='Tools'){run(()=>openSection(tab,false));return;}
     sectionRequest.current++;setSectionLoading(false);setScreen(tab);
   }
-  const agentOverview=useAgentOverview(backend,active&&screen==='Agents',(path,signal)=>request(path,'GET',undefined,backend,signal),sessionFilter);
+  // The menu is explicit navigation intent. Overlap its interaction time with
+  // the bounded metadata read, without adding work to startup/typing. Keep the
+  // same observer alive through menu → Sessions; closing both cancels polling.
+  const agentOverview=useAgentOverview(backend,active&&(screen==='Agents'||navigationOpen),(path,signal)=>request(path,'GET',undefined,backend,signal),sessionFilter);
   function backSection(){
     Keyboard.dismiss();
     if(screen==='Skills'&&skillEditing){skillEditorEpoch.current++;setSkillEditing(false);return;}
@@ -787,14 +839,18 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
     if(refresh&&b&&needsLibrary)menuReads.invalidate(menuReadScope(b),'library');
     const cached=b&&needsLibrary?menuReads.peek(menuReadScope(b),'library'):undefined;
     const ticket=++sectionRequest.current;setSectionError('');setSectionLoading(needsLibrary&&!cached);
-    if(cached){setLibrary(cached);setInstructions(cached.instructions);} // Local reopen paints without a loading frame.
+    if(cached){observeLibrary(cached);} // Local reopen paints without a loading frame.
     setScreen(name);setDrawer(false);if(name==='Skills')setSkillEditing(false);
+    // Notes lives on a separately retained root plane. Publish its selection in
+    // this tap transaction, not only after rendering the session-local screen.
+    // Otherwise the native menu can finish exiting before that second commit,
+    // exposing the old Chat for several frames (physical216, three repeats).
+    if(name==='Notes'&&active)shell.reportVisible({scope:target?sessionKey(target):'',screen:name,drawer:false,ordinaryChat,child,activeAgentCount:activeAgents.length,requests:view?.docs['bob.phone-tools']?.requests});
     try{
     if (name === 'Prompts' || name === 'Skills') {
-      const l = await request('library','GET',undefined,b);
+      const {value:l} = await readLibrary(b);
       if (!isVisible()||sectionOwner.current!==transport||sectionRequest.current!==ticket) return;
-      setLibrary(l);
-      setInstructions(l.instructions);
+      observeLibrary(l);
     }
     }catch(e){if(isVisible()&&sectionOwner.current===transport&&sectionRequest.current===ticket)setSectionError(String((e as Error).message??e));}
     finally{if(isVisible()&&sectionOwner.current===transport&&sectionRequest.current===ticket)setSectionLoading(false);}
@@ -833,7 +889,10 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   ][],[ordinaryChat,agentRegistry]);
   const activeAgents=agents.filter(([,agent])=>isActiveSubagent(agent.status));
   useEffect(()=>{if(active)onUpdatesVisible?.({scope:target?sessionKey(target):'',visible:screen==='Chat'&&!navigationOpen&&!actions&&!drawer&&!drawingEditor&&!btwOpen});},[active,command,scope,screen,navigationOpen,actions,drawer,drawingEditor,btwOpen]);
-  useEffect(()=>{if(active)shell.reportVisible({scope:target?sessionKey(target):'',screen,drawer,ordinaryChat,child,activeAgentCount:activeAgents.length,requests:view?.docs['bob.phone-tools']?.requests});},[active,command,scope,screen,drawer,ordinaryChat,child,activeAgents.length,view?.docs['bob.phone-tools']?.requests]);
+  // The workstation Notes plane is selected from this context. Publish in the
+  // layout phase so hiding navigation cannot paint the old Chat underneath
+  // before the root switches planes. Identity/revision guards stay in shell.
+  useLayoutEffect(()=>{if(active)shell.reportVisible({scope:target?sessionKey(target):'',screen,drawer,ordinaryChat,child,activeAgentCount:activeAgents.length,requests:view?.docs['bob.phone-tools']?.requests});},[active,command,scope,screen,drawer,ordinaryChat,child,activeAgents.length,view?.docs['bob.phone-tools']?.requests]);
   // Only the overview establishes parent/child membership. A live registry may
   // supply newer statuses, but must not reintroduce missing or wrong-parent IDs.
   // Draft/keyboard updates must not rebuild and re-sort the session tree.
@@ -927,6 +986,13 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
         // heights are measured. No launch-time trip through older history.
         inverted
         initialScrollIndex={0}
+        // Long Markdown replies and authenticated media are expensive native
+        // subtrees. Mount the latest viewport in small batches rather than the
+        // RN default ten permanently retained cells plus 21 viewports. This is
+        // virtualization only: all entries and reader-anchor behavior remain.
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={7}
         data={linked.entries}
         // Preserve an older-message reader's anchor. At latest, keep native
         // offset zero instead of preserving an old cell and scrolling it back.
@@ -973,7 +1039,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
           const delivery=item.id<0?(item.data as {localDelivery?:string}|undefined)?.localDelivery:item.kind==='bob.user'&&(item.data as {requestId?:string}|undefined)?.requestId?'Sent':undefined;
           const failed=item.id<0?outgoing.find(value=>value.localId===item.id&&value.rejected):undefined;
           const assistant=item.kind==='pi.assistant'||item.model?.some(m=>m.role==='assistant');
-          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<LearningActivity entry={item}/>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<ChatBubble style={imageGroup?{width:'100%'}:undefined} variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.bubbleMuted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.bubbleMuted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button disabled={!ordinaryChat} label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{if(!canWriteConversation())return;if(!failed.foregroundUnsent&&!failed.foregroundDeviceId)await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble>}
+          return <View testID={`history-entry-${item.id}`}>{memoryStatus!==undefined?<HindsightActivity entry={item}/>:learningStatus!==undefined?<LearningActivity entry={item}/>:item.kind==='bob.subagent-report'?<AgentReportActivity entry={item}>{body}</AgentReportActivity>:hasInlineChatContent(item)&&<MessageEntrance registry={messageEntrances} id={item.kind==='bob.user'?(item.data as {requestId?:string}|undefined)?.requestId:undefined}><ChatBubble style={imageGroup?{width:'100%'}:undefined} variant={user?'owner':artifact&&item.kind==='bob.artifact'?'upload':'activity'}>{user||assistant||artifact||peerAdmission||scheduleReceipt||scheduleAlert?body:<Disclosure label={attribution.label??item.kind.replace(/^(pi|bob)\./,'').replaceAll('-',' ')}>{body}</Disclosure>}{delivery&&<Text accessibilityLiveRegion={item.id<0?'polite':'none'} style={{color:colors.bubbleMuted,fontSize:11,lineHeight:18,minHeight:18,marginTop:6,alignSelf:'flex-end'}}>{delivery}</Text>}{failed&&<View style={{gap:4}}>{!!failed.lastError&&<Text style={{color:colors.bubbleMuted,fontSize:12,lineHeight:19}}>{failed.lastError}</Text>}<Button disabled={!ordinaryChat} label={failed.admitted||failed.uncertain?"Check delivery":"Retry sending"} onPress={()=>run(async()=>{if(!canWriteConversation())return;if(!failed.foregroundUnsent&&!failed.foregroundDeviceId)await backgroundOutbox?.enqueue(failed,true);await outbox.update(failed.id,{rejected:false,attempts:0,retryAt:undefined,retryAfterAt:undefined,lastError:undefined});await drainLatest.current(true,failed.backend.backendId);})}/></View>}</ChatBubble></MessageEntrance>}
           </View>;
         }}
       />
@@ -985,6 +1051,53 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   }
   // Root sections keep navigation in the same heading slot as Chat.
   const sectionMenu=active&&screen!=='Chat'?<ChatNavigation framedTrigger selected={menuDestination(screen,sectionTrail.current)} open={navigationOpen} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>:undefined;
+  const plusOpen=!!(active&&actions&&!actionsMore&&ordinaryChat&&screen==='Chat');
+  const plusTransition=useModalTransition(plusOpen,active&&screen==='Chat'&&ordinaryChat);
+  const plusOverlay=<MenuTheme><View testID="chat-actions-overlay" accessibilityViewIsModal pointerEvents={plusOpen?'auto':'none'} style={[StyleSheet.absoluteFill,{zIndex:40}]}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
+          <NativeAnimated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill,plusTransition.panel]}><PlusMenu bottom={Math.max(0,keyboardInset-insets.bottom)+12+composerRowHeight+6} maxHeight={Math.max(48,windowSize.height-Math.max(0,keyboardInset-insets.bottom)-12-composerRowHeight-6-insets.top-insets.bottom-12)} disabled={!chat||!ordinaryChat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/></NativeAnimated.View>
+        </View></MenuTheme>;
+  const plusHosted=useOverlayHost(plusOpen,plusTransition.mounted,plusOverlay,()=>{if(plusOpen)setActions(false);});
+  const moreOpen=active&&screen==='Chat'&&actions&&actionsMore&&ordinaryChat;
+  const moreTransition=useModalTransition(moreOpen,active&&screen==='Chat'&&ordinaryChat);
+  const moreOverlay=<MenuTheme><View pointerEvents={moreOpen?'auto':'none'} style={[menuStyles.actionOverlay,{backgroundColor:'transparent'}]}><NativeAnimated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'#00000088'},moreTransition.backdrop]}/>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss more chat actions" onPress={()=>setActions(false)}/>
+          <SafeAreaView edges={['bottom']} style={menuStyles.actionSheet}><NativeAnimated.View style={[{flexShrink:1},moreTransition.panel]}>
+            <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"/></View>
+            <SectionBody style={{flex:undefined,flexShrink:1,marginHorizontal:-20,marginBottom:-20}} footer={<SectionActions overlay leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/>}>{clearance=>
+            <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:16,paddingTop:16,paddingBottom:clearance+24}}>
+              <Text typography="ui" accessibilityLiveRegion="polite" style={[menuStyles.caption,{marginBottom:12}]}>{backend?workstationLabel(backend,backends):'Workstation'} · {busy?'Working':status}</Text>
+              <SettingsGroup title="Messages">
+                <Button label="BTW · side chat" disabled={!chat||!ordinaryChat} onPress={()=>{Keyboard.dismiss();setActions(false);setBtwIntent({scope,id:uuid(),text:''});setBtwOpen(true);}}/>
+                {busy&&<Button label="Send now to steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
+                <Button label="Send after this reply" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
+              </SettingsGroup>
+              <SettingsGroup title="Conversation">
+                <SettingsRow title="Conversation settings" icon={SettingsIcon} disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Conversation settings'));}}/>
+                <Disclosure label="Conversation history">
+                  <Button label={parentHistory.page?.next?'Load earlier messages':'Load / refresh stored history'} disabled={!chat||!parentHistory.ready||parentHistory.loading} onPress={()=>{setActions(false);run(parentHistory.load);}}/>
+                  <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
+                  {parentHistory.page&&<Text typography="ui" style={menuStyles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
+                </Disclosure>
+                {ordinaryChat&&agents.length>0&&<SettingsRow title="Agent history" icon={Users} onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
+                {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
+                  <Text typography="ui" style={menuStyles.caption}>Older surfaces without a link in the loaded history.</Text>
+                  {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
+                </Disclosure>}
+              </SettingsGroup>
+              <SettingsGroup title="App maintenance">
+                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);onUpdates?.();}}/>
+              </SettingsGroup>
+              {(busy||activeAgents.length>0)&&<SettingsGroup title="Stop running work">
+                <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
+                {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
+                <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
+              </SettingsGroup>}
+            </ScrollView>
+            }</SectionBody>
+          </NativeAnimated.View></SafeAreaView>
+        </View></MenuTheme>;
+  const moreHosted=useOverlayHost(moreOpen,moreTransition.mounted,moreOverlay,()=>{if(moreOpen)setActions(false);});
   if (backends.length === 0) return (
     <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle={colors.background==='#000000'?'light-content':'dark-content'} />}
@@ -1009,11 +1122,11 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
   );
   return (
     <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} style={styles.root}>
-      <View testID="rounded-app-surface" style={[styles.content,{backgroundColor:colors.background,overflow:'hidden',paddingBottom:Math.max(0,keyboardInset-insets.bottom)}]}>
+      <View testID="rounded-app-surface" style={[styles.content,{backgroundColor:colors.background,overflow:'hidden',paddingBottom:nativeKeyboardLayout&&screen==='Chat'?0:Math.max(0,keyboardInset-insets.bottom)}]}>
       {Platform.OS!=='android'&&<StatusBar hidden barStyle={colors.background==='#000000'?'light-content':'dark-content'} />}
       {/* Keep the same native list and viewport alive under section overlays.
           Unmounting here recreates FlatList at its initial offset on every return. */}
-      <>
+      <KeyboardLayout active={active&&foreground&&screen==='Chat'}>
           <PersistentMotionSurface active={screen==='Chat'} testID="chat-viewport" pointerEvents={screen==='Chat'&&!composerRecoveryVisible?'auto':'none'} accessibilityElementsHidden={screen!=='Chat'||composerRecoveryVisible} importantForAccessibility={screen==='Chat'&&!composerRecoveryVisible?'auto':'no-hide-descendants'} style={{flex:1,opacity:screen==='Chat'?1:0}}>
             {chat ? (
               transcript(view)
@@ -1034,13 +1147,13 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
             {parentFollow.showJump&&<Pressable accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={parentFollow.resume} style={{position:'absolute',bottom:composerHeight+12,left:'50%',marginLeft:-24,width:48,height:48,borderRadius:24,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,alignItems:'center',justifyContent:'center',zIndex:30,...shadows.floating}}><ArrowDown size={23} color={colors.foreground}/></Pressable>}
 
           </PersistentMotionSurface>
-          <Animated.View layout={composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'&&!composerRecoveryVisible?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'||composerRecoveryVisible} importantForAccessibility={screen==='Chat'&&!composerRecoveryVisible?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
+          <KeyboardComposer layout={nativeKeyboardLayout?undefined:composerTransition} testID="chat-composer" pointerEvents={screen==='Chat'&&!composerRecoveryVisible?'box-none':'none'} accessibilityElementsHidden={screen!=='Chat'||composerRecoveryVisible} importantForAccessibility={screen==='Chat'&&!composerRecoveryVisible?'auto':'no-hide-descendants'} onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composer,keyboardInset<=0&&styles.composerCompact,{opacity:screen==='Chat'?1:0,position:'absolute',left:0,right:0,bottom:Math.max(0,keyboardInset-insets.bottom),zIndex:20}]}>
             <View testID="composer-heading" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0&&!voiceGeometry.constrained)setComposerHeadingHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={[styles.composerHeading,voiceGeometry.constrained&&{height:48}]}>
               <View style={{flex:1,minWidth:0}}>{voiceGeometry.constrained&&composerNotices.length>0?<ComposerStatusIndicator notices={composerNotices} onOpen={openComposerRecovery}/>:<>{voiceGeometry.constrained&&(attachments.length>0||playbackState.phase==='stop-unconfirmed')&&<Text numberOfLines={1} accessibilityLabel={attachments.length?`${attachments.length} draft attachments retained; previews collapsed during voice`:'Audio recovery'} style={{fontSize:13,lineHeight:18,color:colors.muted}}>{attachments.length?`${attachments.length} attached`:'Audio recovery'}</Text>}{ordinaryChat&&!voiceGeometry.constrained&&<PebblePresence active={active&&screen==='Chat'&&!navigationOpen&&!actions&&!drawingEditor&&!(btwOpen&&btwIntent?.scope===scope)} scope={scope} activity={pebbleActivity}/>}{draftError&&<View style={{gap:4}}><Text accessibilityLiveRegion="polite" style={styles.caption}>{draftError==='load'?DRAFT_LOAD_WARNING:DRAFT_SAVE_WARNING}</Text><Button label={draftError==='load'?'Retry loading draft':'Retry saving draft'} onPress={retryComposerDraft}/></View>}{readOnly&&<Text testID="read-only-conversation" style={styles.caption}>{readOnlyMessage}</Text>}{!!chat&&!conversationProfile.known&&!!conversationProfile.error&&<Text style={styles.caption}>{conversationProfile.error}</Text>}</>}</View>
               <ChatNavigation showTrigger={active&&screen==='Chat'} open={active&&navigationOpen&&screen==='Chat'} onOpen={()=>{Keyboard.dismiss();setActions(false);setNavigationOpen(true);}} onClose={()=>setNavigationOpen(false)} onSelect={navigate} activeAgentCount={activeAgents.length} readOnly={!!chat&&!ordinaryChat}/>
             </View>
             <View testID="composer-row" onLayout={event=>{const height=event.nativeEvent.layout.height;if(Number.isFinite(height)&&height>0)setComposerRowHeight(previous=>Math.abs(previous-height)>.5?height:previous);}} style={styles.composerRow}>
-            <Animated.View layout={composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
+            <KeyboardCapsule layout={nativeKeyboardLayout?undefined:composerTransition} style={[styles.composerCapsule,keyboardInset<=0&&styles.composerCapsuleCompact]}>
               {attachments.length>0&&<ScrollView testID="draft-attachment-previews" accessibilityElementsHidden={boundedComposer&&voiceGeometry.attachmentHeight===0} importantForAccessibility={boundedComposer&&voiceGeometry.attachmentHeight===0?'no-hide-descendants':'auto'} style={{maxHeight:boundedComposer?voiceGeometry.attachmentHeight:136,overflow:'hidden'}} keyboardShouldPersistTaps="handled"><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:10,padding:12}} style={{maxHeight:136}}>
                 {attachments.map(file=><AttachmentThumbnail key={file.id} name={file.name} mime={file.mime} source={file.drawingData?{uri:file.drawingData}:{uri:file.uri}} onOpen={file.drawingData&&ordinaryChat?()=>{setDrawingEditor(true);}:undefined} disabled={!ordinaryChat||!!pending} onRemove={()=>{
                   const current=scope;
@@ -1050,16 +1163,16 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
               </ScrollView></ScrollView>}
               <SpeechRecoveryControl maxHeight={audioComposer?voiceGeometry.recoveryMax:180}/>
               <VoiceChatPanel state={voiceChat.state} session={voiceChat.session} maxHeight={voiceGeometry.voiceMax}/>
-              <DraftInput key="draft-editor" scope={scope} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={160}
+              <DraftInput key="draft-editor" scope={scope} active={active&&screen==='Chat'} animateLayout={!nativeKeyboardLayout} editable={active&&composerReady&&ordinaryChat} onExpandedChange={setDraftExpanded} onFocusChange={setDraftFocused} value={draft} onChangeText={setDraft} compact={keyboardInset<=0} trailingWidth={160}
                 maxHeight={boundedComposer?voiceGeometry.draftMax:Math.max(48,Math.min(156,windowSize.height-keyboardInset-insets.top-insets.bottom-48-48-40-(attachments.length?136:0)))}
                 leading={<IconButton icon={Plus} label="Chat actions" disabled={!composerReady||!ordinaryChat} onPress={()=>{if(!canWriteConversation())return;setActionsMore(false);setActions(true);}}/>}
                 trailing={<><VoiceInputButton disabled={!composerReady||!ordinaryChat||!!pending} active={voiceActive} scope={voiceScope} onTranscript={acceptTranscript} onBegin={()=>voiceChat.session.cancel(true)} onExternalChange={setDictationExternal}/><VoiceChatButton state={voiceChat.state} session={voiceChat.session} disabled={!voiceOwnerActive||!foreground||!sendReady||!!pending}/><IconButton icon={showStop?Square:ArrowUp} label={showStop?'Stop Bob':'Send message'} primary disabled={!composerReady||!ordinaryChat||(!showStop&&(!sendReady||!hasDraft||!!pending))} onPress={()=>run(()=>showStop?stop(false):submit('steer'))}/></>}
               />
-            </Animated.View>
+            </KeyboardCapsule>
 
             </View>
-          </Animated.View>
-      </>
+          </KeyboardComposer>
+      </KeyboardLayout>
       {backend&&chat&&ordinaryChat&&<BtwSheet key={'btw:'+scope} visible={btwOpen&&btwIntent?.scope===scope&&screen==='Chat'} active={active} conversationId={chat} initial={btwIntent?.scope===scope?btwIntent:undefined} request={(path,method,body)=>request(path,method,body,backend)} onClose={()=>setBtwOpen(false)}/>}
       <DrawingEditor visible={active&&drawingEditor&&screen==='Chat'} onCancel={()=>setDrawingEditor(false)} onAdd={addDrawing}/>
       {skillPickerVisible&&<SkillPicker key={scope} scope={scope} query={slashQuery!}
@@ -1069,7 +1182,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
         onDismiss={()=>setSlashDismissed(true)}
         onSelect={entry=>{setDraft(pickerRequest(entry));setSlashDismissed(true);}}
       />}
-      {<AgentsScreen menu={screen==='Agents'?sectionMenu:undefined} key={'agents:'+String(backend?.backendId)} visible={active&&screen==='Agents'&&!!backend} bottomInset={Math.max(0,keyboardInset-insets.bottom)} workstation={backend?workstationLabel(backend,backends):undefined} sessions={agentSessions} currentSessionId={chat} selected={agentTarget} onSelect={(parentId,id)=>{const session=agentSessions.find(item=>item.conversationId===parentId),agent=session?.agents.find(item=>item.conversationId===id);if(session&&agent){Keyboard.dismiss();setAgentTarget({parentId,agent,title:session.title});setChild(id);}}} onOpenSession={id=>{Keyboard.dismiss();setChat(id);showChat();}} onBack={()=>{setChild(undefined);setAgentTarget(undefined);}} history={agentHistory} onHistoryChange={setAgentHistory} onNew={()=>run(newChat)} newBusy={!!backend&&creatingIds.has(backend.backendId)} filter={sessionFilter} onFilterChange={setSessionFilter} onSessionAction={async(id,action,title)=>{await sessionAction(id,action,title);agentOverview.retry();}} onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}} status={childStatus} loading={agentOverview.loading} error={agentOverview.error} onRetry={agentOverview.retry} hasMore={!!agentOverview.next} onLoadMore={agentOverview.loadMore}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
+      {<AgentsScreen scopeKey={backend?.backendId} menu={screen==='Agents'?sectionMenu:undefined} key={'agents:'+String(backend?.backendId)} visible={active&&screen==='Agents'&&!!backend} bottomInset={Math.max(0,keyboardInset-insets.bottom)} workstation={backend?workstationLabel(backend,backends):undefined} sessions={agentSessions} currentSessionId={chat} selected={agentTarget} onSelect={(parentId,id)=>{const session=agentSessions.find(item=>item.conversationId===parentId),agent=session?.agents.find(item=>item.conversationId===id);if(session&&agent){Keyboard.dismiss();setAgentTarget({parentId,agent,title:session.title});setChild(id);}}} onOpenSession={id=>{Keyboard.dismiss();setChat(id);showChat();}} onBack={()=>{setChild(undefined);setAgentTarget(undefined);}} history={agentHistory} onHistoryChange={setAgentHistory} onNew={()=>run(newChat)} newBusy={!!backend&&creatingIds.has(backend.backendId)} filter={sessionFilter} onFilterChange={setSessionFilter} onSessionAction={async(id,action,title)=>{await sessionAction(id,action,title);agentOverview.retry();}} onSchedules={()=>{Keyboard.dismiss();run(()=>openSection('Schedules'));}} status={childStatus} loading={agentOverview.loading} error={agentOverview.error} onRetry={agentOverview.retry} hasMore={!!agentOverview.next} onLoadMore={agentOverview.loadMore}>{clearance=>displayedChild&&transcript(childView,true,clearance)}</AgentsScreen>}
       <TerminalScreen menuOpen={navigationOpen} menu={screen==='Terminal'?sectionMenu:undefined} key={'terminal:'+scope} visible={active&&screen==='Terminal'} bottomInset={Math.max(0,keyboardInset-insets.bottom)} target={backend&&chat?{backendId:backend.backendId,conversationId:chat,title:listedChat?.meta?.title??'Current conversation'}:undefined} workstation={backend?workstationLabel(backend,backends):undefined} allowed={ordinaryChat&&!listedChat?.meta?.trashed&&!listedChat?.owner} onBack={backSection} request={(path,method,body,signal)=>request(path,method,body,backend,signal)}/>
       {composerRecoveryVisible&&<ComposerStatusRecovery notices={composerNotices} top={insets.top} bottom={Math.max(0,keyboardInset-insets.bottom)} onClose={()=>{if(composerRecoveryOwner.current===composerRecovery)closeComposerRecovery();}} retry={draftError?{label:draftError==='load'?'Retry loading draft':'Retry saving draft',onPress:()=>{
         if(!recoveryVisible.current||composerRecoveryOwner.current!==composerRecovery||composerRecovery?.visit!==draftVisit.current||!isVisible())return;
@@ -1092,6 +1205,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
             <TextInput typography="ui" accessibilityLabel="New todo" style={menuStyles.input} value={todoText} onChangeText={setTodoText} placeholder="Next task" placeholderTextColor={menuColors.muted} />
             <Button menu label="Add todo" disabled={!chat || !todoText.trim()} onPress={() => run(async () => { await request(`chats/${chat}/todos`, 'PUT', { items: [...(view?.docs['bob.todos']?.items ?? []), { text: todoText, done: false }] }); setTodoText(''); })} />
           </View>}
+          {(screen==='Prompts'||screen==='Skills')&&!!libraryOps.message&&<Text typography="ui" accessibilityLiveRegion="polite" style={menuStyles.caption}>{libraryOps.message}</Text>}
           {screen === 'Prompts' && !sectionError && (
             <>
               <LibraryCard title="Default instructions" icon={FileText} description="Defaults for this workstation. Conversation overrides stay separate.">
@@ -1105,36 +1219,27 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
               />
               <Button menu
                 label="Save instructions"
-                onPress={() =>
-                  run(async () => {
-                    await request('library', 'PUT', {
-                      instructions,
-                      templates: library.templates,
-                    });
-                    setLibrary(await request('library'));
-                  })
-                }
+                disabled={libraryOps.blocked||sectionLoading}
+                onPress={()=>run(()=>changeLibrary({field:'instructions',expected:libraryDrafts.instructionBase??library.instructions,value:instructions},()=>libraryDrafts.acknowledgeInstructions(instructions)))}
               />
+              {libraryDrafts.instructionsDirty&&<Button menu label="Load saved instructions" disabled={libraryOps.pending||sectionLoading} onPress={()=>{const ticket=sectionRequest.current;Alert.alert('Replace this editor draft?','Load the last read saved instructions into this editor? Your unsaved instructions will be replaced.',[{text:'Cancel',style:'cancel'},{text:'Load saved',onPress:()=>{if(isVisible()&&sectionRequest.current===ticket)libraryDrafts.replaceInstructions(instructions,library.instructions);}}]);}}/>}
               </LibraryCard>
               <LibraryCard title="Message templates" icon={Library} description="Reusable messages you can edit before sending.">
               <TextInput typography="ui" accessibilityLabel="Template name" style={menuStyles.input} value={templateName} onChangeText={setTemplateName} placeholder="Template name" placeholderTextColor={menuColors.muted} />
               <TextInput typography="ui" accessibilityLabel="Template message" style={menuStyles.input} multiline value={templateText} onChangeText={setTemplateText} placeholder="Reusable message; separate from system instructions" placeholderTextColor={menuColors.muted} />
-              <Button menu label="Save message template" onPress={() => run(async () => {
-                if (!templateName.trim()) throw Error('Name the template');
-                await request('library', 'PUT', { instructions: library.instructions, templates: { ...library.templates, [templateName]: templateText } });
-                setLibrary(await request('library'));
-              })} />
+              <Button menu label="Save message template" disabled={libraryOps.blocked||sectionLoading} onPress={()=>run(async()=>{await saveTemplate();})} />
               {Object.entries(library?.templates ?? {}).map(([name, text]) => (
                 <View key={name} style={menuStyles.templateRow}>
-                  <Button menu label={`Use template ${name}`} onPress={() => { setDraft(String(text)); showChat(); }} />
-                  <Button menu label={`Edit template ${name}`} onPress={() => { setTemplateName(name); setTemplateText(String(text)); }} />
-                  <Button menu label={`Delete template ${name}`} onPress={() => run(async () => { const templates = { ...library.templates }; delete templates[name]; await request('library', 'PUT', { instructions: library.instructions, templates }); setLibrary(await request('library')); })} />
+                  <Button menu label={`Use template ${name}`} onPress={() => { setDraft(previous => previous ? `${previous}\n\n${String(text)}` : String(text)); showChat(); }} />
+                  <Button menu label={`Edit template ${name}`} onPress={() => { libraryDrafts.editTemplate(name,String(text)); }} />
+                  <Button menu label={`Delete template ${name}`} disabled={libraryOps.blocked||sectionLoading} onPress={()=>deleteTemplate(name,String(text))} />
                 </View>
               ))}
               </LibraryCard>
             </>
           )}
           {screen === 'Tools' && backend && <ToolsScreen
+            presentation={toolsPresentation}
             backendId={backend.backendId}
             workstationName={workstationLabel(backend,backends)}
             conversationId={chat}
@@ -1151,7 +1256,8 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
           />}
           {screen === 'Skills' && !sectionError && (
             <>
-              <View testID="skill-library-list" style={skillEditing?{display:'none'}:undefined}><SkillLibraryList skills={library?.skills??{}} selected={skillName} onSelect={(name,value)=>{skillEditorEpoch.current++;setSkillName(name);setSkillText(value.markdown);setSkillDescription(value.description??'');setSkillEnabled(value.enabled);setSkillEditing(true);}} onNew={()=>{skillEditorEpoch.current++;setSkillName('');setSkillText('');setSkillDescription('');setSkillEnabled(true);setSkillEditing(true);}}/></View>
+              <View testID="skill-library-list" style={skillEditing?{display:'none'}:undefined}><SkillLibraryList skills={library?.skills??{}} selected={skillName} onSelect={(name,value)=>{skillEditorEpoch.current++;libraryDrafts.editSkill(name,{...value,description:value.description??''});}} onNew={()=>{skillEditorEpoch.current++;libraryDrafts.newSkill();}}/></View>
+              {!skillEditing&&(skillName||skillText)&&<Button menu label="Continue editing skill" onPress={()=>setSkillEditing(true)}/>}
               {skillEditing&&<>
               <LibraryCard title={skillName?'Edit skill':'New skill'} icon={BookOpen} description="Reusable instructions for Bob. Changes apply after saving.">
               <Text typography="ui" style={menuStyles.fieldLabel}>Name</Text>
@@ -1160,7 +1266,7 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
                 style={menuStyles.input}
                 accessibilityLabel="Skill name"
                 value={skillName}
-                onChangeText={setSkillName}
+                onChangeText={value=>{skillEditorEpoch.current++;setSkillName(value);}}
                 placeholder="skill-name"
                 placeholderTextColor={menuColors.muted}
               />
@@ -1170,35 +1276,26 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
                 accessibilityLabel="Skill Markdown"
                 textAlignVertical="top"
                 value={skillText}
-                onChangeText={setSkillText}
+                onChangeText={value=>{skillEditorEpoch.current++;setSkillText(value);}}
                 multiline
                 placeholder="Markdown"
                 placeholderTextColor={menuColors.muted}
               />
-              <TextInput typography="ui" accessibilityLabel="Skill description" style={menuStyles.input} value={skillDescription} onChangeText={setSkillDescription} placeholder="Skill description" placeholderTextColor={menuColors.muted} />
-              <Button menu label={skillEnabled ? 'Skill enabled ✓' : 'Skill disabled'} onPress={() => setSkillEnabled(!skillEnabled)} />
+              <TextInput typography="ui" accessibilityLabel="Skill description" style={menuStyles.input} value={skillDescription} onChangeText={value=>{skillEditorEpoch.current++;setSkillDescription(value);}} placeholder="Skill description" placeholderTextColor={menuColors.muted} />
+              <Button menu label={skillEnabled ? 'Skill enabled ✓' : 'Skill disabled'} onPress={() => {skillEditorEpoch.current++;setSkillEnabled(!skillEnabled);}} />
               <Button menu
                 label="Save skill"
-                onPress={() =>
-                  run(async () => {
-                    await request('skills', 'PUT', {
-                      name: skillName,
-                      description: skillDescription || skillName,
-                      markdown: skillText,
-                      enabled: skillEnabled,
-                    });
-                    setLibrary(await request('library'));
-                  })
-                }
+                disabled={libraryOps.blocked||sectionLoading}
+                onPress={()=>run(async()=>{await saveLibrarySkill();})}
               />
-              <Button menu label="Import Markdown skill (review before saving)" onPress={() => {const editor=skillEditorEpoch.current;run(async()=>{const markdown=await NativeModules.BobFiles.importMarkdown();if(skillEditorEpoch.current===editor)setSkillText(markdown);});}} />
-              <Button menu label="Archive selected skill" disabled={!skillName} onPress={() => {const editor=skillEditorEpoch.current,name=skillName;Alert.alert('Archive this skill?', 'It will no longer appear in the active skill library. Bob can restore archived skills later.', [{text:'Cancel',style:'cancel'},{text:'Archive skill',style:'destructive',onPress:()=>run(async () => { await request(`skills/${encodeURIComponent(name)}`, 'DELETE'); const updated=await request('library');setLibrary(updated);if(skillEditorEpoch.current!==editor)return;skillEditorEpoch.current++;setSkillName('');setSkillText('');setSkillDescription('');setSkillEditing(false); })}]);}} />
+              <Button menu label="Import Markdown skill (review before saving)" onPress={() => {const editor=skillEditorEpoch.current;run(async()=>{const markdown=await NativeModules.BobFiles.importMarkdown();if(isVisible()&&skillEditorEpoch.current===editor)setSkillText(markdown);});}} />
+              <Button menu label="Archive selected skill" disabled={!skillName||libraryOps.blocked||sectionLoading||libraryDrafts.skillBase?.name!==skillName} onPress={() => {const editor=skillEditorEpoch.current,name=skillName,base=libraryDrafts.skillBase;if(!base||libraryOps.blocked)return;Alert.alert('Archive this skill?', 'It will no longer appear in the active skill library. Your editor text will be retained. Bob can restore archived skills later.', [{text:'Cancel',style:'cancel'},{text:'Archive skill',style:'destructive',onPress:()=>{if(isVisible()&&skillEditorEpoch.current===editor)run(()=>changeLibrary({field:'skill',name,expected:base.value,value:null},()=>{if(skillEditorEpoch.current===editor)libraryDrafts.acknowledgeArchive(name);}));}}]);}} />
               </LibraryCard>
               </>}
             </>
           )}
           {screen === 'Settings' && <>
-            {networkErrors.map((error,index)=><Text typography="ui" key={index} accessibilityLiveRegion="polite" style={menuStyles.caption}>{error}</Text>)}
+            {networkErrors.length>0&&<View accessibilityLiveRegion="polite" style={{gap:4}}><Text typography="ui" style={menuStyles.caption}>Workstation links (not necessarily the selected workstation):</Text>{networkErrors.map((error,index)=><Text typography="ui" key={index} style={menuStyles.caption}>{error}</Text>)}</View>}
             {readOnly&&<Text typography="ui" style={menuStyles.caption}>{readOnlyMessage}</Text>}
             <SettingsHome readOnly={readOnly} onOpen={name=>run(()=>openSection(name))}/>
           </>}
@@ -1305,50 +1402,9 @@ function SessionMain({target,active,command,destination,shell,menuReads,updatesO
           }</SectionBody>
         </MotionSurface></MenuTheme>
       )}
-      {actions&&!actionsMore&&ordinaryChat&&screen==='Chat'&&<View testID="chat-actions-overlay" accessibilityViewIsModal style={[StyleSheet.absoluteFill,{zIndex:40}]}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss chat actions" onPress={()=>setActions(false)}/>
-          <PlusMenu bottom={Math.max(0,keyboardInset-insets.bottom)+12+composerRowHeight+6} maxHeight={Math.max(48,windowSize.height-Math.max(0,keyboardInset-insets.bottom)-12-composerRowHeight-6-insets.top-insets.bottom-12)} disabled={!chat||!ordinaryChat||!!pending} onCamera={()=>run(()=>openAttachments('camera'))} onGallery={()=>run(()=>openAttachments('gallery'))} onFiles={()=>run(()=>openAttachments('files'))} onDrawing={()=>{setActions(false);Keyboard.dismiss();setDrawingEditor(true);}} onModel={()=>{setActions(false);Keyboard.dismiss();run(openModelPicker);}} onMore={()=>{Keyboard.dismiss();setActionsMore(true);}}/>
-        </View>}
-      <MenuTheme><Modal visible={active&&actions&&actionsMore&&ordinaryChat} transparent animationType="none" onRequestClose={()=>setActions(false)}>
-        <View style={menuStyles.actionOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Dismiss more chat actions" onPress={()=>setActions(false)}/>
-          <SafeAreaView edges={['bottom']} style={menuStyles.actionSheet}><MotionSurface style={{flexShrink:1}}>
-            <View style={{marginHorizontal:-20,marginTop:-20}}><SectionHeading title="More actions"/></View>
-            <SectionBody style={{flex:undefined,flexShrink:1,marginHorizontal:-20,marginBottom:-20}} footer={<SectionActions overlay leading={<RoundAction icon={X} label="Close actions" onPress={()=>setActions(false)}/>}/>}>{clearance=>
-            <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:16,paddingTop:16,paddingBottom:clearance+24}}>
-              <Text typography="ui" accessibilityLiveRegion="polite" style={[menuStyles.caption,{marginBottom:12}]}>{backend?workstationLabel(backend,backends):'Workstation'} · {busy?'Working':status}</Text>
-              <SettingsGroup title="Messages">
-                <Button label="BTW · side chat" disabled={!chat||!ordinaryChat} onPress={()=>{Keyboard.dismiss();setActions(false);setBtwIntent({scope,id:uuid(),text:''});setBtwOpen(true);}}/>
-                {busy&&<Button label="Send now to steer Bob" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('steer'));}}/>}
-                <Button label="Send after this reply" disabled={!chat||!hasDraft||!!pending} onPress={()=>{setActions(false);run(()=>submit('followUp'));}}/>
-              </SettingsGroup>
-              <SettingsGroup title="Conversation">
-                <SettingsRow title="Conversation settings" icon={SettingsIcon} disabled={!chat} onPress={()=>{setActions(false);run(()=>openSection('Conversation settings'));}}/>
-                <Disclosure label="Conversation history">
-                  <Button label={parentHistory.page?.next?'Load earlier messages':'Load / refresh stored history'} disabled={!chat||!parentHistory.ready||parentHistory.loading} onPress={()=>{setActions(false);run(parentHistory.load);}}/>
-                  <Button label="Jump to oldest loaded message" disabled={!chat} onPress={()=>{setActions(false);parentFollow.oldest();}}/>
-                  {parentHistory.page&&<Text typography="ui" style={menuStyles.caption}>{parentHistory.page.items.length} stored entries loaded · {parentHistory.page.next?'more available':'end of last scan'}. Stored history is not unlimited model context.</Text>}
-                </Disclosure>
-                {ordinaryChat&&agents.length>0&&<SettingsRow title="Agent history" icon={Users} onPress={()=>{setActions(false);setAgentHistory(true);navigate('Agents');}}/>}
-                {unlinkedSurfaces.length>0&&<Disclosure label="Other interactive surfaces">
-                  <Text typography="ui" style={menuStyles.caption}>Older surfaces without a link in the loaded history.</Text>
-                  {unlinkedSurfaces.map(item=><Button key={item.value.id} label={`Open ${item.value.title}`} onPress={()=>{setActions(false);run(()=>openSurface(item));}}/>)}
-                </Disclosure>}
-              </SettingsGroup>
-              <SettingsGroup title="App maintenance">
-                <SettingsRow title="Build & install" icon={Download} disabled={!backend} onPress={()=>{setActions(false);onUpdates?.();}}/>
-              </SettingsGroup>
-              {(busy||activeAgents.length>0)&&<SettingsGroup title="Stop running work">
-                <Text typography="ui" style={[menuStyles.caption,{paddingVertical:8}]}>Stopping does not undo completed actions.</Text>
-                {busy&&<Button label="Stop Bob" onPress={()=>{setActions(false);run(()=>stop(false));}}/>}
-                <Button label="Stop Bob and subagents" onPress={()=>{setActions(false);run(()=>stop(true));}}/>
-              </SettingsGroup>}
-            </ScrollView>
-            }</SectionBody>
-          </MotionSurface></SafeAreaView>
-        </View>
-      </Modal></MenuTheme>
-      {active&&attachmentPicker&&attachmentPicker.scope===scope&&<AttachmentPicker key={attachmentPicker.scope} initialTab={attachmentPicker.tab} limit={attachmentPicker.limit} onClose={()=>setAttachmentPicker(undefined)} onAdd={files=>{
+      {!plusHosted&&plusOpen&&plusOverlay}
+      {!moreHosted&&<Modal visible={moreOpen} transparent animationType="none" onRequestClose={()=>setActions(false)}>{moreOverlay}</Modal>}
+      {active&&attachmentPicker&&attachmentPicker.scope===scope&&<AttachmentPicker key={attachmentPicker.scope} scopeKey={attachmentPicker.scope} initialTab={attachmentPicker.tab} limit={attachmentPicker.limit} onClose={()=>setAttachmentPicker(undefined)} onAdd={files=>{
         const current=attachmentPicker.scope;
         setDraftAttachments(previous=>({...previous,[current]:[...(previous[current]??[]),...files]}));setAttachmentPicker(undefined);
       }}/>}
@@ -1387,14 +1443,17 @@ function WorkstationNotes({backend,shell,active}:{backend:Backend;shell:SessionS
   useEffect(()=>{if(!active)setMenuOpen(false);},[active]);
   const navigate=(destination:BottomDestination)=>{if(visible.current&&target){Keyboard.dismiss();setMenuOpen(false);shell.selectSession(target,destination);}};
   useBackNavigation(()=>{if(menuOpen){setMenuOpen(false);return true;}if(Keyboard.isVisible())return false;navigate('Chat');return true;},active);
-  return <SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} testID={`workspace-notes:${backend.backendId}`} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?2:0}]}>
+  return <AppMotionProvider active={active}><SafeAreaView edges={Platform.OS==='android'?['left','right','bottom']:undefined} testID={`workspace-notes:${backend.backendId}`} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?2:0}]}>
     <MenuTheme><View style={[styles.content,{backgroundColor:menuTheme.colors.background}]}><NotesScreen backendId={backend.backendId} request={(path,method,body)=>requestBackend(path,method,body,backend)} visible={active} topInset={0}
       menu={<ChatNavigation framedTrigger selected="Notes" open={active&&menuOpen} onOpen={()=>{Keyboard.dismiss();setMenuOpen(true);}} onClose={()=>setMenuOpen(false)} onSelect={navigate} activeAgentCount={shell.context?.activeAgentCount??0} readOnly={!!target?.chat&&!shell.context?.ordinaryChat}/>}/></View></MenuTheme>
-  </SafeAreaView>;
+  </SafeAreaView></AppMotionProvider>;
 }
-function RetainedSessionApp(){
-  const shell=useSessionShell(),{selection}=shell;
+function RetainedSessionApp({shell}:{shell:SessionShell}){
+  const {selection}=shell;
+  useOverlayScope(JSON.stringify([selection.deck.active,shell.current?.backendId,shell.context?.screen]));
   const [menuReads]=useState(()=>new MenuReadCache());
+  const editorReported=useRef(false);
+  const onEditorReady=useCallback(()=>{if(!editorReported.current){editorReported.current=true;recordAppEvent('startup.editor-ready');}},[]);
   const backend=shell.backends.find(item=>item.backendId===shell.current?.backendId);
   const build=useBuildStatus(backend);
   const keyboardInset=useKeyboardInset();
@@ -1415,24 +1474,29 @@ function RetainedSessionApp(){
   },[updateScope,updateVisit]);
   const chatUpdatesVisible=updateSurface?.scope===selection.deck.active&&updateSurface.visible;
   const openUpdates=()=>{if(backend)setManagement(updateScope);};
-  if(!shell.ready)return <View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator accessibilityLabel="Opening Bob"/></View>;
+  if(!shell.ready)return <StartupRecovery error={shell.startupError} onRetry={shell.retryStartup}/>;
   if(!shell.backends.length)return <SessionMain menuReads={menuReads} active command={0} destination="Chat" shell={shell}/>;
   return <View style={{flex:1}}>{selection.deck.targets.map(target=>{
     const key=sessionKey(target),active=key===selection.deck.active;
     // Keep identical native viewport geometry while hidden. Visibility belongs
     // to a non-animated host, never to a native-driver opacity animation.
     return <View key={key} testID={`session-host:${key}`} collapsable={false} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'} style={[StyleSheet.absoluteFill,{opacity:active?1:0,zIndex:active?1:0}]}>
-      <AppMotionProvider active={active}><SessionMain updatesOpen={updatesOpen} menuReads={menuReads} target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
+      <AppMotionProvider active={active}><SessionMain onEditorReady={onEditorReady} updatesOpen={updatesOpen} menuReads={menuReads} target={target} active={active} command={active?selection.revision:0} destination={selection.destination} shell={shell} onUpdates={active?openUpdates:undefined} onUpdatesVisible={setUpdateSurface}/></AppMotionProvider>
     </View>;
   })}{shell.backends.map(backend=><WorkstationNotes key={backend.backendId} backend={backend} shell={shell} active={shell.current?.backendId===backend.backendId&&shell.context?.screen==='Notes'}/>)}
     {backend&&<BuildCard onVisibilityChange={onUpdateVisibility} backend={backend} state={build.state} error={build.error} focus={manage} active={!!chatUpdatesVisible||manage} keyboardInset={keyboardInset} onDismiss={()=>setManagement(undefined)} onRefresh={build.refresh}/>}
   </View>;
 }
+/** Read independent startup state concurrently. ThemeProvider still owns the
+ * first visible frame; a slow appearance read must not postpone saved-session
+ * hydration by another complete storage round trip. Keep both under recovery. */
+function AppRuntime(){
+  const shell=useSessionShell();
+  return <ThemeProvider><AppMotionProvider active><OverlayHost><RetainedSessionApp shell={shell}/></OverlayHost></AppMotionProvider></ThemeProvider>;
+}
 export default function App() {
   return (
-    <DiagnosticBoundary><SafeAreaProvider><ThemeProvider>
-      <AppMotionProvider active><RetainedSessionApp /></AppMotionProvider>
-    </ThemeProvider></SafeAreaProvider></DiagnosticBoundary>
+    <DiagnosticBoundary><SafeAreaProvider><AppRuntime/></SafeAreaProvider></DiagnosticBoundary>
   );
 }
 const stylesTheme = themed(({colors,menuChrome,shadows})=>StyleSheet.create({

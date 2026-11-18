@@ -1,11 +1,13 @@
-import {withMenuTheme,ChatTheme,useChatTheme} from '../menu-theme';
+import {useModalTransition} from './modal-transition';
+import {useOverlayHost} from './overlay-host';
+import {MenuTheme,withMenuTheme,ChatTheme,useChatTheme} from '../menu-theme';
 import {selectionHaptic} from '../haptics';
 import {PersistentMotionSurface} from './motion-surface';
 import {PageSearch} from './page-search';
 import {EmptyState} from './empty-state';
 import {menuButtonChrome} from '../menu-button-style';
-import React,{useEffect,useMemo,useState} from 'react';
-import {View,FlatList,Pressable,StyleSheet,ActivityIndicator,Keyboard,Modal,ScrollView} from 'react-native';
+import React,{useEffect,useMemo,useRef,useState} from 'react';
+import {Animated,View,FlatList,Pressable,StyleSheet,ActivityIndicator,Keyboard,Modal,ScrollView} from 'react-native';
 import {ChevronDown,ArrowLeft,Pin,Plus,Ellipsis,Clock3,Check,MessagesSquare} from 'lucide-react-native';
 import {Text} from './app-text';
 import {themed,useTheme,useThemedValue} from '../theme';
@@ -19,11 +21,12 @@ import type {AgentSession,AgentStatus,OverviewAgent,SessionFilter} from '../use-
 type TreeRow={kind:'session';session:AgentSession;first:boolean}|{kind:'agent';session:AgentSession;agent:OverviewAgent;last:boolean};
 const active=(status:AgentStatus)=>status==='working'||status==='stopping';
 const label=(status:AgentStatus)=>({working:'Running',stopping:'Stopping',idle:'Idle',unknown:'Status unavailable'}[status]);
-type Props={menu?:React.ReactNode;sessions:AgentSession[];currentSessionId?:number;selected?:{parentId:number;agent:OverviewAgent;title:string};onSelect:(parentId:number,id:number)=>void;onOpenSession:(id:number)=>void;onBack:()=>void;status:string;children:React.ReactNode|((clearance:number)=>React.ReactNode);visible?:boolean;bottomInset?:number;history?:boolean;onHistoryChange:(value:boolean)=>void;workstation?:string;loading?:boolean;error?:string;onRetry?:()=>void;hasMore?:boolean;onLoadMore?:()=>void;onNew?:()=>void;newBusy?:boolean;onSchedules?:()=>void;filter?:SessionFilter;onFilterChange?:(filter:SessionFilter)=>void;onSessionAction?:(id:string,action:SessionAction,title?:string)=>Promise<void>};
+type Props={scopeKey?:string;menu?:React.ReactNode;sessions:AgentSession[];currentSessionId?:number;selected?:{parentId:number;agent:OverviewAgent;title:string};onSelect:(parentId:number,id:number)=>void;onOpenSession:(id:number)=>void;onBack:()=>void;status:string;children:React.ReactNode|((clearance:number)=>React.ReactNode);visible?:boolean;bottomInset?:number;history?:boolean;onHistoryChange:(value:boolean)=>void;workstation?:string;loading?:boolean;error?:string;onRetry?:()=>void;hasMore?:boolean;onLoadMore?:()=>void;onNew?:()=>void;newBusy?:boolean;onSchedules?:()=>void;filter?:SessionFilter;onFilterChange?:(filter:SessionFilter)=>void;onSessionAction?:(id:string,action:SessionAction,title?:string)=>Promise<void>};
 /** Conversation-first presentation only. Membership/status remain server-authoritative. */
-function AgentsScreenContent({menu,sessions,currentSessionId,selected,onSelect,onOpenSession,onBack,status,children,visible=true,bottomInset=0,loading=false,error,onRetry,hasMore,onLoadMore,onNew,newBusy=false,onSchedules,filter='all',onFilterChange,onSessionAction}:Props){
+function AgentsScreenContent({scopeKey='standalone',menu,sessions,currentSessionId,selected,onSelect,onOpenSession,onBack,status,children,visible=true,bottomInset=0,loading=false,error,onRetry,hasMore,onLoadMore,onNew,newBusy=false,onSchedules,filter='all',onFilterChange,onSessionAction}:Props){
  const s=useThemedValue(sTheme),{colors}=useTheme(),chatTheme=useChatTheme();
  const [actionSession,setActionSession]=useState<AgentSession>(),[filterOpen,setFilterOpen]=useState(false);
+ const filterTransition=useModalTransition(visible&&filterOpen&&!!onFilterChange,visible);
  useEffect(()=>{if(!visible){setActionSession(undefined);setFilterOpen(false);}if(selected||!onFilterChange)setFilterOpen(false);},[visible,selected,onFilterChange]);
  const [query,setQuery]=useState('');
  const rows=useMemo(()=>{
@@ -41,6 +44,14 @@ function AgentsScreenContent({menu,sessions,currentSessionId,selected,onSelect,o
  }),[rows]);
  const state=(value:AgentStatus)=><View accessibilityLabel={`Session status: ${label(value)}`} style={s.state}><View accessible={false} style={[s.dot,{backgroundColor:active(value)?colors.accent:colors.muted}]}/><Text typography="ui" style={s.statusText}>{label(value)}</Text></View>;
  const action=(name:string,text:string,onPress:()=>void,disabled=false,primary=false)=><Pressable accessibilityRole="button" accessibilityLabel={name} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={[s.action,primary&&s.primary,disabled&&{opacity:.45}]}>{primary&&<Plus size={19} color={colors.foreground}/>}<Text typography="ui" style={[s.actionText,primary&&{fontWeight:'600'}]}>{text}</Text></Pressable>;
+ const filterOverlay=onFilterChange?<MenuTheme><SafeAreaView pointerEvents={filterOpen?'auto':'none'} accessibilityElementsHidden={!filterOpen} importantForAccessibility={filterOpen?'auto':'no-hide-descendants'} style={s.filterOverlay}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'#00000055'},filterTransition.backdrop]}/><Pressable accessibilityRole="button" accessibilityLabel="Dismiss session filters" onPress={()=>setFilterOpen(false)} style={StyleSheet.absoluteFill}/>
+    <Animated.View testID="session-filter-picker" accessibilityViewIsModal onAccessibilityEscape={()=>setFilterOpen(false)} style={[s.filterSheet,filterTransition.panel]}>
+     <ScrollView style={s.filterScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={s.filterOptions}><Text typography="ui" accessibilityRole="header" style={s.filterTitle}>Show sessions</Text>
+      {FILTERS.map(option=><Pressable key={option.value} accessibilityRole="radio" accessibilityLabel={option.text} accessibilityState={{checked:filter===option.value}} accessibilityHint={option.value==='all'?'All sessions not archived or in Trash':undefined} onPress={()=>{setFilterOpen(false);onFilterChange(option.value);}} style={s.filterOption}><Text typography="ui" style={s.filterOptionText}>{option.text}</Text>{filter===option.value&&<Check size={20} color={colors.foreground}/>}</Pressable>)}
+     </ScrollView><SectionActions leading={<RoundAction label="Close session filters" icon={ArrowLeft} onPress={()=>setFilterOpen(false)}/>}/>
+    </Animated.View>
+   </SafeAreaView></MenuTheme>:null;
+ const hostedFilter=useOverlayHost(visible&&filterOpen&&!!onFilterChange,filterTransition.mounted&&visible&&!!onFilterChange,filterOverlay,()=>{if(filterOpen)setFilterOpen(false);});
  return <PersistentMotionSurface active={visible} testID="agents-screen" pointerEvents={visible?'auto':'none'} accessibilityElementsHidden={!visible} importantForAccessibility={visible?'auto':'no-hide-descendants'} style={[s.screen,{opacity:visible?1:0,bottom:bottomInset}]}>
   <View testID="agent-screen-content" style={s.body} accessibilityElementsHidden={!!actionSession||filterOpen} importantForAccessibility={actionSession||filterOpen?'no-hide-descendants':'auto'}>
    <View testID="sessions-heading" style={s.heading}><Text typography="ui" accessibilityRole="header" style={s.headingText}>{selected?selected.agent.name:'Sessions'}</Text>{selected&&<Text typography="ui" style={s.context}>{`${selected.title} · View only`}</Text>}</View>
@@ -90,23 +101,15 @@ function AgentsScreenContent({menu,sessions,currentSessionId,selected,onSelect,o
     {!selected&&<>{onSchedules&&<Pressable accessibilityRole="button" accessibilityLabel="Schedules" onPress={onSchedules} style={s.utility}><Clock3 size={22} color={colors.foreground}/></Pressable>}{onNew&&<Pressable accessibilityRole="button" accessibilityLabel="New session" accessibilityHint="Start a new conversation" accessibilityState={{disabled:newBusy,busy:newBusy}} disabled={newBusy} onPress={onNew} style={[s.newSession,newBusy&&{opacity:.45}]}>{newBusy?<ActivityIndicator size="small" color={colors.onAccent}/>:<Plus size={23} color={colors.onAccent}/>}</Pressable>}</>}
    </SectionActions></View>
   </View>
-  {visible&&filterOpen&&onFilterChange&&<Modal visible transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={()=>setFilterOpen(false)}>
-   <SafeAreaView style={s.filterOverlay}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss session filters" onPress={()=>setFilterOpen(false)} style={StyleSheet.absoluteFill}/>
-    <View testID="session-filter-picker" accessibilityViewIsModal onAccessibilityEscape={()=>setFilterOpen(false)} style={s.filterSheet}>
-     <ScrollView style={s.filterScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={s.filterOptions}><Text typography="ui" accessibilityRole="header" style={s.filterTitle}>Show sessions</Text>
-      {FILTERS.map(option=><Pressable key={option.value} accessibilityRole="radio" accessibilityLabel={option.text} accessibilityState={{checked:filter===option.value}} accessibilityHint={option.value==='all'?'All sessions not archived or in Trash':undefined} onPress={()=>{setFilterOpen(false);onFilterChange(option.value);}} style={s.filterOption}><Text typography="ui" style={s.filterOptionText}>{option.text}</Text>{filter===option.value&&<Check size={20} color={colors.foreground}/>}</Pressable>)}
-     </ScrollView><SectionActions leading={<RoundAction label="Close session filters" icon={ArrowLeft} onPress={()=>setFilterOpen(false)}/>}/>
-    </View>
-   </SafeAreaView>
-  </Modal>}
-  {visible&&actionSession&&onSessionAction&&<SessionActions key={actionSession.conversationId} session={actionSession} onClose={()=>setActionSession(undefined)} onAction={onSessionAction}/>}
+  {!hostedFilter&&visible&&filterOpen&&onFilterChange&&<Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={()=>setFilterOpen(false)}>{filterOverlay}</Modal>}
+  {visible&&actionSession&&onSessionAction&&<SessionActions key={actionSession.conversationId} scopeKey={scopeKey} session={actionSession} onClose={()=>setActionSession(undefined)} onAction={onSessionAction}/>}
  </PersistentMotionSurface>;
 }
 const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  screen:{position:'absolute',top:0,bottom:0,left:0,right:0,backgroundColor:colors.background,zIndex:25},body:{flex:1,minHeight:0},
  heading:{paddingHorizontal:16,paddingTop:SECTION_HEADING_TOP,paddingBottom:8},headingText:{color:colors.foreground,fontSize:26,lineHeight:34,fontWeight:'600'},context:{color:colors.muted,fontSize:13,lineHeight:20},tools:{paddingHorizontal:16,gap:8,paddingBottom:8},
  utility:{width:48,height:48,minWidth:48,minHeight:48,alignItems:'center',justifyContent:'center'},newSession:{width:48,height:48,minWidth:48,minHeight:48,borderRadius:24,backgroundColor:colors.accent,alignItems:'center',justifyContent:'center'},filterTrigger:{minHeight:48,minWidth:48,maxWidth:'100%',flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:8},filterText:{color:colors.foreground,fontSize:14,lineHeight:22,flexShrink:1},
- filterOverlay:{flex:1,backgroundColor:'#00000055',justifyContent:'flex-end'},filterSheet:{maxHeight:'80%',flexShrink:1,backgroundColor:colors.background,borderTopLeftRadius:20,borderTopRightRadius:20},filterScroll:{flexGrow:0,flexShrink:1,minHeight:0},filterOptions:{padding:16,gap:4},filterTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground,paddingBottom:8},filterOption:{minHeight:48,paddingVertical:12,paddingHorizontal:8,flexDirection:'row',alignItems:'center',gap:12},filterOptionText:{flex:1,fontSize:16,lineHeight:24,color:colors.foreground},
+ filterOverlay:{flex:1,justifyContent:'flex-end'},filterSheet:{maxHeight:'80%',flexShrink:1,backgroundColor:colors.background,borderTopLeftRadius:20,borderTopRightRadius:20},filterScroll:{flexGrow:0,flexShrink:1,minHeight:0},filterOptions:{padding:16,gap:4},filterTitle:{fontSize:16,lineHeight:24,fontWeight:'600',color:colors.foreground,paddingBottom:8},filterOption:{minHeight:48,paddingVertical:12,paddingHorizontal:8,flexDirection:'row',alignItems:'center',gap:12},filterOptionText:{flex:1,fontSize:16,lineHeight:24,color:colors.foreground},
  list:{paddingHorizontal:16,paddingTop:12,paddingBottom:24},listHeading:{paddingTop:4,paddingBottom:8,gap:8},
  // The line pieces fill each independently virtualized row; percentage joins
  // follow its natural height when titles wrap or Android text scaling changes.
@@ -116,4 +119,12 @@ const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  action:{...menuButtonChrome({colors,shadows}).pill,minHeight:48,minWidth:48,maxWidth:'100%',paddingHorizontal:16,paddingVertical:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,borderRadius:999},primary:{...menuButtonChrome({colors,shadows}).primary},actionText:{...menuButtonChrome({colors,shadows}).label,flexShrink:1,fontSize:15,lineHeight:22,fontWeight:'600',color:colors.foreground},bottomBar:{flexShrink:0,backgroundColor:colors.background},empty:{paddingVertical:32,gap:8},emptyTitle:{fontSize:17,lineHeight:25,color:colors.foreground},notice:{gap:8},viewer:{position:'absolute',top:0,bottom:0,left:0,right:0,backgroundColor:colors.background},connectionStatus:{color:colors.muted,fontSize:12,lineHeight:18,paddingHorizontal:16,paddingVertical:4},
 }));
 
-export const AgentsScreen=withMenuTheme(AgentsScreenContent);
+const ThemedAgentsScreen=withMenuTheme(AgentsScreenContent);
+/** The unopened session list has no background responsibility (the overview
+ * poll lives in SessionMain). Avoid its hidden native tree on chat startup and
+ * typing. Once visited, retain the same list/search and visibility fences. */
+export function AgentsScreen(props:Props){
+ const visited=useRef(false);
+ if(props.visible!==false)visited.current=true;
+ return visited.current?<ThemedAgentsScreen {...props}/>:null;
+}

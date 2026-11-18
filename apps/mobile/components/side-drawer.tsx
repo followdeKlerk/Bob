@@ -13,6 +13,7 @@ import {ActionIcon} from './message-actions';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
 import {SectionHeading,SectionActions,RoundAction,SectionSegments} from './section-ui';
 import {useKeyboardInset} from '../keyboard-inset';
+import {useOverlayBack} from './overlay-host';
 export type SessionAction='rename'|'pin'|'unpin'|'archive'|'unarchive'|'delete'|'restore';
 type Row={id:string;label:string;selected?:boolean;disabled?:boolean;onPress:()=>void;pinned?:boolean;archived?:boolean;trashed?:boolean;working?:boolean;onAlias?:()=>void};
 type Props={menu?:React.ReactNode;headingTitle?:string;onBack?:()=>void;embedded?:boolean;mode?:'sessions'|'workstations';workspaceLabel?:string;visible:boolean;onClose:()=>void;navigation:(Row&{icon:LucideIcon})[];workspaces:Row[];conversations:Row[];onSchedules?:()=>void;onNew:()=>void;onSettings:()=>void;disabled:boolean;loadMore?:()=>void;pairing:React.ReactNode;onSessionAction:(id:string,action:SessionAction,title?:string)=>Promise<void>};
@@ -29,7 +30,7 @@ function SideDrawerContent({menu:sectionMenu,headingTitle,onBack,onSchedules,vis
  const {colors}=useTheme();
  const s=useThemedValue(sTheme);
 
- const keyboard=useKeyboardInset(),insets=useSafeAreaInsets();
+ const keyboard=useKeyboardInset(),insets=useSafeAreaInsets(),overlayBack=useOverlayBack();
  const [headerHeight,setHeaderHeight]=useState(128),[footerHeight,setFooterHeight]=useState(80);
  const bottomInset=embedded||keyboard>0?0:insets.bottom;
  const topClearance=(embedded?0:insets.top)+headerHeight+(embedded?0:36),bottomClearance=embedded?footerHeight+12:mode==='workstations'?24:bottomInset+footerHeight+44;
@@ -50,6 +51,7 @@ function SideDrawerContent({menu:sectionMenu,headingTitle,onBack,onSchedules,vis
  }
  // Close local editing/search/pairing before leaving this destination.
  const dismissLocal=()=>{
+  if(overlayBack())return true;
   if(Keyboard.isVisible()){Keyboard.dismiss();return true;}
   if(renaming){setRenaming(undefined);return true;}
   if(menu){setMenu(undefined);return true;}
@@ -61,7 +63,7 @@ function SideDrawerContent({menu:sectionMenu,headingTitle,onBack,onSchedules,vis
   if(!embedded||!visible)return;
   const subscription=BackHandler.addEventListener('hardwareBackPress',dismissLocal);
   return ()=>subscription.remove();
- },[embedded,visible,renaming,menu,query,pairingOpen]);
+ },[embedded,visible,renaming,menu,query,pairingOpen,overlayBack]);
  if(!visible)return null;
  const options:{label:string;icon:LucideIcon;action:SessionAction}[]=menu?.row.trashed?[{label:'Restore conversation',icon:Undo2,action:'restore'}]:[{label:'Rename',icon:Edit3,action:'rename'},{label:menu?.row.pinned?'Unpin':'Pin to top',icon:menu?.row.pinned?PinOff:Pin,action:menu?.row.pinned?'unpin':'pin'},{label:menu?.row.archived?'Unarchive':'Archive',icon:menu?.row.archived?ArchiveRestore:Archive,action:menu?.row.archived?'unarchive':'archive'},{label:'Delete',icon:Trash2,action:'delete'}];
  const panel=<MotionSurface testID={embedded?'navigation-panel':undefined} style={embedded?[StyleSheet.absoluteFill,{backgroundColor:colors.background,zIndex:25}]:s.overlay}>

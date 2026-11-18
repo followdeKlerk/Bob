@@ -29,6 +29,6 @@ export function ImageAttachments({backend,artifacts,fromBob,active=true,onOpen,o
  const resolve=(item:ImageStackItem)=>mounted.current&&current.current.active&&current.current.scope===scope?current.current.valid.find(artifact=>artifact.id===item.id):undefined;
  return <View testID="image-attachments" style={{width:'100%',alignItems:fromBob?'flex-start':'flex-end'}}>
   <ImageAttachmentStack key={scope} images={images} active={active&&!detailArtifact} onOpen={item=>{const artifact=resolve(item);if(artifact)onOpen(artifact);}} onDetails={item=>{const artifact=resolve(item);if(artifact)setDetail({scope,id:artifact.id});}} onSave={fromBob&&onSave?item=>{const artifact=resolve(item);if(artifact&&current.current.fromBob)onSave(artifact);}:undefined}/>
-  {detailArtifact&&<AttachmentDetails artifact={detailArtifact} onClose={()=>{if(current.current.scope===scope)setDetail(undefined);}}/>}
+  {detailArtifact&&<AttachmentDetails scopeKey={`${scope}:${detailArtifact.id}`} artifact={detailArtifact} onClose={()=>{if(current.current.scope===scope)setDetail(undefined);}}/>}
  </View>;
 }

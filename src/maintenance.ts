@@ -6,6 +6,9 @@ import {join} from 'node:path';
 import {acquireOwner} from './ownership.js';
 import {readControlFloor,assertReleaseFloor,assertFloorIntent,assertLegacyIntent,assertBridgeActivation,preparePi15Floor,prepareFreshPi15ReleaseFloor,verifiedBackup,type MigrationIntent,type SupervisorEvidence,patchSupervisorProtocol,assertPatchFloorIntent,assertPrePatchIntent,preparePi151Floor,prepareFreshPi151ReleaseFloor,type PatchMigrationIntent} from './maintenance-migration.js';
 export type UpdateRequest={id:string;action:'build'|'update'|'rollback';target:'android'|'backend'|'all';conversationId?:number};
+export function assertUpdateTarget(request:UpdateRequest){
+ if(request.action==='rollback'&&request.target!=='backend')throw Error('Rollback supports target=backend only; Android rollback is not supported');
+}
 export type UpdateJob=UpdateRequest&{status:string;stage:string;created:number;updated:number;error?:string;releaseId?:string;validation?:{lane:'ui-fast'|'full';reason:string;baselineId?:string;changedFiles?:string[]}};
 /** Deployment journal only. Conversation/tool execution remains in official Durable. */
 export class MaintenanceStore{
@@ -13,6 +16,7 @@ export class MaintenanceStore{
  constructor(readonly home:string){mkdirSync(home,{recursive:true,mode:0o700});this.db=new DatabaseSync(join(home,'journal.sqlite'));chmodSync(join(home,'journal.sqlite'),0o600);this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,request TEXT NOT NULL,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)');}
  enqueue(request:UpdateRequest):UpdateJob{
   if(!/^[A-Za-z0-9_-]{1,128}$/.test(request.id)||!['build','update','rollback'].includes(request.action)||!['android','backend','all'].includes(request.target))throw Error('Invalid self-update request');
+  assertUpdateTarget(request);
   const canonical=JSON.stringify({id:request.id,action:request.action,target:request.target,conversationId:request.conversationId});
   const job:UpdateJob={...request,status:'queued',stage:'Queued',created:Date.now(),updated:Date.now()};
   this.db.prepare('INSERT OR IGNORE INTO jobs VALUES(?,?,?)').run(request.id,canonical,JSON.stringify(job));
@@ -190,4 +194,28 @@ export class MaintenanceSupervisor{
    }
   }finally{this.store.set('draining',false);this.transitioning=false;}
  }
+}
+
+/** A completed build is not an activation receipt. Keep the existing terminal
+ * status contract, but state precisely which operation actually finished. */
+export async function runUpdateJob(store:MaintenanceStore,job:UpdateJob,build:()=>Promise<Release>,activate:(release:Release)=>Promise<void>){
+ // Also fence jobs admitted by older installed controllers before this runner.
+ assertUpdateTarget(job);
+ let stage:string;
+ if(job.action==='rollback'){
+  const previous=store.get<Release>('previous');if(!previous)throw Error('No previous release available');
+  store.patch(job.id,{status:'activating',stage:'Waiting for active work, then restoring previous backend code'});
+  await activate(previous);
+  stage='Previous backend code activated; chat data retained. Android app unchanged';
+ }else{
+  const release=await build();
+  if(job.action==='update'&&job.target!=='android'){
+   store.patch(job.id,{status:'activating',stage:'Waiting for active work, then restarting backend'});
+   await activate(release);
+   stage=job.target==='backend'?'Backend update activated':'Backend update activated; signed APK ready — Android installation requires owner approval';
+  }else{
+   stage=job.target==='backend'?'Backend build staged; not activated':job.target==='all'?'Backend build staged; not activated. Signed APK ready — Android installation requires owner approval':'Signed APK ready — Android installation requires owner approval; backend unchanged';
+  }
+ }
+ return store.patch(job.id,{status:'complete',stage});
 }

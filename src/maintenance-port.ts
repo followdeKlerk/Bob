@@ -16,6 +16,7 @@ export function updateStatus(state:State){
  if(!state.get('maintenanceHome'))return {enabled:false,reason:'not_installed' as const,message:'Updates not configured on this backend',installCommand:'bob updates install --help'};
  return withMaintenance(state,(store,config)=>{const androidConfigured=androidBuildConfigured(config);const latest=store.get<Release>('latestApk'),supervisor=store.get<SupervisorEvidence>('supervisorEvidence');return {enabled:true,androidBuild:{configured:androidConfigured,reason:androidConfigured?undefined:'Android build/signing prerequisites are not configured on this backend.'},supervisorProtocol:supervisor?.supervisorProtocol,patchSupervisorProtocol:supervisor?.patchSupervisorProtocol,supervisorPid:supervisor?.pid,supervisorRelease:supervisor?.release,bridgeReady:runningBridge(supervisor,store.get<Release>('active')),supervisorOnline:Date.now()-(store.get<number>('heartbeat')??0)<15000,active:store.get<Release>('active')?.id,previous:store.get<Release>('previous')?.id,draining:store.get<boolean>('draining')??false,jobs:store.jobs(),apk:latest?.apk?{releaseId:latest.id,sha256:latest.apk.sha256,size:latest.apk.size,versionCode:latest.apk.versionCode,versionName:latest.apk.versionName}:undefined};});
 }
+export function updateJob(state:State,id:string){return withMaintenance(state,store=>store.job(id));}
 export function queueUpdate(state:State,request:UpdateRequest){return withMaintenance(state,store=>store.enqueue(request));}
 export function maintenancePort(state:State){
  if(!state.get('maintenanceHome'))return undefined;

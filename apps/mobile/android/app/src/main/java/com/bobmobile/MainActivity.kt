@@ -7,8 +7,17 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnable
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 class MainActivity : ReactActivity() {
+  // RN AlertFragment inflates its accessible title in this Activity theme separately
+  // from its AppCompat dialog context. Keep both palettes paired without recreation.
+  private val alertAppearance = object : BobAppearance.Listener {
+    override fun applyAppearance() {
+      theme.applyStyle(if (BobAppearance.palette(this@MainActivity).light) R.style.BobAlertOwner_Light else R.style.BobAlertOwner_Dark, true)
+    }
+  }
   override fun onCreate(savedInstanceState: android.os.Bundle?) {
+    alertAppearance.applyAppearance()
     super.onCreate(savedInstanceState)
+    BobAppearance.addListener(alertAppearance)
     AppDiagnostics.record(this, "activity.create")
   }
   override fun onResume() {
@@ -21,7 +30,7 @@ class MainActivity : ReactActivity() {
   }
   override fun onPause() { synchronized(NotificationWatchStore) { NotificationRuntime.appVisible = false }; AppDiagnostics.record(this, "activity.pause"); super.onPause() }
   override fun onStop() { AppDiagnostics.record(this, "activity.stop"); super.onStop() }
-  override fun onDestroy() { AppDiagnostics.record(this, "activity.destroy"); super.onDestroy() }
+  override fun onDestroy() { BobAppearance.removeListener(alertAppearance); AppDiagnostics.record(this, "activity.destroy"); super.onDestroy() }
   override fun onUserLeaveHint() { AppDiagnostics.record(this, "activity.user-leave"); super.onUserLeaveHint() }
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)

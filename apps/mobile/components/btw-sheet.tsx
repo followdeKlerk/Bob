@@ -1,6 +1,7 @@
-import {withMenuTheme,ChatTheme,useChatTheme} from '../menu-theme';
+import {MenuTheme,withMenuTheme,ChatTheme,useChatTheme} from '../menu-theme';
+import {useOverlayHost,useOverlayHostAvailable,useOverlayKeyboardClearance} from './overlay-host';
 import React,{useEffect,useRef,useState} from 'react';
-import {Alert,AppState,Keyboard,KeyboardAvoidingView,Modal,Platform,ScrollView,View} from 'react-native';
+import {Alert,Animated,AppState,Keyboard,KeyboardAvoidingView,Modal,Platform,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {ArrowUp,Plus,RefreshCw,Square,Trash2,X} from 'lucide-react-native';
 import {v4 as uuid} from 'uuid';
@@ -8,20 +9,21 @@ import {Text,TextInput} from './app-text';
 import {ChatMarkdown} from './chat-markdown';
 import {RoundAction,SectionActions,SectionBody} from './section-ui';
 import {useTheme} from '../theme';
-import {useAppMotion} from '../app-motion';
+import {useModalTransition} from './modal-transition';
+const AnimatedSafeAreaView=Animated.createAnimatedComponent(SafeAreaView);
 import {BtwSession,type BtwRequest,type BtwState} from '../btw';
 
 type Props={visible:boolean;active:boolean;conversationId:number;initial?:{id:string;text:string};request:BtwRequest;onClose:()=>void};
 /** A separate native workspace; underlying chat and its running task stay mounted.
  * Closing hides, not cancels. Side state is intentionally process-local. */
 function BtwSheetContent({visible,active,conversationId,initial,request,onClose}:Props){
- const {colors}=useTheme(),motion=useAppMotion(),chatColors=useChatTheme().colors;
+ const {colors}=useTheme(),chatColors=useChatTheme().colors;
  const transport=useRef(request);transport.current=request;
  const [session]=useState(()=>new BtwSession(`chats/${conversationId}/btw`,(...args)=>transport.current(...args),uuid));
  const [state,setState]=useState<BtwState>(session.state),[draft,setDraft]=useState('');
  const [foreground,setForeground]=useState(AppState.currentState==='active');
  const list=useRef<React.ComponentRef<typeof ScrollView>>(null),following=useRef(true),handled=useRef(''),queued=useRef<{id:string;text:string}|undefined>(undefined);
- const displayed=visible&&active,thread=state.thread;
+ const displayed=visible&&active,thread=state.thread,transition=useModalTransition(displayed,active),hostAvailable=useOverlayHostAvailable(),overlayKeyboard=useOverlayKeyboardClearance();
  const running=!!thread?.messages.some(message=>message.status==='running');
  const lastReceipt=thread?.messages.at(-1);
  useEffect(()=>{if(lastReceipt)setDraft(current=>current.trim()===lastReceipt.question?'':current);},[lastReceipt?.requestId]);
@@ -49,10 +51,10 @@ function BtwSheetContent({visible,active,conversationId,initial,request,onClose}
  const send=()=>{const text=draft.trim();if(!text)return;following.current=true;void session.send(text).then(accepted=>{if(accepted)setDraft(current=>current.trim()===text?'':current);});};
  const clearThreads=()=>Alert.alert('Clear temporary side chats?','Discard all temporary side chats for this paired device on this backend, including other conversations, and start fresh here. Running side replies will be cancelled; main tasks are unaffected.',[{text:'Keep them',style:'cancel'},{text:'Clear side chats',style:'destructive',onPress:()=>{queued.current=undefined;setDraft('');following.current=true;void session.discardAll();}}]);
  const newThread=()=>Alert.alert('New side chat?','Discard this temporary thread and take a fresh snapshot of the main chat. Any side response still running will be cancelled. The main task is unaffected.',[{text:'Keep this one',style:'cancel'},{text:'New side chat',onPress:()=>{queued.current=undefined;setDraft('');following.current=true;void session.reset();}}]);
- return <Modal visible={displayed} transparent animationType={motion?'fade':'none'} onRequestClose={close}>
-  {/* Android Modal resizes its own window for the IME; don't apply Activity insets twice. */}
-  <KeyboardAvoidingView enabled={Platform.OS==='ios'} behavior="padding" style={{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'}}>
-   <SafeAreaView edges={['top','bottom']} testID="btw-sheet" style={{height:'90%',backgroundColor:colors.background,borderTopLeftRadius:22,borderTopRightRadius:22,borderWidth:1,borderColor:colors.border}}>
+ const overlay=<MenuTheme>  {/* Android Modal resizes its own window for the IME; don't apply Activity insets twice. */}
+  <KeyboardAvoidingView pointerEvents={displayed?'auto':'none'} accessibilityElementsHidden={!displayed} importantForAccessibility={displayed?'auto':'no-hide-descendants'} enabled={Platform.OS==='ios'} behavior="padding" style={[{flex:1,justifyContent:'flex-end'},hostAvailable&&Platform.OS==='android'&&{paddingBottom:overlayKeyboard??0}]}>
+   <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'#00000088'},transition.backdrop]}/>
+   <AnimatedSafeAreaView edges={['top','bottom']} testID="btw-sheet" style={[{height:'90%',backgroundColor:colors.background,borderTopLeftRadius:22,borderTopRightRadius:22,borderWidth:1,borderColor:colors.border},transition.panel]}>
     <View style={{paddingHorizontal:18,paddingTop:15,paddingBottom:8,gap:5}}>
      <Text accessibilityRole="header" style={{fontSize:23,fontWeight:'600'}}>BTW · side chat</Text>
      <Text style={{fontSize:13,lineHeight:19,color:colors.muted}}>Main task continues · no tools · not added to main chat</Text>
@@ -78,9 +80,11 @@ function BtwSheetContent({visible,active,conversationId,initial,request,onClose}
       {message.status!=='done'&&<Text accessibilityLiveRegion="polite" style={{fontSize:13,lineHeight:20,color:chatColors.muted}}>{message.status==='running'?'Answering your side question…':message.status==='cancelled'?'Side response stopped.':message.error??'Side response failed. No automatic retry was made.'}</Text>}
      </View>)}
     </ScrollView></ChatTheme>}</SectionBody>
-   </SafeAreaView>
+   </AnimatedSafeAreaView>
   </KeyboardAvoidingView>
- </Modal>;
+ </MenuTheme>;
+ const hosted=useOverlayHost(displayed,transition.mounted,overlay,()=>{if(displayed)close();});
+ return hosted?null:<Modal visible={displayed} transparent animationType="none" onRequestClose={()=>{if(displayed)close();}}>{overlay}</Modal>;
 }
 
 export const BtwSheet=withMenuTheme(BtwSheetContent);

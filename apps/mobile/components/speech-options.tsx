@@ -1,5 +1,8 @@
-import React,{useCallback,useEffect,useRef,useState} from 'react';
-import {Alert,NativeModules,KeyboardAvoidingView,Modal,ScrollView,View,useWindowDimensions} from 'react-native';
+import {useModalTransition} from './modal-transition';
+import {useOverlayHost,useOverlayHostAvailable,useOverlayKeyboardClearance} from './overlay-host';
+import {useKeyboardInset} from '../keyboard-inset';
+import React,{useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {Alert,Animated,Keyboard,NativeModules,KeyboardAvoidingView,Modal,Platform,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {Button} from './ui/button';
 import {Text,TextInput} from './app-text';
 import {useTheme} from '../theme';
@@ -13,6 +16,7 @@ type Pending={initial:string;generation:number;language?:string;providers?:Voice
 type NetworkConsent={provider:VoiceProvider;resolve:(value:boolean)=>void;signal:AbortSignal};
 /** Ephemeral selection UI. Closing, backgrounding or replacing the owner resolves without capture. */
 export function useSpeechOptions(session:VoiceInputSession){
+ const hostAvailable=useOverlayHostAvailable(),overlayKeyboard=useOverlayKeyboardClearance(),keyboard=useKeyboardInset();
  const [pending,setPending]=useState<Pending|null>(null);
  const [consent,setConsent]=useState<NetworkConsent|null>(null);
  const [custom,setCustom]=useState('');
@@ -65,10 +69,14 @@ export function useSpeechOptions(session:VoiceInputSession){
    }
   }catch(error){Alert.alert('Speech options',error instanceof Error?error.message:'Could not change voice preferences.');}
  };
- const language=pending?.language;
- return <><Modal visible={!!pending} transparent animationType="fade" onRequestClose={()=>close(pending)} accessibilityViewIsModal>
-  <KeyboardAvoidingView style={{flex:1,justifyContent:'center',paddingHorizontal:16,backgroundColor:'rgba(0,0,0,0.7)'}}>
-   <View testID="speech-options" style={{backgroundColor:colors.background,borderRadius:16,borderWidth:1,borderColor:colors.border,maxHeight:Math.max(0,height-48),padding:16,gap:8}}>
+ const lastPending=useRef<Pending|null>(null),lastConsent=useRef<NetworkConsent|null>(null);
+ if(pending)lastPending.current=pending;if(consent)lastConsent.current=consent;
+ const shownPending=pending??lastPending.current,shownConsent=consent??lastConsent.current;
+ const pickerTransition=useModalTransition(!!pending),consentTransition=useModalTransition(!!consent);
+ const wasPending=useRef(!!pending);useLayoutEffect(()=>{if(hostAvailable&&wasPending.current&&!pending)Keyboard.dismiss();wasPending.current=!!pending;},[pending,hostAvailable]);
+ const language=shownPending?.language;
+ const pickerOverlay=<KeyboardAvoidingView pointerEvents={pending?'auto':'none'} style={[{flex:1,justifyContent:'center',paddingHorizontal:16},hostAvailable&&Platform.OS==='android'&&{paddingBottom:overlayKeyboard??0}]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'rgba(0,0,0,0.7)'},pickerTransition.backdrop]}/>
+   <Animated.View testID="speech-options" style={[{backgroundColor:colors.background,borderRadius:16,borderWidth:1,borderColor:colors.border,maxHeight:Math.max(0,height-48-(hostAvailable?(Platform.OS==='android'?(overlayKeyboard??0):keyboard):0)),padding:16,gap:8},pickerTransition.panel]}>
     <Text accessibilityRole="header" style={{fontSize:20,color:colors.foreground}}>Speech options</Text>
     <Text style={{color:colors.muted}}>Choose a language, then a provider. Choices are remembered on this phone; models depend on the provider.</Text>
     <ScrollView style={{flexShrink:1,minHeight:0}} keyboardShouldPersistTaps="handled" contentContainerStyle={{gap:8,paddingBottom:8}}>
@@ -77,12 +85,12 @@ export function useSpeechOptions(session:VoiceInputSession){
       {row('English (US) · en-US','Request US English; availability depends on the selected provider.',()=>request('en-US'))}
       <Text style={{color:colors.foreground}}>Other Android language tag</Text>
       <TextInput accessibilityLabel="Other speech language tag" value={custom} onChangeText={setCustom} autoCapitalize="none" autoCorrect={false} placeholder="e.g. en-AU or zh-Hant-TW" style={{color:colors.foreground,minHeight:48,borderWidth:1,borderColor:colors.border,borderRadius:12,paddingLeft:12,paddingRight:12}}/>
-      {row('Request entered language','Only a request; the provider checks whether its model is available.',()=>{const tag=custom.trim();if(pending?.resolve!==owner.current?.resolve||pending?.generation!==loadGeneration.current)return;if(/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*$/.test(tag)&&tag.length<=100)request(tag);else setPending({...pending!,error:'Enter a valid BCP-47 language tag, such as en-AU.'});})}
-      {!!pending?.error&&<Text style={{color:colors.foreground}}>{pending.error}</Text>}
+      {row('Request entered language','Only a request; the provider checks whether its model is available.',()=>{const tag=custom.trim();if(shownPending?.resolve!==owner.current?.resolve||shownPending?.generation!==loadGeneration.current)return;if(/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*$/.test(tag)&&tag.length<=100)request(tag);else setPending({...shownPending!,error:'Enter a valid BCP-47 language tag, such as en-AU.'});})}
+      {!!shownPending?.error&&<Text style={{color:colors.foreground}}>{shownPending.error}</Text>}
      </>:<>
       <Text style={{color:colors.foreground}}>Requested language: {language}</Text>
-      {pending?.error?<Text style={{color:colors.foreground}}>{pending.error}</Text>:pending?.providers?.length?pending.providers.map(plan=>row(`${plan.label} · ${language}`,plan.networkCapable?(plan.approved?'Network speech approved on this phone.':'May send audio over the network; approval is remembered.'):'On-device route; model checked when starting.',()=>choose(plan,pending!),plan.key)):<Text style={{color:colors.muted}}>Checking installed providers…</Text>}
-      {row('Back to languages','No microphone is started.',()=>{if(pending?.resolve!==owner.current?.resolve||pending?.generation!==loadGeneration.current)return;const generation=++loadGeneration.current;setPending({...pending!,generation,language:undefined,providers:undefined,error:undefined});})}
+      {shownPending?.error?<Text style={{color:colors.foreground}}>{shownPending.error}</Text>:shownPending?.providers?.length?shownPending.providers.map(plan=>row(`${plan.label} · ${language}`,plan.networkCapable?(plan.approved?'Network speech approved on this phone.':'May send audio over the network; approval is remembered.'):'On-device route; model checked when starting.',()=>choose(plan,shownPending!),plan.key)):<Text style={{color:colors.muted}}>Checking installed providers…</Text>}
+      {row('Back to languages','No microphone is started.',()=>{if(shownPending?.resolve!==owner.current?.resolve||shownPending?.generation!==loadGeneration.current)return;const generation=++loadGeneration.current;setPending({...shownPending!,generation,language:undefined,providers:undefined,error:undefined});})}
      </>}
      {!language&&<>
       {row('Forget network speech approval','Ask again before any network-capable provider receives audio. Keeps your language/provider choice.',()=>manage(()=>void session.revokeApprovals()))}
@@ -91,22 +99,22 @@ export function useSpeechOptions(session:VoiceInputSession){
       <Text style={{color:colors.muted}}>{SPEECH_CAPTURE_HELP}</Text>
      </>}
     </ScrollView>
-    <Button variant="ghost" accessibilityLabel="Close speech options" onPress={()=>close(pending)} style={{minHeight:48,paddingLeft:12,paddingRight:12,paddingTop:8,paddingBottom:8}}><Text style={{color:colors.accent}}>Close</Text></Button>
-   </View>
-  </KeyboardAvoidingView>
- </Modal>
- <Modal visible={!!consent} transparent animationType="fade" onRequestClose={()=>settleConsent(false,consent)} accessibilityViewIsModal>
-  <View style={{flex:1,justifyContent:'center',paddingHorizontal:16,backgroundColor:'rgba(0,0,0,0.7)'}}>
-   <View testID="speech-network-consent" style={{backgroundColor:colors.background,borderRadius:16,borderWidth:1,borderColor:colors.border,maxHeight:Math.max(0,height-48),padding:16,gap:12}}>
+    <Button variant="ghost" accessibilityLabel="Close speech options" onPress={()=>close(shownPending)} style={{minHeight:48,paddingLeft:12,paddingRight:12,paddingTop:8,paddingBottom:8}}><Text style={{color:colors.accent}}>Close</Text></Button>
+   </Animated.View>
+  </KeyboardAvoidingView>;
+ const consentOverlay=<View pointerEvents={consent?'auto':'none'} style={{flex:1,justifyContent:'center',paddingHorizontal:16}}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'rgba(0,0,0,0.7)'},consentTransition.backdrop]}/>
+   <Animated.View testID="speech-network-consent" style={[{backgroundColor:colors.background,borderRadius:16,borderWidth:1,borderColor:colors.border,maxHeight:Math.max(0,height-48),padding:16,gap:12},consentTransition.panel]}>
     <Text accessibilityRole="header" style={{fontSize:20,color:colors.foreground}}>Allow network speech?</Text>
     <ScrollView style={{flexShrink:1,minHeight:0}} keyboardShouldPersistTaps="always">
-     <Text style={{color:colors.foreground,fontSize:16,lineHeight:24}}>{consent?.provider.label} ({consent?.provider.language}). May send microphone audio to this provider over the network. Bob does not save or upload audio. Remember approval on this phone? Revoke in Speech options.</Text>
+     <Text style={{color:colors.foreground,fontSize:16,lineHeight:24}}>{shownConsent?.provider.label} ({shownConsent?.provider.language}). May send microphone audio to this provider over the network. Bob does not save or upload audio. Remember approval on this phone? Revoke in Speech options.</Text>
     </ScrollView>
     <View style={{flexDirection:'row',gap:8}}>
-     <Button variant="outline" accessibilityLabel="Cancel network speech" onPress={()=>settleConsent(false,consent)} style={{flex:1,minWidth:48,minHeight:48,height:'auto',paddingLeft:8,paddingRight:8,paddingTop:8,paddingBottom:8,borderColor:colors.border}}><Text style={{color:colors.foreground}}>Cancel</Text></Button>
-     <Button variant="outline" accessibilityLabel="Allow and remember network speech" onPress={()=>settleConsent(true,consent)} style={{flex:1,minWidth:48,minHeight:48,height:'auto',paddingLeft:8,paddingRight:8,paddingTop:8,paddingBottom:8,borderColor:colors.border}}><Text style={{color:colors.foreground}}>Allow & remember</Text></Button>
+     <Button variant="outline" accessibilityLabel="Cancel network speech" onPress={()=>settleConsent(false,shownConsent)} style={{flex:1,minWidth:48,minHeight:48,height:'auto',paddingLeft:8,paddingRight:8,paddingTop:8,paddingBottom:8,borderColor:colors.border}}><Text style={{color:colors.foreground}}>Cancel</Text></Button>
+     <Button variant="outline" accessibilityLabel="Allow and remember network speech" onPress={()=>settleConsent(true,shownConsent)} style={{flex:1,minWidth:48,minHeight:48,height:'auto',paddingLeft:8,paddingRight:8,paddingTop:8,paddingBottom:8,borderColor:colors.border}}><Text style={{color:colors.foreground}}>Allow & remember</Text></Button>
     </View>
-   </View>
-  </View>
- </Modal></>;
+   </Animated.View>
+  </View>;
+ const pickerHosted=useOverlayHost(!!pending,pickerTransition.mounted,pickerOverlay,()=>close(pending));
+ const consentHosted=useOverlayHost(!!consent,consentTransition.mounted,consentOverlay,()=>settleConsent(false,consent));
+ return <>{!pickerHosted&&<Modal visible={!!pending} transparent animationType="none" onRequestClose={()=>close(pending)} accessibilityViewIsModal>{pickerOverlay}</Modal>}{!consentHosted&&<Modal visible={!!consent} transparent animationType="none" onRequestClose={()=>settleConsent(false,consent)} accessibilityViewIsModal>{consentOverlay}</Modal>}</>;
 }

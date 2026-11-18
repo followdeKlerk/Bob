@@ -5,7 +5,7 @@ import org.junit.Test
 
 class AppDiagnosticsTest {
     @Test fun onlyFixedNonContentEventsAreAccepted() {
-        for (event in listOf("js.ready", "js.background", "activity.pause", "activity.back", "back.root-ignored")) assertTrue(AppDiagnostics.allowedEvent(event))
+        for (event in listOf("js.ready", "js.background", "activity.pause", "activity.back", "back.root-ignored", "startup.theme-ready", "startup.session-ready", "startup.editor-ready")) assertTrue(AppDiagnostics.allowedEvent(event))
         for (event in listOf("my private message", "https://backend.ts.net", "Bearer secret", "51.5,-0.1", "js.arbitrary-message", "")) assertFalse(AppDiagnostics.allowedEvent(event))
     }
     @Test fun eventHistoryIsBoundedAndKeepsTheNewestEvents() {

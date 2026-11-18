@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {AppState} from 'react-native';
 import * as Keychain from 'react-native-keychain';
 export type BuildBackend={backendId:string;endpoint:string;name:string};
-export type BuildJob={id:string;status:string;stage:string;error?:string;conversationId?:number;target?:string};
+export type BuildJob={id:string;status:string;stage:string;action?:'build'|'update'|'rollback';error?:string;conversationId?:number;target?:string};
 export type BuildState={enabled:boolean;reason?:string;message?:string;installCommand?:string;androidBuild?:{configured:boolean;reason?:string};supervisorOnline?:boolean;draining?:boolean;jobs?:BuildJob[];apk?:{releaseId:string;sha256:string;size:number;versionCode:number;versionName:string}};
 export const activeBuild=(state?:BuildState)=>state?.jobs?.find(job=>['queued','building','activating'].includes(job.status));
 export function useBuildStatus(backend?:BuildBackend){

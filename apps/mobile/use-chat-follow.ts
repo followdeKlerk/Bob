@@ -4,7 +4,8 @@ import {ChatFollow} from './chat-follow';
 export function useChatFollow<T>(scope:string,inverted=false,active=true){
  const list=useRef<FlatList<T>>(null),policy=useRef(new ChatFollow(inverted));
  const frame=useRef<number|undefined>(undefined),release=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
- const positioned=useRef(false),autoScrolling=useRef(false),reduceMotion=useRef(false),bottom=useRef(true),following=useRef(true);
+ // Until Android reports the accessibility preference, avoid animated jumps.
+ const positioned=useRef(false),autoScrolling=useRef(false),reduceMotion=useRef(true),bottom=useRef(true),following=useRef(true);
  const [isFollowing,setIsFollowing]=useState(true);
  const visible=useRef(active);visible.current=active;
  const foreground=useRef(AppState.currentState!=='background'&&AppState.currentState!=='inactive'),pendingFollow=useRef(false);
@@ -13,8 +14,8 @@ export function useChatFollow<T>(scope:string,inverted=false,active=true){
  const syncFollowing=()=>{if(following.current!==policy.current.following){following.current=policy.current.following;setIsFollowing(following.current);}};
  const cancelFollow=()=>{if(frame.current!==undefined)cancelAnimationFrame(frame.current);frame.current=undefined;};
  useEffect(()=>{
-  let alive=true;void AccessibilityInfo.isReduceMotionEnabled().then(value=>{if(alive)reduceMotion.current=value;}).catch(()=>{});
-  const subscription=AccessibilityInfo.addEventListener('reduceMotionChanged',value=>{reduceMotion.current=value;});
+  let alive=true,changed=false;void AccessibilityInfo.isReduceMotionEnabled().then(value=>{if(alive&&!changed)reduceMotion.current=value;}).catch(()=>{});
+  const subscription=AccessibilityInfo.addEventListener('reduceMotionChanged',value=>{changed=true;if(alive)reduceMotion.current=value;});
   return()=>{alive=false;subscription.remove();};
  },[]);
  const follow=(smooth=false,force=false)=>{
@@ -22,7 +23,10 @@ export function useChatFollow<T>(scope:string,inverted=false,active=true){
   if(!foreground.current||!visible.current){pendingFollow.current=true;return;}
   const m=metrics.current;
   if(!force&&positioned.current&&(inverted?Math.max(0,m.offset)<=1:m.content>0&&m.viewport>0&&Math.abs(Math.max(0,m.content-m.viewport)-m.offset)<=1)){pendingFollow.current=false;return;}
-  cancelFollow();
+  // Keep the earliest pending frame during a burst of layout changes. Replacing
+  // it on every streamed token can indefinitely defer positioning under load.
+  // Explicit jumps may replace it so their force/animation choice wins.
+  if(frame.current!==undefined){if(!force&&!smooth)return;cancelFollow();}
   frame.current=requestAnimationFrame(()=>{
    frame.current=undefined;
    if(!foreground.current||!visible.current){pendingFollow.current=true;return;}

@@ -28,8 +28,10 @@ internal object BobAppearance {
     interface Listener { fun applyAppearance() }
     private val listeners = WeakHashMap<Listener, Unit>()
     private fun preferences(context: Context) = context.applicationContext.getSharedPreferences("bob-appearance", Context.MODE_PRIVATE)
+    fun preference(context: Context): String = preferences(context).getString("appearance", "system")
+        ?.takeIf { it == "light" || it == "dark" || it == "system" } ?: "system"
     fun palette(context: Context): Palette {
-        val mode = preferences(context).getString("appearance", "system")
+        val mode = preference(context)
         val systemDark = context.applicationContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         return if (mode == "light" || (mode != "dark" && !systemDark)) light else dark
     }

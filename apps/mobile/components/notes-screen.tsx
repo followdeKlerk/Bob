@@ -1,11 +1,13 @@
-import {withMenuTheme} from '../menu-theme';
+import {useModalTransition} from './modal-transition';
+import {useOverlayHost,useOverlayHostAvailable,useOverlayKeyboardClearance} from './overlay-host';
+import {MenuTheme,withMenuTheme} from '../menu-theme';
 import {MotionSurface} from './motion-surface';
 import {PageSearch} from './page-search';
 import {EmptyState} from './empty-state';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text,TextInput} from './app-text';
-import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,AppState,FlatList,Modal,Platform,Pressable,ScrollView,StyleSheet,View,KeyboardAvoidingView} from 'react-native';
+import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {Alert,Animated,AppState,FlatList,Keyboard,Modal,Platform,Pressable,ScrollView,StyleSheet,View,KeyboardAvoidingView} from 'react-native';
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
 import {v4 as uuid} from 'uuid';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +50,7 @@ function NotesPreview({body,onToggle}:{body:string;onToggle:(line:number)=>void}
 }
 function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:React.ReactNode;backendId:string;request:NotesTransport;visible:boolean;topInset:number;onBack?:()=>void}){
  const {colors}=useTheme();
+ const hostAvailable=useOverlayHostAvailable();
  const palette=useThemedValue(paletteTheme);
  const s=useThemedValue(sTheme);
 
@@ -57,6 +60,7 @@ function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:Rea
  useEffect(()=>store.subscribe(()=>refresh(value=>value+1)),[store]);
  useEffect(()=>{if(visible)void store.sync();const timer=setInterval(()=>{if(AppState.currentState==='active'&&(visible||store.pendingCount))void store.sync();},8000);const listener=AppState.addEventListener('change',state=>{if(state==='active'&&(visible||store.pendingCount))void store.sync();});return()=>{clearInterval(timer);listener.remove();};},[store,visible]);
  const [query,setQuery]=useState(''),[category,setCategory]=useState(''),[trash,setTrash]=useState(false),[editing,setEditing]=useState(false),[draft,setDraft]=useState<Draft>(),[preview,setPreview]=useState(false),[saving,setSaving]=useState(false),[draftError,setDraftError]=useState(''),[editorReady,setEditorReady]=useState(false);
+ const [recoveryError,setRecoveryError]=useState(''),[recoveryPending,setRecoveryPending]=useState(false),[recoveryRetry,setRecoveryRetry]=useState(0);
  const [managing,setManaging]=useState(false),[categoryForm,setCategoryForm]=useState<{id?:string;name:string;revision?:number}>({name:''});
  const editorWrites=useRef<Promise<unknown>>(Promise.resolve()),draftKey=`note-editor:v1:${backendId}`;
  const savingRef=useRef(false),categorySaving=useRef(false);
@@ -64,13 +68,26 @@ function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:Rea
  const [savingCategory,setSavingCategory]=useState(false);
  const bodyInput=useRef<React.ComponentRef<typeof TextInput>>(null);
  const insets=useSafeAreaInsets();
- const keyboard=useKeyboardInset();
+ const keyboard=useKeyboardInset(),overlayKeyboard=useOverlayKeyboardClearance();
  const categoryScroll=useRef<React.ComponentRef<typeof ScrollView>>(null),categoryInput=useRef<React.ComponentRef<typeof TextInput>>(null);
  // BobKeyboard observes the Activity, not this dialog. Edge-to-edge Android
  // needs measured remaining-overlap avoidance; iOS keeps its existing inset owner.
- const modalKeyboard=Platform.OS==='android'?0:keyboard;
+ const modalKeyboard=Platform.OS==='android'?(hostAvailable?(overlayKeyboard??0):0):keyboard;
  useEffect(()=>{let cancelled=false;void AsyncStorage.getItem(draftKey).then(raw=>{if(cancelled)return;if(raw){const saved=JSON.parse(raw);setDraft({...NoteValue.parse(valueOf(saved)),id:saved.id,baseRevision:saved.baseRevision??0});setEditing(true);}setEditorReady(true);}).catch(()=>{if(!cancelled)setDraftError('The unsaved note draft could not be loaded. It has not been overwritten.');});return()=>{cancelled=true;};},[draftKey]);
- useEffect(()=>{if(!editorReady)return;editorWrites.current=editorWrites.current.catch(()=>{}).then(()=>draft?AsyncStorage.setItem(draftKey,JSON.stringify(draft)):AsyncStorage.removeItem(draftKey));void editorWrites.current.catch(()=>{});},[draft,draftKey,editorReady]);
+ useEffect(()=>{
+  if(!editorReady)return;
+  let current=true;
+  setRecoveryPending(true);
+  // Keep native writes serialized: timing out must not let an older write land
+  // after a newer draft (or after Save/Discard removes recovery data).
+  const timer=setTimeout(()=>{if(current)setRecoveryError('Draft recovery storage is taking too long. Keep this editor open, or use Save to save your note.');},8000);
+  const write=editorWrites.current.catch(()=>{}).then(()=>draft?AsyncStorage.setItem(draftKey,JSON.stringify(draft)):AsyncStorage.removeItem(draftKey));
+  editorWrites.current=write;
+  void write.then(()=>{if(current)setRecoveryError('');},()=>{
+   if(current)setRecoveryError(draft?'Draft recovery could not be saved on this device. Your text is still here; retry recovery or use Save.':'The old recovery draft could not be cleared. Your saved notes are kept, but the draft may reappear on reopen. Retry clearing it.');
+  }).finally(()=>{clearTimeout(timer);if(current)setRecoveryPending(false);});
+  return()=>{current=false;clearTimeout(timer);};
+ },[draft,draftKey,editorReady,recoveryRetry]);
  const categories=store.categories.filter(item=>!item.deleted).sort((a,b)=>a.name.localeCompare(b.name));
  const categoryNames=new Map(categories.map(item=>[item.id,item.name]));
  useEffect(()=>{if(category&&store.ready&&!categories.some(item=>item.id===category))setCategory('');},[category,categories,store.ready]);
@@ -98,11 +115,44 @@ function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:Rea
   finally{savingRef.current=false;setSaving(false);}
  };
  const closeEditor=()=>{void save();};
+ const recoveryNotice=recoveryError?<View testID="note-recovery-error" style={{gap:8}}><Text typography="ui" accessibilityLiveRegion="polite" style={s.status}>{recoveryError}</Text><Action label="Retry draft recovery" disabled={recoveryPending||saving} onPress={()=>setRecoveryRetry(value=>value+1)}/></View>:null;
  const saveCategory=()=>invoke(async()=>{
   if(categorySaving.current)return;categorySaving.current=true;setSavingCategory(true);
   try{const id=categoryForm.id??uuid();setCategoryForm({...categoryForm,id});await store.saveCategory({name:categoryForm.name.trim(),deleted:false},id,categoryForm.revision);setCategoryForm({name:''});}
   finally{categorySaving.current=false;setSavingCategory(false);}
  });
+ const lastDraft=useRef<Draft|undefined>(undefined);if(draft)lastDraft.current=draft;
+ const viewDraft=draft??lastDraft.current;
+ const editOpen=!!(visible&&editing&&draft),categoryOpen=visible&&managing;
+ const editTransition=useModalTransition(editOpen,visible),categoryTransition=useModalTransition(categoryOpen,visible);
+ const previousEditors=useRef({editOpen,categoryOpen});
+ useLayoutEffect(()=>{const previous=previousEditors.current;if(hostAvailable&&((previous.editOpen&&!editOpen)||(previous.categoryOpen&&!categoryOpen)))Keyboard.dismiss();previousEditors.current={editOpen,categoryOpen};},[editOpen,categoryOpen,hostAvailable]);
+ const editorOverlay=viewDraft?<MenuTheme><KeyboardAvoidingView enabled={Platform.OS==='android'&&!hostAvailable} behavior="height" style={{flex:1}}><Animated.View pointerEvents={editOpen?'auto':'none'} style={[{flex:1},editTransition.panel]}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}>
+   <SectionHeading title={viewDraft.id?'Edit note':'New note'}/>
+   <SectionBody footer={<SectionActions overlay leading={<RoundAction label="Save note and go back" disabled={saving} onPress={closeEditor} icon={ArrowLeft}/>}>
+    <RoundAction label={preview?'Edit text':'Preview note'} icon={preview?Pencil:Eye} selected={preview} disabled={saving} onPress={()=>{bodyInput.current?.blur();setPreview(value=>!value);}}/>
+    <SectionAction disabled={saving} text="Discard" label="Discard unsaved draft" onPress={()=>Alert.alert('Discard unsaved changes?','Saved notes and server copies are not deleted.',[{text:'Keep editing',style:'cancel'},{text:'Discard draft',style:'destructive',onPress:()=>{setEditing(false);setDraft(undefined);}}])}/>
+    <SectionAction text="Save" label={saving?'Saving note…':'Save note'} primary busy={saving} disabled={saving||(!viewDraft.title.trim()&&!viewDraft.body.trim())} onPress={()=>void save()}/></SectionActions>}>{clearance=>
+   <ScrollView style={s.bodyRegion} keyboardShouldPersistTaps="handled" pointerEvents={saving?'none':'auto'} contentContainerStyle={{padding:16,paddingBottom:clearance+16,gap:8}}>
+    {recoveryNotice}
+    <TextInput typography="ui" accessibilityLabel="Note title" editable={!saving} placeholder="Title" placeholderTextColor={colors.muted} value={viewDraft.title} maxLength={200} onChangeText={title=>setDraft({...viewDraft,title})} style={[s.input,{fontWeight:'600'}]}/>
+    {preview&&<NotesPreview body={viewDraft.body} onToggle={line=>setDraft({...viewDraft,body:toggleNoteTask(viewDraft.body,line)})}/>}<View testID="note-editor-input" accessibilityElementsHidden={preview} importantForAccessibility={preview?'no-hide-descendants':'auto'} style={preview?{display:'none'}:undefined}><TextInput typography="ui" ref={bodyInput} accessibilityLabel="Note body" editable={!saving} placeholder="Write a note…" placeholderTextColor={colors.muted} multiline textAlignVertical="top" value={viewDraft.body} maxLength={100000} onChangeText={body=>setDraft({...viewDraft,body})} style={[s.input,{minHeight:240,lineHeight:26}]}/></View>
+    <Text typography="ui" style={s.label}>Categories</Text><View style={s.wrap}>{categories.length?categories.map(item=><Pressable key={item.id} accessibilityRole="checkbox" accessibilityLabel={`Assign category ${item.name}`} accessibilityState={{checked:viewDraft.categoryIds.includes(item.id)}} onPress={()=>setDraft({...viewDraft,categoryIds:viewDraft.categoryIds.includes(item.id)?viewDraft.categoryIds.filter(id=>id!==item.id):viewDraft.categoryIds.length<20?[...viewDraft.categoryIds,item.id]:viewDraft.categoryIds})} style={[s.chip,viewDraft.categoryIds.includes(item.id)&&s.selected]}><Text typography="ui" style={s.small}>{item.name}</Text></Pressable>):<Text typography="ui" style={s.status}>Create categories from the Notes screen.</Text>}</View>
+    <Text typography="ui" style={s.label}>Shade</Text><View style={s.wrap}>{(Object.keys(palette) as (keyof typeof palette)[]).map(color=><Pressable key={color} accessibilityRole="radio" accessibilityLabel={`Note shade: ${shadeLabels[color]}`} accessibilityState={{checked:viewDraft.color===color}} onPress={()=>setDraft({...viewDraft,color})} style={[s.color,{backgroundColor:palette[color]},viewDraft.color===color&&s.swatchSelected]}>{viewDraft.color===color&&<Check size={20} color={colors.foreground}/>}</Pressable>)}</View>
+    <Action label={viewDraft.pinned?'Unpin this note':'Pin this note'} onPress={()=>setDraft({...viewDraft,pinned:!viewDraft.pinned})}/>
+   </ScrollView>
+   }</SectionBody>
+  </SafeAreaView></Animated.View></KeyboardAvoidingView></MenuTheme>:null;
+ const categoryOverlay=<MenuTheme><KeyboardAvoidingView enabled={Platform.OS==='android'&&!hostAvailable} behavior="height" style={{flex:1}}><Animated.View pointerEvents={categoryOpen?'auto':'none'} style={[{flex:1},categoryTransition.panel]}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}><SectionHeading title="Categories"/><SectionBody footer={<SectionActions overlay leading={<RoundAction label="Close categories" disabled={savingCategory} onPress={()=>setManaging(false)} icon={ArrowLeft}/>}>
+   {categoryForm.id&&<SectionAction label="Cancel category rename" text="Cancel" disabled={savingCategory} onPress={()=>setCategoryForm({name:''})}/>}
+   <SectionAction label={categoryForm.id?'Save category name':'Create category'} text={categoryForm.id?'Save':'Create'} primary busy={savingCategory} disabled={savingCategory||!categoryForm.name.trim()} onPress={saveCategory}/>
+  </SectionActions>}>{clearance=><ScrollView ref={categoryScroll} style={s.bodyRegion} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:clearance+16,gap:8}}>
+   <Text typography="ui" style={s.label}>{categoryForm.id?'Rename category':'New category'}</Text>
+   <TextInput typography="ui" ref={categoryInput} accessibilityLabel="Category name" editable={!savingCategory} placeholder="Category name" placeholderTextColor={colors.muted} maxLength={60} value={categoryForm.name} onChangeText={name=>setCategoryForm({...categoryForm,name})} style={s.input}/>
+   {categories.map((item:CategoryRecord)=><View key={item.id} style={s.categoryRow}><Text typography="ui" style={s.categoryName}>{item.name}</Text><View style={s.wrap}><Action label={`Rename ${item.name}`} text="Rename" disabled={savingCategory} onPress={()=>{setCategoryForm({id:item.id,name:item.name,revision:item.revision});categoryScroll.current?.scrollTo({y:0,animated:true});categoryInput.current?.focus();}}/><Action label={`Remove category ${item.name}`} text="Remove" disabled={savingCategory} onPress={()=>Alert.alert('Remove category?','Your notes will be kept.',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>invoke(async()=>{await store.saveCategory({name:item.name,deleted:true},item.id);if(category===item.id)setCategory('');})}])}/></View></View>)}
+  </ScrollView>}</SectionBody></SafeAreaView></Animated.View></KeyboardAvoidingView></MenuTheme>;
+ const hostedEditor=useOverlayHost(editOpen,editTransition.mounted&&visible,editorOverlay,()=>{if(editOpen)closeEditor();});
+ const hostedCategory=useOverlayHost(categoryOpen,categoryTransition.mounted&&visible,categoryOverlay,()=>{if(categoryOpen&&!categorySaving.current)setManaging(false);});
  if(!visible)return null;
  // This absolute overlay owns its IME clearance; App already consumes the bottom safe area.
  return <MotionSurface active={visible} testID="notes-screen" style={[StyleSheet.absoluteFill,s.screen,{paddingTop:topInset,paddingBottom:Math.max(0,keyboard-insets.bottom),zIndex:25}]}>
@@ -112,6 +162,7 @@ function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:Rea
   <FlatList style={s.bodyRegion} data={notes} numColumns={1} keyExtractor={note=>note.id} contentContainerStyle={{paddingHorizontal:16,paddingBottom:clearance+16,gap:8}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
    ListHeaderComponent={<View testID="notes-search-and-filters" style={{gap:8,marginBottom:8}}>
     {categories.length>0&&<ScrollView testID="notes-category-strip" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={s.categoryScroller} contentContainerStyle={s.categoryStrip}><Pressable accessibilityRole="tab" accessibilityLabel="All categories" accessibilityState={{selected:!category}} onPress={()=>setCategory('')} style={[s.chip,s.categoryFilter,!category&&s.selected]}><Text typography="ui" style={s.small}>All</Text></Pressable>{categories.map(item=><Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={`Filter category ${item.name}`} accessibilityState={{selected:category===item.id}} onPress={()=>setCategory(item.id)} style={[s.chip,s.categoryFilter,category===item.id&&s.selected]}><Text typography="ui" style={s.small}>{item.name}</Text></Pressable>)}</ScrollView>}
+    {!editing&&recoveryNotice}
     {!!draftError&&<View style={{gap:8}}><Text typography="ui" style={s.status}>{draftError}</Text><Action label="Discard unreadable draft" onPress={()=>Alert.alert('Discard unreadable draft?','Only the unsaved editor draft will be removed. Your saved notes are kept.',[{text:'Cancel',style:'cancel'},{text:'Discard draft',style:'destructive',onPress:()=>{setDraftError('');setDraft(undefined);setEditorReady(true);}}])}/></View>}
     {(!store.ready||store.error||store.pendingCount>0)&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.status}>{!store.ready?(store.error||'Loading notes…'):store.error||`${store.pendingCount} pending · Saved on this device`}</Text>}
    </View>}
@@ -125,29 +176,8 @@ function NotesScreenContent({menu,backendId,request,visible,topInset}:{menu?:Rea
     <View style={s.cardActions}><Pressable accessibilityRole="button" accessibilityLabel={`${item.pinned?'Unpin':'Pin'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),pinned:!item.pinned},item.id))} style={s.icon}><Pin size={18} color={item.pinned?colors.accent:colors.muted}/></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${item.trashed?'Restore':'Trash'} note ${item.title||'Untitled'}`} onPress={()=>invoke(()=>store.saveNote({...valueOf(item),trashed:!item.trashed},item.id))} style={s.icon}>{item.trashed?<ArrowLeft size={18} color={colors.muted}/>:<Trash2 size={18} color={colors.muted}/>}</Pressable></View>
    </View>}/>
   }</SectionBody>
-  {editing&&draft&&<Modal visible animationType="slide" onRequestClose={closeEditor}><KeyboardAvoidingView enabled={Platform.OS==='android'} behavior="height" style={{flex:1}}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}>
-   <SectionHeading title={draft.id?'Edit note':'New note'}/>
-   <SectionBody footer={<SectionActions overlay leading={<RoundAction label="Save note and go back" disabled={saving} onPress={closeEditor} icon={ArrowLeft}/>}>
-    <RoundAction label={preview?'Edit text':'Preview note'} icon={preview?Pencil:Eye} selected={preview} disabled={saving} onPress={()=>{bodyInput.current?.blur();setPreview(value=>!value);}}/>
-    <SectionAction disabled={saving} text="Discard" label="Discard unsaved draft" onPress={()=>Alert.alert('Discard unsaved changes?','Saved notes and server copies are not deleted.',[{text:'Keep editing',style:'cancel'},{text:'Discard draft',style:'destructive',onPress:()=>{setEditing(false);setDraft(undefined);}}])}/>
-    <SectionAction text="Save" label={saving?'Saving note…':'Save note'} primary busy={saving} disabled={saving||(!draft.title.trim()&&!draft.body.trim())} onPress={()=>void save()}/></SectionActions>}>{clearance=>
-   <ScrollView style={s.bodyRegion} keyboardShouldPersistTaps="handled" pointerEvents={saving?'none':'auto'} contentContainerStyle={{padding:16,paddingBottom:clearance+16,gap:8}}>
-    <TextInput typography="ui" accessibilityLabel="Note title" editable={!saving} placeholder="Title" placeholderTextColor={colors.muted} value={draft.title} maxLength={200} onChangeText={title=>setDraft({...draft,title})} style={[s.input,{fontWeight:'600'}]}/>
-    {preview&&<NotesPreview body={draft.body} onToggle={line=>setDraft({...draft,body:toggleNoteTask(draft.body,line)})}/>}<View testID="note-editor-input" accessibilityElementsHidden={preview} importantForAccessibility={preview?'no-hide-descendants':'auto'} style={preview?{display:'none'}:undefined}><TextInput typography="ui" ref={bodyInput} accessibilityLabel="Note body" editable={!saving} placeholder="Write a note…" placeholderTextColor={colors.muted} multiline textAlignVertical="top" value={draft.body} maxLength={100000} onChangeText={body=>setDraft({...draft,body})} style={[s.input,{minHeight:240,lineHeight:26}]}/></View>
-    <Text typography="ui" style={s.label}>Categories</Text><View style={s.wrap}>{categories.length?categories.map(item=><Pressable key={item.id} accessibilityRole="checkbox" accessibilityLabel={`Assign category ${item.name}`} accessibilityState={{checked:draft.categoryIds.includes(item.id)}} onPress={()=>setDraft({...draft,categoryIds:draft.categoryIds.includes(item.id)?draft.categoryIds.filter(id=>id!==item.id):draft.categoryIds.length<20?[...draft.categoryIds,item.id]:draft.categoryIds})} style={[s.chip,draft.categoryIds.includes(item.id)&&s.selected]}><Text typography="ui" style={s.small}>{item.name}</Text></Pressable>):<Text typography="ui" style={s.status}>Create categories from the Notes screen.</Text>}</View>
-    <Text typography="ui" style={s.label}>Shade</Text><View style={s.wrap}>{(Object.keys(palette) as (keyof typeof palette)[]).map(color=><Pressable key={color} accessibilityRole="radio" accessibilityLabel={`Note shade: ${shadeLabels[color]}`} accessibilityState={{checked:draft.color===color}} onPress={()=>setDraft({...draft,color})} style={[s.color,{backgroundColor:palette[color]},draft.color===color&&s.swatchSelected]}>{draft.color===color&&<Check size={20} color={colors.foreground}/>}</Pressable>)}</View>
-    <Action label={draft.pinned?'Unpin this note':'Pin this note'} onPress={()=>setDraft({...draft,pinned:!draft.pinned})}/>
-   </ScrollView>
-   }</SectionBody>
-  </SafeAreaView></KeyboardAvoidingView></Modal>}
-  {managing&&<Modal visible animationType="slide" onRequestClose={()=>{if(!categorySaving.current)setManaging(false);}}><KeyboardAvoidingView enabled={Platform.OS==='android'} behavior="height" style={{flex:1}}><SafeAreaView style={[s.screen,{flex:1,paddingBottom:modalKeyboard}]}><SectionHeading title="Categories"/><SectionBody footer={<SectionActions overlay leading={<RoundAction label="Close categories" disabled={savingCategory} onPress={()=>setManaging(false)} icon={ArrowLeft}/>}>
-   {categoryForm.id&&<SectionAction label="Cancel category rename" text="Cancel" disabled={savingCategory} onPress={()=>setCategoryForm({name:''})}/>}
-   <SectionAction label={categoryForm.id?'Save category name':'Create category'} text={categoryForm.id?'Save':'Create'} primary busy={savingCategory} disabled={savingCategory||!categoryForm.name.trim()} onPress={saveCategory}/>
-  </SectionActions>}>{clearance=><ScrollView ref={categoryScroll} style={s.bodyRegion} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,paddingBottom:clearance+16,gap:8}}>
-   <Text typography="ui" style={s.label}>{categoryForm.id?'Rename category':'New category'}</Text>
-   <TextInput typography="ui" ref={categoryInput} accessibilityLabel="Category name" editable={!savingCategory} placeholder="Category name" placeholderTextColor={colors.muted} maxLength={60} value={categoryForm.name} onChangeText={name=>setCategoryForm({...categoryForm,name})} style={s.input}/>
-   {categories.map((item:CategoryRecord)=><View key={item.id} style={s.categoryRow}><Text typography="ui" style={s.categoryName}>{item.name}</Text><View style={s.wrap}><Action label={`Rename ${item.name}`} text="Rename" disabled={savingCategory} onPress={()=>{setCategoryForm({id:item.id,name:item.name,revision:item.revision});categoryScroll.current?.scrollTo({y:0,animated:true});categoryInput.current?.focus();}}/><Action label={`Remove category ${item.name}`} text="Remove" disabled={savingCategory} onPress={()=>Alert.alert('Remove category?','Your notes will be kept.',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>invoke(async()=>{await store.saveCategory({name:item.name,deleted:true},item.id);if(category===item.id)setCategory('');})}])}/></View></View>)}
-  </ScrollView>}</SectionBody></SafeAreaView></KeyboardAvoidingView></Modal>}
+  {!hostedEditor&&editOpen&&<Modal visible transparent animationType="none" onRequestClose={closeEditor}>{editorOverlay}</Modal>}
+  {!hostedCategory&&categoryOpen&&<Modal visible transparent animationType="none" onRequestClose={()=>{if(!categorySaving.current)setManaging(false);}}>{categoryOverlay}</Modal>}
  </MotionSurface>;
 }
 const sTheme=themed(({colors,menuChrome,shadows})=>StyleSheet.create({

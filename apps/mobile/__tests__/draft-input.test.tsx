@@ -129,3 +129,16 @@ test('empty inline and expanded drafts have no visible placeholder but retain ac
   expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(input);
  }finally{await act(async()=>tree.unmount());}
 });
+
+test('native IME geometry can suppress the independent composer layout animation without replacing the input',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ const render=(compact:boolean)=><DraftInput scope="same" value="Keep text" onChangeText={()=>{}} compact={compact} animateLayout={false}/>;
+ await act(async()=>{tree=Renderer.create(render(true));});
+ const input=tree.root.findByProps({accessibilityLabel:'Message draft'});
+ expect(tree.root.findByProps({testID:'draft-editor'}).props.layout).toBeUndefined();
+ expect(tree.root.findByProps({testID:'composer-controls'}).props.layout).toBeUndefined();
+ await act(async()=>tree.update(render(false)));
+ expect(tree.root.findByProps({accessibilityLabel:'Message draft'})).toBe(input);
+ expect(input.props.value).toBe('Keep text');
+ await act(async()=>tree.unmount());
+});

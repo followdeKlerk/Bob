@@ -1,7 +1,7 @@
 import {readFileSync,mkdirSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {MaintenanceStore,MaintenanceSupervisor,type MaintenanceConfig,type Release} from './maintenance.js';
+import {MaintenanceStore,MaintenanceSupervisor,runUpdateJob,type MaintenanceConfig,type Release} from './maintenance.js';
 import {buildRelease} from './maintenance-build.js';
 import {acquireOwner} from './ownership.js';
 import {supervisorProtocol,patchSupervisorProtocol,type SupervisorEvidence} from './maintenance-migration.js';
@@ -49,16 +49,7 @@ try{
   const job=store.nextQueued();
   if(!job){await new Promise(r=>setTimeout(r,750));continue;}
   try{
-   if(job.action==='rollback'){
-    const previous=store.get<Release>('previous');if(!previous)throw Error('No previous release available');
-    store.patch(job.id,{status:'activating',stage:'Waiting for active work, then restoring previous code'});await supervisor.activate(previous);
-   }else{
-    const release=await buildRelease(home,config,store,job);
-    if(job.action==='update'&&job.target!=='android'){
-     store.patch(job.id,{status:'activating',stage:'Waiting for active work, then restarting backend'});await supervisor.activate(release);
-    }
-   }
-   store.patch(job.id,{status:'complete',stage:job.action==='rollback'?'Previous code restored; chat data retained':job.target==='backend'?'Backend update complete':'Ready — install the signed APK in chat'});
+   await runUpdateJob(store,job,()=>buildRelease(home,config,store,job),release=>supervisor.activate(release));
    const installed=supervisor.recoveryRelease(); // Re-exec choices obey the same read-only floor guard.
    const own=dirname(fileURLToPath(import.meta.url)),next=dirname(installed.cli);
    // Evidence must keep naming the actual runner. Even identical supervisor code

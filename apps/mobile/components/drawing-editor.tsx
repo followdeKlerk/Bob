@@ -1,9 +1,12 @@
-import {withMenuTheme} from '../menu-theme';
+import {useModalTransition} from './modal-transition';
+import {MenuTheme,withMenuTheme} from '../menu-theme';
+import {useOverlayHost} from './overlay-host';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,Modal,PanResponder,Pressable,ScrollView,StyleSheet,View} from 'react-native';
+import {Alert,Animated,Modal,PanResponder,Pressable,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+const AnimatedSafeAreaView=Animated.createAnimatedComponent(SafeAreaView);
 import Svg,{Path} from 'react-native-svg';
 import {RotateCcw,RotateCw} from 'lucide-react-native';
 import {themed,useTheme,useThemedValue} from '../theme';
@@ -20,10 +23,13 @@ const exportTimeoutMs=10000;
 function pathFor(stroke:Stroke){const path=stroke.points.map((point,index)=>`${index?'L':'M'}${point.x},${point.y}`).join(' ');return stroke.points.length===1?`${path} l0.01,0`:path;}
 function DrawingEditorContent({visible,onCancel,onAdd}:{visible:boolean;onCancel:()=>void;onAdd:(pngDataUri:string)=>Promise<void>}){
  const {colors}=useTheme();
+ const transition=useModalTransition(visible);
  const s=useThemedValue(sTheme);
 
  const [strokes,setStrokes]=useState<Stroke[]>([]),[redo,setRedo]=useState<Stroke[]>([]),[color,setColor]=useState('#111111'),[penWidth,setPenWidth]=useState(5),[erasing,setErasing]=useState(false);
+ const retainedStrokes=useRef(strokes);if(visible)retainedStrokes.current=strokes;
  const [canvas,setCanvas]=useState<Size>({width:0,height:0}),[paper,setPaper]=useState<Size|null>(null),[saving,setSaving]=useState(false),[error,setError]=useState('');
+ const retainedPaper=useRef<Size|null>(paper);if(visible)retainedPaper.current=paper;
  // Lock document coordinates on the first stroke, not to transient feedback/rotation layouts.
  const viewport=useRef(canvas),documentSize=useRef<Size|null>(null),drawing=useRef(false);
  const svgRef=useRef<any>(null),inFlight=useRef(false),active=useRef(false),operation=useRef(0),cancelExport=useRef<(()=>void)|null>(null),confirming=useRef(false);
@@ -86,9 +92,9 @@ function DrawingEditorContent({visible,onCancel,onAdd}:{visible:boolean;onCancel
   }
  }
  const undoDisabled=saving||!strokes.length,redoDisabled=saving||!redo.length;
- const size=paper??canvas,fit=fitPaper(canvas,size);
- return <Modal visible={visible} animationType="slide" onRequestClose={requestCancel} statusBarTranslucent>
-  <SafeAreaView style={s.root}>
+ const size=(visible?paper:retainedPaper.current)??canvas,fit=fitPaper(canvas,size);
+ const overlay=<MenuTheme>
+  <AnimatedSafeAreaView pointerEvents={visible?'auto':'none'} accessibilityElementsHidden={!visible} importantForAccessibility={visible?'auto':'no-hide-descendants'} style={[s.root,transition.panel]}>
    <View style={{marginHorizontal:-16}}><SectionHeading title="Drawing"/></View>
    <ScrollView testID="drawing-toolbar" horizontal showsHorizontalScrollIndicator={false} style={s.toolbar} contentContainerStyle={s.tools}>
     <Pressable accessibilityRole="button" accessibilityLabel="Undo" accessibilityState={{disabled:undoDisabled}} disabled={undoDisabled} onPress={undo} style={[s.tool,undoDisabled&&s.disabled]}><RotateCcw size={20} color={colors.foreground}/></Pressable>
@@ -105,12 +111,14 @@ function DrawingEditorContent({visible,onCancel,onAdd}:{visible:boolean;onCancel
    <View onLayout={event=>{const layout=event.nativeEvent.layout;viewport.current={width:layout.width,height:layout.height};setCanvas(viewport.current);}} style={[s.canvas,{marginBottom:clearance+8}]} {...responder.panHandlers} accessibilityLabel="Drawing canvas" accessibilityRole="image">
     <Svg ref={svgRef} pointerEvents="none" width={fit.width} height={fit.height} style={{position:'absolute',left:fit.left,top:fit.top}} viewBox={`0 0 ${Math.max(1,size.width)} ${Math.max(1,size.height)}`} preserveAspectRatio="xMidYMid meet">
      <Path d={`M0 0 H${size.width} V${size.height} H0 Z`} fill="#ffffff"/>
-     {strokes.map((stroke,index)=><Path key={index} d={pathFor(stroke)} stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
+     {(visible?strokes:retainedStrokes.current).map((stroke,index)=><Path key={index} d={pathFor(stroke)} stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
     </Svg>
    </View>
    }</SectionBody>
-  </SafeAreaView>
- </Modal>;
+  </AnimatedSafeAreaView>
+ </MenuTheme>;
+ const hosted=useOverlayHost(visible,transition.mounted,overlay,()=>{if(visible)requestCancel();});
+ return hosted?null:<Modal visible={visible} transparent animationType="none" onRequestClose={()=>{if(visible)requestCancel();}} statusBarTranslucent>{overlay}</Modal>;
 }
 const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  root:{flex:1,backgroundColor:colors.background,paddingHorizontal:16},toolbar:{flexGrow:0,flexShrink:0},tools:{minHeight:64,flexDirection:'row',alignItems:'center',gap:8,paddingVertical:8},

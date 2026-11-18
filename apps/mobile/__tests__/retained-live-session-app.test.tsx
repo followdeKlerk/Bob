@@ -55,12 +55,12 @@ function button(root:Renderer.ReactTestInstance,label:string){
 function list(root:Renderer.ReactTestInstance){return root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToOffset==='function')[0];}
 function draft(root:Renderer.ReactTestInstance){return root.findByProps({accessibilityLabel:'Message draft'});}
 function toolHeader(root:Renderer.ReactTestInstance){return root.findAll(node=>node.props.accessibilityLabel==='Tool details: read'&&node.props.accessibilityRole==='button'&&!!node.props.style)[0];}
-async function navigateTo(tree:Renderer.ReactTestRenderer,destination:'Chat'|'Notes'|'Workstations'|'Tools'|'Settings'){
+async function navigateTo(tree:Renderer.ReactTestRenderer,destination:'Chat'|'Notes'|'Workstations'|'Tools'|'Settings'|'Tasks'){
  const notes=tree.root.findAll(node=>node.type===View&&typeof node.props.testID==='string'&&node.props.testID.startsWith('workspace-notes:')&&node.props.pointerEvents==='auto')[0];
  const root=notes??activeHost(tree),navigation=root.findAllByType(ChatNavigation).find(node=>node.props.showTrigger!==false)!;
  if(destination==='Chat'&&(!navigation.props.selected||navigation.props.selected==='Chat'))return;
  if(!navigation.props.open)await act(async()=>button(root,'Menu').props.onPress());
- await act(async()=>button(root.findByProps({testID:'chat-navigation-sheet'}),destination==='Chat'?'Back to chat':destination).props.onPress());
+ await act(async()=>button(tree.root.findByProps({testID:'overlay-active'}).findAllByProps({testID:'chat-navigation-sheet'}).at(-1)!,destination==='Chat'?'Back to chat':destination).props.onPress());
 }
 async function switchBackend(tree:Renderer.ReactTestRenderer,backend:Backend){
  await navigateTo(tree,'Workstations');
@@ -151,6 +151,93 @@ async function mount({emptyA=false,continuous=false,updates={enabled:false}}:{em
  });
  return {tree,streams,latest,publish,publishNative,publishNativeRaw,notifications,phone,connection,fetchMock,transition,close:async()=>act(async()=>tree.unmount())};
 }
+
+test('saved-session hydration starts while appearance is still reading, without exposing unthemed chat',async()=>{
+ const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let finish!:(value:string|null)=>void;
+ const held=new Promise<string|null>(resolve=>{finish=resolve;});
+ const spy=jest.spyOn(AsyncStorage,'getItem').mockImplementation(key=>key==='appearance'?held:get(key));
+ const app=await mount();
+ try{
+  expect(spy).toHaveBeenCalledWith('appearance');
+  expect(spy).toHaveBeenCalledWith('backends');
+  expect(spy).toHaveBeenCalledWith('selection');
+  expect(app.tree.root.findAllByType(DraftInput)).toHaveLength(0);
+  await act(async()=>finish('system'));
+  expect(host(app.tree,a)).toBeDefined();expect(draft(host(app.tree,a)).props.value).toBe('');
+  expect(app.streams).toHaveLength(1);
+ }finally{finish('system');await app.close();spy.mockImplementation(get);}
+});
+
+test('unopened Sessions does not mount its native list during startup or typing; first visit is retained',async()=>{
+ const app=await mount();
+ try{
+  const first=host(app.tree,a),editor=draft(first);
+  expect(first.findAllByProps({testID:'agent-session-tree'})).toHaveLength(0);
+  await act(async()=>editor.props.onChangeText('Preserved performance draft'));
+  expect(first.findAllByProps({testID:'agent-session-tree'})).toHaveLength(0);
+  await act(async()=>button(first,'Menu').props.onPress());
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Agents and Sessions').props.onPress());
+  const agents=first.findAllByProps({testID:'agent-session-tree'})[0];expect(agents).toBeDefined();
+  const search=first.findByProps({accessibilityLabel:'Search agents and sessions'});
+  await act(async()=>search.props.onChangeText('synthetic'));
+  await navigateTo(app.tree,'Chat');
+  expect(first.findAllByProps({testID:'agent-session-tree'})[0]).toBe(agents);
+  expect(draft(first)).toBe(editor);expect(editor.props.value).toBe('Preserved performance draft');
+  await act(async()=>button(first,'Menu').props.onPress());
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Agents and Sessions').props.onPress());
+  expect(first.findAllByProps({testID:'agent-session-tree'})[0]).toBe(agents);
+  expect(first.findByProps({accessibilityLabel:'Search agents and sessions'}).props.value).toBe('synthetic');
+ }finally{await app.close();}
+});
+
+test('optional history IO cannot hold the recovered draft or authenticated stream hostage',async()=>{
+ const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let finish!:(value:string|null)=>void;
+ const held=new Promise<string|null>(resolve=>{finish=resolve;});
+ const spy=jest.spyOn(AsyncStorage,'getItem').mockImplementation(key=>key===`chunked:history:${a.backendId}:${chat}`?held:get(key));
+ await AsyncStorage.setItem(`history:${a.backendId}:${chat}`,JSON.stringify({entries:[{id:89,kind:'bob.user',data:{text:'Stale cached text'}}],docs:{}}));
+ const app=await mount();
+ try{
+  expect(spy).toHaveBeenCalledWith(`pending:${a.backendId}:${chat}`);
+  expect(draft(host(app.tree,a)).props.editable).toBe(true);
+  expect(app.latest(a)?.publish).toBeDefined();
+  await app.publish(a,{},[{id:90,kind:'pi.assistant',model:[{role:'assistant',content:'Fresh authoritative answer'}]}]);
+  await act(async()=>finish(null));
+  expect(list(host(app.tree,a)).props.data.some((item:any)=>item.id===90)).toBe(true);
+ }finally{finish(null);await app.close();spy.mockImplementation(get);}
+});
+
+test('operation recovery still fences stream reconciliation and sends when optional history is independent',async()=>{
+ const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let finish!:(value:string|null)=>void;
+ const held=new Promise<string|null>(resolve=>{finish=resolve;});
+ const spy=jest.spyOn(AsyncStorage,'getItem').mockImplementation(key=>key===`pending:${a.backendId}:${chat}`?held:get(key));
+ const app=await mount();
+ try{
+  expect(draft(host(app.tree,a)).props.editable).toBe(false);
+  expect(app.streams).toHaveLength(0);
+  expect(Keychain.getGenericPassword).toHaveBeenCalledWith({service:`bob.${a.backendId}`});
+  await act(async()=>finish('synthetic-existing-operation'));
+  expect(app.streams).toHaveLength(1);
+  await act(async()=>draft(host(app.tree,a)).props.onChangeText('Must not resend'));
+  expect(button(host(app.tree,a),'Send message').props.disabled).toBe(true);
+  expect(app.fetchMock.mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
+ }finally{finish(null);await app.close();spy.mockImplementation(get);}
+});
+
+test('transcript bounds its initial native mount without trimming stored entries or reader retention',async()=>{
+ const app=await mount();
+ try{
+  const items=Array.from({length:40},(_,index)=>({id:index+1,kind:'pi.assistant',model:[{role:'assistant',content:`Synthetic preserved answer ${index}`}]}));
+  await app.publish(a,{},items);
+  const history=list(host(app.tree,a));
+  expect(history.props.initialNumToRender).toBe(4);
+  expect(history.props.maxToRenderPerBatch).toBe(4);
+  expect(history.props.windowSize).toBe(7);
+  expect(history.props.data).toHaveLength(40);
+  expect(history.props.data[0].id).toBe(40);
+  pauseEarlier(host(app.tree,a));
+  expect(history.props.maintainVisibleContentPosition).toEqual({minIndexForVisible:0});
+ }finally{await app.close();}
+});
 
 test('real workstation A → B → A retains both scope-keyed hosts, FlatLists, editors and open SSE instances',async()=>{
  const app=await mount();
@@ -295,16 +382,16 @@ test('two chats on one backend share one NotesScreen owner and preserve offline 
   await navigateTo(app.tree,'Notes');
   expect(workspace.props.pointerEvents).toBe('auto');expect(owner.props.visible).toBe(true);
   await act(async()=>button(workspace,'Create note').props.onPress());
-  act(()=>workspace.findByProps({accessibilityLabel:'Note title'}).props.onChangeText('Synthetic pending note'));
-  act(()=>workspace.findByProps({accessibilityLabel:'Note body'}).props.onChangeText('Saved locally without a notes server'));
-  await act(async()=>button(workspace,'Save note').props.onPress());
+  act(()=>app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note title'}).props.onChangeText('Synthetic pending note'));
+  act(()=>app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note body'}).props.onChangeText('Saved locally without a notes server'));
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Save note').props.onPress());
   expect(button(workspace,'Open note Synthetic pending note')).toBeDefined();
   const cacheKey=`notes:v1:${a.backendId}`,editorKey=`note-editor:v1:${a.backendId}`;
   const pending=JSON.parse((await AsyncStorage.getItem(cacheKey))!).pending;
   expect(pending).toHaveLength(1);expect(pending[0].value.body).toBe('Saved locally without a notes server');
   await act(async()=>button(workspace,'Create note').props.onPress());
-  act(()=>workspace.findByProps({accessibilityLabel:'Note title'}).props.onChangeText('Synthetic unsaved draft'));
-  await act(async()=>workspace.findByProps({accessibilityLabel:'Note body'}).props.onChangeText('Editor text must outlive a chat switch'));
+  act(()=>app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note title'}).props.onChangeText('Synthetic unsaved draft'));
+  await act(async()=>app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note body'}).props.onChangeText('Editor text must outlive a chat switch'));
   const editor=JSON.parse((await AsyncStorage.getItem(editorKey))!);
   expect(editor.body).toBe('Editor text must outlive a chat switch');
   // A notification can legitimately change sessions while the editor Modal is open.
@@ -317,8 +404,8 @@ test('two chats on one backend share one NotesScreen owner and preserve offline 
   expect(JSON.parse((await AsyncStorage.getItem(editorKey))!)).toEqual(editor);
   await navigateTo(app.tree,'Notes');
   expect(owners()).toEqual([owner]);expect(owner.props.visible).toBe(true);
-  expect(workspace.findByProps({accessibilityLabel:'Note title'}).props.value).toBe('Synthetic unsaved draft');
-  expect(workspace.findByProps({accessibilityLabel:'Note body'}).props.value).toBe(editor.body);
+  expect(app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note title'}).props.value).toBe('Synthetic unsaved draft');
+  expect(app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note body'}).props.value).toBe(editor.body);
   expect(button(workspace,'Open note Synthetic pending note')).toBeDefined();
   // Exercise the Notes-owned root menu, outside either conversation host.
   await navigateTo(app.tree,'Chat');
@@ -326,7 +413,7 @@ test('two chats on one backend share one NotesScreen owner and preserve offline 
   await openNotification(a,chat);await navigateTo(app.tree,'Notes');
   expect(host(app.tree,a)).toBe(first);expect(host(app.tree,a,8)).toBe(second);
   expect(owners()).toEqual([owner]);expect(notesHost(app.tree,a)).toBe(workspace);
-  expect(workspace.findByProps({accessibilityLabel:'Note body'}).props.value).toBe(editor.body);
+  expect(app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Note body'}).props.value).toBe(editor.body);
   expect(JSON.parse((await AsyncStorage.getItem(cacheKey))!).pending).toEqual(pending);
   expect(JSON.parse((await AsyncStorage.getItem(editorKey))!)).toEqual(editor);
   expect(app.fetchMock.mock.calls.some(([url])=>String(url).startsWith(`${a.endpoint}/v1/notes?`))).toBe(true);
@@ -369,8 +456,8 @@ test('editing a workstation alias does not restart either retained SSE or replac
   await switchBackend(app.tree,b);const second=host(app.tree,b),oldB=app.latest(b);
   await switchBackend(app.tree,a);await navigateTo(app.tree,'Workstations');
   await act(async()=>button(first,'Edit alias for Example A').props.onPress());
-  act(()=>first.findByProps({accessibilityLabel:'Workstation alias'}).props.onChangeText('Synthetic alias'));
-  await act(async()=>button(first,'Save workstation alias').props.onPress());
+  act(()=>app.tree.root.findByProps({testID:'overlay-active'}).findByProps({accessibilityLabel:'Workstation alias'}).props.onChangeText('Synthetic alias'));
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Save workstation alias').props.onPress());
   expect(button(first,'Synthetic alias')).toBeDefined();
   expect(JSON.parse((await AsyncStorage.getItem('backends'))!).find((backend:Backend)=>backend.backendId===a.backendId).alias).toBe('Synthetic alias');
   await navigateTo(app.tree,'Chat');
@@ -621,7 +708,7 @@ test('one update owner survives empty/live and retained-chat switches without re
   expect(popup().props.visible).toBe(false);
   await act(async()=>button(app.tree.root,'App update status').props.onPress());
   expect(popup().props.visible).toBe(true);
-  act(()=>popup().findByType(Modal).props.onRequestClose());
+  act(()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Close update bubble').props.onPress());
   await openNotification(a,chat);
   const first=host(app.tree,a),history=list(first),editor=draft(first),stream=app.latest(a);
   pauseEarlier(first);const scroll=jest.spyOn(history.instance,'scrollToOffset').mockImplementation(()=>{});
@@ -653,7 +740,7 @@ test('library reopen/sibling routes reuse one read; mutation and explicit refres
  const app=await mount();
  try{
   const fetch=app.fetchMock.getMockImplementation()!,requests:string[]=[];let saved={instructions:'Synthetic defaults',templates:{},skills:{}};
-  app.fetchMock.mockImplementation(async(input:any,init:any)=>{if(String(input).endsWith('/library')){requests.push(init.method);if(init.method==='PUT')saved={...saved,...JSON.parse(init.body)};return{ok:true,status:200,json:async()=>saved} as Response;}return fetch(input,init);});
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{if(String(input).endsWith('/library')){requests.push(init.method);if(init.method==='PATCH'){const change=JSON.parse(init.body);if(change.field==='instructions')saved={...saved,instructions:change.value};}return{ok:true,status:200,json:async()=>saved} as Response;}return fetch(input,init);});
   const root=activeHost(app.tree),editor=draft(root),history=list(root),stream=app.latest(a);
   await act(async()=>editor.props.onChangeText('Keep my composer'));
   await navigateTo(app.tree,'Settings');
@@ -667,11 +754,52 @@ test('library reopen/sibling routes reuse one read; mutation and explicit refres
   await act(async()=>button(root,'Instructions & templates').props.onPress());expect(requests).toEqual(['GET']);
   expect(root.findAllByProps({testID:'section-loading-overlay'})).toHaveLength(0);
   await act(async()=>root.findByProps({accessibilityLabel:'Backend default instructions'}).props.onChangeText('Updated defaults'));
-  await act(async()=>button(root,'Save instructions').props.onPress());expect(requests).toEqual(['GET','PUT','GET']);
+  await act(async()=>button(root,'Save instructions').props.onPress());expect(requests).toEqual(['GET','PATCH','GET']);
   await act(async()=>button(root,'Back to previous menu').props.onPress());await act(async()=>button(root,'Instructions & templates').props.onPress());
-  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Updated defaults');expect(requests).toEqual(['GET','PUT','GET']);
-  await act(async()=>button(root,'Refresh library').props.onPress());expect(requests).toEqual(['GET','PUT','GET','GET']);
+  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Updated defaults');expect(requests).toEqual(['GET','PATCH','GET']);
+  await act(async()=>button(root,'Refresh library').props.onPress());expect(requests).toEqual(['GET','PATCH','GET','GET']);
   await navigateTo(app.tree,'Chat');expect(draft(root)).toBe(editor);expect(editor.props.value).toBe('Keep my composer');expect(list(root)).toBe(history);expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();
+ }finally{await app.close();}
+});
+
+test('Tasks navigation shows the active conversation list and writes synthetic edits',async()=>{
+ const app=await mount();
+ try{
+  const root=activeHost(app.tree);
+  await app.publish(a,{'bob.todos':{items:[{text:'Synthetic task',done:false}]}});
+  await navigateTo(app.tree,'Tasks');
+  expect(button(root,'○ Synthetic task')).toBeDefined();
+  await act(async()=>button(root,'○ Synthetic task').props.onPress());
+  const writes=app.fetchMock.mock.calls.filter(([url,init])=>String(url).endsWith(`/chats/${chat}/todos`)&&init?.method==='PUT');
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(writes[0][1]!.body as string).items).toEqual([{text:'Synthetic task',done:true}]);
+  await app.publish(a,{'bob.todos':{items:[]}});
+  expect(root.findAllByProps({accessibilityLabel:'○ Synthetic task'})).toHaveLength(0);
+  await act(async()=>root.findByProps({accessibilityLabel:'New todo'}).props.onChangeText('Another synthetic task'));
+  await act(async()=>button(root,'Add todo').props.onPress());
+  const added=app.fetchMock.mock.calls.filter(([url,init])=>String(url).endsWith(`/chats/${chat}/todos`)&&init?.method==='PUT');
+  expect(JSON.parse(added[1][1]!.body as string).items).toEqual([{text:'Another synthetic task',done:false}]);
+  await app.publish(a,{'bob.todos':{items:[{text:'Another synthetic task',done:false}]}});
+  await act(async()=>button(root,'Remove task 1').props.onPress());
+  const removed=app.fetchMock.mock.calls.filter(([url,init])=>String(url).endsWith(`/chats/${chat}/todos`)&&init?.method==='PUT');
+  expect(JSON.parse(removed[2][1]!.body as string).items).toEqual([]);
+  await navigateTo(app.tree,'Chat');
+  expect(activeHost(app.tree)).toBe(root);
+ }finally{await app.close();}
+});
+
+test('using a template retains the existing composer draft',async()=>{
+ const app=await mount();
+ try{
+  const fetch=app.fetchMock.getMockImplementation()!;
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>String(input).endsWith('/library')?{ok:true,status:200,json:async()=>({instructions:'',templates:{Example:'Template body'},skills:{}})} as Response:fetch(input,init));
+  const root=activeHost(app.tree),editor=draft(root);
+  await act(async()=>editor.props.onChangeText('Unsent original'));
+  await navigateTo(app.tree,'Settings');
+  await act(async()=>button(root,'Instructions & templates').props.onPress());
+  await act(async()=>button(root,'Use template Example').props.onPress());
+  expect(draft(root)).toBe(editor);
+  expect(editor.props.value).toBe('Unsent original\n\nTemplate body');
  }finally{await app.close();}
 });
 
@@ -709,10 +837,10 @@ test('model catalog reopens without another read while conversation config is al
    if(url.endsWith('/configure')){if(init.method==='GET')configReads++;else configured={...configured,...JSON.parse(init.body)};return{ok:true,status:200,json:async()=>configured} as Response;}
    return fetch(input,init);
   });
-  const root=activeHost(app.tree);const open=async()=>{await act(async()=>button(root,'Chat actions').props.onPress());await act(async()=>button(root,'Model & thinking').props.onPress());};
+  const root=activeHost(app.tree);const open=async()=>{await act(async()=>button(root,'Chat actions').props.onPress());await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Model & thinking').props.onPress());};
   await open();expect(catalogs).toBe(1);expect(configReads).toBe(1);expect(root.findByType(VoiceInputButton).props.active).toBe(false);
   await act(async()=>root.findByType(ModelPicker).props.onClose());await open();expect(catalogs).toBe(1);expect(configReads).toBe(2);
-  await act(async()=>button(root,'Select Synthetic fast (example)').props.onPress());await act(async()=>button(root,'High thinking').props.onPress());await act(async()=>button(root,'Apply model selection').props.onPress());
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Select Synthetic fast (example)').props.onPress());await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'High thinking').props.onPress());await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Apply model selection').props.onPress());
   expect(configured.thinkingLevel).toBe('high');expect(configReads).toBe(3);await open();expect(configReads).toBe(4);expect(catalogs).toBe(1);
   await act(async()=>root.findByType(ModelPicker).props.onClose());
   await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Advanced').props.onPress());await act(async()=>button(root,'Provider connection').props.onPress());await act(async()=>button(root,'Configure backend provider').props.onPress());
@@ -745,7 +873,7 @@ test('expanded editor and library/Settings Back preserve draft and deactivate di
   act(()=>DeviceEventEmitter.emit('BobKeyboardInset',{imeBottom:300}));
   act(()=>editor.props.onContentSizeChange({nativeEvent:{contentSize:{height:100}}}));
   await act(async()=>button(root,'Expand message editor').props.onPress());expect(voice.props.active).toBe(false);
-  await act(async()=>button(root,'Collapse message editor').props.onPress());expect(voice.props.active).toBe(true);
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Collapse message editor').props.onPress());expect(voice.props.active).toBe(true);
   await navigateTo(app.tree,'Settings');expect(voice.props.active).toBe(false);
   await act(async()=>button(root,'Appearance').props.onPress());await act(async()=>button(root,'Back to previous menu').props.onPress());expect(root.findAllByType(SettingsHome)).toHaveLength(1);
   await act(async()=>button(root,'Back to previous menu').props.onPress());expect(voice.props.active).toBe(true);
@@ -776,7 +904,7 @@ test('update indicator and management revoke native capture; late finals cannot 
   const fresh=await listen();await final(fresh,'fresh final');await final(fresh,'duplicate final');expect(editor.props.value).toBe('Keep typed edits fresh final');
   // The existing Chat actions management route must also cancel a live microphone.
   const managementId=await listen();await act(async()=>button(first,'Chat actions').props.onPress());expect(native.cancel).toHaveBeenCalledWith(managementId);
-  await act(async()=>button(first,'More').props.onPress());await act(async()=>button(first,'Build & install').props.onPress());
+  await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'More').props.onPress());await act(async()=>button(app.tree.root.findByProps({testID:'overlay-active'}),'Build & install').props.onPress());
   expect(popup().props.visible).toBe(true);expect(button(app.tree.root,'Build app')).toBeDefined();expect(voice.props.active).toBe(false);
   await final(managementId);await act(async()=>button(app.tree.root,'Close update bubble').props.onPress());expect(voice.props.active).toBe(true);
   // Explicit Settings management stays open across a same-chat notification.
@@ -874,5 +1002,99 @@ test('actual command suggestions cancel capture, fence old generations and never
   await act(async()=>button(root,'Dismiss command suggestions').props.onPress());expect(voice.props.active).toBe(true);
   await act(async()=>{old('Retired original visit');beforeReturn('Retired return visit');});expect(editor.props.value).toBe('/next');expect(native.start).toHaveBeenCalledTimes(3);
   expect(draft(root)).toBe(editor);expect(list(root)).toBe(history);expect(app.latest(a)).toBe(stream);expect(stream.close).not.toHaveBeenCalled();expect(app.fetchMock.mock.calls.some(([url])=>String(url).endsWith('/messages'))).toBe(false);
+ }finally{await app.close();}
+});
+
+test('library saves are pending and single-admission; lost responses reconcile without clearing newer text or crossing workstation scope',async()=>{
+ const app=await mount();let release:(()=>void)|undefined;
+ try{
+  const original=app.fetchMock.getMockImplementation()!,writes:any[]=[];
+  const libraries={[a.backendId]:{instructions:'Defaults A',templates:{keep:'Keep A'},skills:{}},[b.backendId]:{instructions:'Defaults B',templates:{keep:'Keep B'},skills:{}}};
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{
+   if(String(input).endsWith('/library')){
+    const id=String(input).startsWith(a.endpoint)?a.backendId:b.backendId;
+    if(init.method==='PATCH'){
+     const change=JSON.parse(init.body);writes.push(change);
+     await new Promise<void>(done=>{release=()=>{libraries[id].instructions=change.value;done();};});
+     throw Error('Synthetic response lost after save');
+    }
+    return {ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(libraries[id]))} as Response;
+   }
+   return original(input,init);
+  });
+  const root=activeHost(app.tree);await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Instructions & templates').props.onPress());
+  await act(async()=>root.findByProps({accessibilityLabel:'Backend default instructions'}).props.onChangeText('Submitted A'));
+  const save=button(root,'Save instructions').props.onPress;
+  await act(async()=>{save();save();});expect(writes).toEqual([{field:'instructions',expected:'Defaults A',value:'Submitted A'}]);
+  expect(button(root,'Save instructions').props.disabled).toBe(true);expect(button(root,'Save message template').props.disabled).toBe(true);
+  await act(async()=>root.findByProps({accessibilityLabel:'Backend default instructions'}).props.onChangeText('Newer unsaved A'));
+  await act(async()=>release!());release=undefined;
+  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Newer unsaved A');
+  expect(root.findAll(node=>node.props.children==='Saved and checked.').length).toBeGreaterThan(0);
+  await act(async()=>button(root,'Refresh library').props.onPress());expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Newer unsaved A');
+  await switchBackend(app.tree,b);const second=activeHost(app.tree);await navigateTo(app.tree,'Settings');await act(async()=>button(second,'Instructions & templates').props.onPress());
+  expect(second.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Defaults B');
+  await switchBackend(app.tree,a);await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Instructions & templates').props.onPress());
+  expect(root.findByProps({accessibilityLabel:'Backend default instructions'}).props.value).toBe('Newer unsaved A');expect(writes).toHaveLength(1);
+ }finally{if(release)await act(async()=>release!());await app.close();}
+});
+
+test('template deletion requires destructive confirmation, rejects a stale dialog and sends only the named value',async()=>{
+ const app=await mount(),alerts=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+ try{
+  const original=app.fetchMock.getMockImplementation()!,writes:any[]=[];
+  const library={instructions:'Keep instructions',templates:{remove:'Remove this',keep:'Keep this'},skills:{}};
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{
+   if(String(input).endsWith('/library')){
+    if(init.method==='PATCH'){const change=JSON.parse(init.body);writes.push(change);if(change.value===null)delete (library.templates as any)[change.name];}
+    return {ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(library))} as Response;
+   }
+   return original(input,init);
+  });
+  const root=activeHost(app.tree);await act(async()=>draft(root).props.onChangeText('Keep composer'));
+  await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Instructions & templates').props.onPress());
+  await act(async()=>root.findByProps({accessibilityLabel:'Template message'}).props.onChangeText('Keep unsaved template'));
+  act(()=>button(root,'Delete template remove').props.onPress());expect(writes).toHaveLength(0);
+  const stale=alerts.mock.calls.at(-1)![2]!.find(item=>item.style==='destructive')!;expect(stale.text).toBe('Delete template');
+  await navigateTo(app.tree,'Chat');await act(async()=>stale.onPress!());expect(writes).toHaveLength(0);
+  await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Instructions & templates').props.onPress());
+  act(()=>button(root,'Delete template remove').props.onPress());const confirm=alerts.mock.calls.at(-1)![2]!.find(item=>item.style==='destructive')!;
+  await act(async()=>{confirm.onPress!();confirm.onPress!();});
+  expect(writes).toEqual([{field:'template',name:'remove',expected:'Remove this',value:null}]);
+  expect(library.instructions).toBe('Keep instructions');expect(library.templates).toEqual({keep:'Keep this'});
+  expect(root.findByProps({accessibilityLabel:'Template message'}).props.value).toBe('Keep unsaved template');expect(draft(root).props.value).toBe('Keep composer');
+ }finally{await app.close();}
+});
+
+test('skill save and archive use exact reviewed values; failed readback preserves editor and requires refresh',async()=>{
+ const app=await mount(),alerts=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+ try{
+  const original=app.fetchMock.getMockImplementation()!,writes:any[]=[];
+  const before={description:'Example skill',markdown:'Original skill',enabled:true};
+  const library={instructions:'Keep instructions',templates:{keep:'Keep template'},skills:{example:before} as Record<string,typeof before>};
+  let failRead=false;
+  app.fetchMock.mockImplementation(async(input:any,init:any)=>{
+   if(String(input).endsWith('/library')){
+    if(init.method==='PATCH'){
+     const change=JSON.parse(init.body);writes.push(change);if(change.value===null)delete library.skills[change.name];else library.skills[change.name]=change.value;
+    }else if(failRead){failRead=false;throw Error('Synthetic readback unavailable');}
+    return {ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(library))} as Response;
+   }
+   return original(input,init);
+  });
+  const root=activeHost(app.tree);await navigateTo(app.tree,'Settings');await act(async()=>button(root,'Skills').props.onPress());
+  await act(async()=>button(root,'Edit skill example').props.onPress());await act(async()=>root.findByProps({accessibilityLabel:'Skill Markdown'}).props.onChangeText('Edited skill'));
+  failRead=true;await act(async()=>button(root,'Save skill').props.onPress());
+  expect(writes).toEqual([{field:'skill',name:'example',expected:before,value:{...before,markdown:'Edited skill'}}]);
+  expect(root.findByProps({accessibilityLabel:'Skill Markdown'}).props.value).toBe('Edited skill');expect(button(root,'Save skill').props.disabled).toBe(true);
+  await act(async()=>button(root,'Refresh library').props.onPress());await act(async()=>button(root,'Continue editing skill').props.onPress());
+  expect(root.findByProps({accessibilityLabel:'Skill Markdown'}).props.value).toBe('Edited skill');expect(button(root,'Save skill').props.disabled).toBe(false);
+  // Re-open authoritative saved skill before destructive archive: the old base
+  // remains stale after uncertainty, rather than silently authorizing overwrite.
+  await act(async()=>button(root,'Edit skill example').props.onPress());
+  act(()=>button(root,'Archive selected skill').props.onPress());expect(writes).toHaveLength(1);
+  const confirm=alerts.mock.calls.at(-1)![2]!.find(item=>item.style==='destructive')!;await act(async()=>confirm.onPress!());
+  expect(writes[1]).toEqual({field:'skill',name:'example',expected:{...before,markdown:'Edited skill'},value:null});
+  expect(root.findByProps({accessibilityLabel:'Skill Markdown'}).props.value).toBe('Edited skill');expect(library.templates).toEqual({keep:'Keep template'});expect(library.instructions).toBe('Keep instructions');
  }finally{await app.close();}
 });

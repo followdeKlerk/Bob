@@ -389,3 +389,140 @@ test('Sync remains available after local cache loading fails and recovers the mo
   expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBeTruthy();
  }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.getItem as jest.Mock).mockImplementation(read);}
 });
+
+const recoveryKey=`note-editor:v1:${backend}`;
+const deferred=()=>{let resolve!:()=>void,reject!:(error:Error)=>void;const promise=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+
+test('recovery-write failure is bounded, retryable, and retains the native editor, preview and dirty text',async()=>{
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ let tree!:Renderer.ReactTestRenderer,fail=true;
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key===recoveryKey&&fail?Promise.reject(Error('sensitive unbounded native details'.repeat(100))):write(key,value));
+  act(()=>press(tree,'Create note'));act(()=>input(tree,'Note body','Unsaved **text**'));
+  await act(async()=>{});
+  const editor=tree.root.findByProps({accessibilityLabel:'Note body'});
+  expect(tree.root.findByProps({testID:'note-recovery-error'}).findAllByType(Text)[0].props.children).toBe('Draft recovery could not be saved on this device. Your text is still here; retry recovery or use Save.');
+  act(()=>press(tree,'Preview note'));expect(editor.props.value).toBe('Unsaved **text**');
+  fail=false;await act(async()=>press(tree,'Retry draft recovery'));
+  expect(tree.root.findAllByProps({testID:'note-recovery-error'})).toHaveLength(0);
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'})).toBe(editor);
+  expect(JSON.parse((await AsyncStorage.getItem(recoveryKey))!).body).toBe('Unsaved **text**');
+  await act(async()=>press(tree,'Save note and go back'));
+  expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
+  expect(await AsyncStorage.getItem(recoveryKey)).toBeNull();
+ }finally{if(tree)await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test('an older recovery success cannot clear the current failure and retry writes the latest text',async()=>{
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const old=deferred(),latest=deferred();let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  act(()=>press(tree,'Create note'));await act(async()=>{});
+  let calls=0;
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key===recoveryKey&&++calls<=2?(calls===1?old.promise:latest.promise):write(key,value));
+  await act(async()=>input(tree,'Note body','Old text'));
+  act(()=>input(tree,'Note body','Newest text'));
+  await act(async()=>old.resolve());
+  await act(async()=>latest.reject(Error('Disk full')));
+  expect(tree.root.findAllByProps({testID:'note-recovery-error'}).length).toBeGreaterThan(0);
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.value).toBe('Newest text');
+  await act(async()=>press(tree,'Retry draft recovery'));
+  expect(tree.root.findAllByProps({testID:'note-recovery-error'})).toHaveLength(0);
+  expect(JSON.parse((await AsyncStorage.getItem(recoveryKey))!).body).toBe('Newest text');
+ }finally{old.resolve();latest.resolve();if(tree)await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test('late recovery write stays ordered before Save cleanup; failed cleanup is retryable without another note save',async()=>{
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!,remove=(AsyncStorage.removeItem as jest.Mock).getMockImplementation()!;
+ const pending=deferred();let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  act(()=>press(tree,'Create note'));await act(async()=>{});
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key===recoveryKey?pending.promise.then(()=>write(key,value)):write(key,value));
+  await act(async()=>input(tree,'Note body','Saved despite recovery failure'));
+  (AsyncStorage.removeItem as jest.Mock).mockImplementation((key:string)=>key===recoveryKey?Promise.reject(Error('Disk full')):remove(key));
+  await act(async()=>press(tree,'Save note and go back'));
+  expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
+  await act(async()=>pending.resolve());
+  expect(tree.root.findByProps({testID:'note-recovery-error'}).findAllByType(Text)[0].props.children).toContain('draft may reappear');
+  (AsyncStorage.removeItem as jest.Mock).mockImplementation(remove);
+  await act(async()=>press(tree,'Retry draft recovery'));
+  expect(await AsyncStorage.getItem(recoveryKey)).toBeNull();
+  expect(JSON.parse((await AsyncStorage.getItem(`notes:v1:${backend}`))!).pending.filter((op:any)=>op.kind==='note')).toHaveLength(1);
+ }finally{pending.resolve();if(tree)await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);(AsyncStorage.removeItem as jest.Mock).mockImplementation(remove);}
+});
+
+test('hung recovery reports after eight seconds without overlapping native writes or blocking editing',async()=>{
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const pending=deferred();let tree!:Renderer.ReactTestRenderer;
+ jest.useFakeTimers();
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key===recoveryKey?pending.promise.then(()=>write(key,value)):write(key,value));
+  act(()=>press(tree,'Create note'));await act(async()=>input(tree,'Note body','Still editable'));
+  await act(async()=>jest.advanceTimersByTime(8000));
+  expect(tree.root.findByProps({testID:'note-recovery-error'}).findAllByType(Text)[0].props.children).toContain('taking too long');
+  const retry=tree.root.findAll(node=>node.props.accessibilityLabel==='Retry draft recovery'&&typeof node.props.onPress==='function')[0];
+  expect(retry.props.disabled).toBe(true);
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.editable).toBe(true);
+  await act(async()=>pending.resolve());
+  expect(tree.root.findAllByProps({testID:'note-recovery-error'})).toHaveLength(0);
+ }finally{pending.resolve();if(tree)await act(async()=>tree.unmount());jest.useRealTimers();(AsyncStorage.setItem as jest.Mock).mockImplementation(write);}
+});
+
+test('Discard after a pending failed recovery clears the draft and ignores the stale failure',async()=>{
+ const write=(AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+ const pending=deferred();const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<NotesScreen backendId={backend} request={offline} visible topInset={0}/>);});
+  act(()=>press(tree,'Create note'));await act(async()=>{});
+  (AsyncStorage.setItem as jest.Mock).mockImplementation((key:string,value:string)=>key===recoveryKey?pending.promise:write(key,value));
+  await act(async()=>input(tree,'Note body','Disposable unsaved text'));
+  act(()=>press(tree,'Discard unsaved draft'));
+  expect(tree.root.findByProps({accessibilityLabel:'Note body'}).props.value).toBe('Disposable unsaved text');
+  const buttons=alert.mock.calls[alert.mock.calls.length-1][2]!;
+  act(()=>buttons.find(button=>button.text==='Discard draft')!.onPress!());
+  await act(async()=>pending.reject(Error('Late write failure')));
+  expect(tree.root.findAllByProps({accessibilityLabel:'Note body'})).toHaveLength(0);
+  expect(tree.root.findAllByProps({testID:'note-recovery-error'})).toHaveLength(0);
+  expect(await AsyncStorage.getItem(recoveryKey)).toBeNull();
+  expect(tree.root.findAllByProps({accessibilityLabel:'Open note Untitled'})).toHaveLength(0);
+ }finally{pending.resolve();if(tree)await act(async()=>tree.unmount());(AsyncStorage.setItem as jest.Mock).mockImplementation(write);alert.mockRestore();}
+});
+
+test('hosted Notes and categories use measured residual IME overlap without a second height adjustment',async()=>{
+ const {OverlayHost}=require('../components/overlay-host');
+ const {Dimensions,KeyboardAvoidingView}=require('react-native');
+ const oldOS=Object.getOwnPropertyDescriptor(Platform,'OS')!;
+ Object.defineProperty(Platform,'OS',{configurable:true,value:'android'});
+ const original=Dimensions.get.bind(Dimensions);const dimensions=jest.spyOn(Dimensions,'get').mockImplementation((name:any)=>name==='screen'?{width:400,height:800,scale:1,fontScale:1}:original(name));
+ let bottom=800,tree!:Renderer.ReactTestRenderer;const measured=jest.fn((cb:any)=>cb(0,0,400,bottom));
+ const props={backendId:backend,request:offline,visible:true,topInset:0};
+ const render=()=><OverlayHost><NotesScreen {...props}/></OverlayHost>;
+ try{
+  await act(async()=>{tree=Renderer.create(render(),{createNodeMock:(element:any)=>element.props.testID==='overlay-host-viewport'?{measureInWindow:measured}:null});});
+  tree.root.findAllByProps({testID:'overlay-host-viewport'}).forEach((node:any)=>{if(node.instance)node.instance.measureInWindow=measured;});
+  await act(async()=>tree.root.findByProps({testID:'overlay-host-viewport'}).props.onLayout({nativeEvent:{layout:{height:800}}}));
+  act(()=>press(tree,'Create note'));act(()=>input(tree,'Note title','Retained title'));
+  const active=()=>tree.root.findByProps({testID:'overlay-active'});
+  const body=active().findByProps({accessibilityLabel:'Note body'}),title=active().findByProps({accessibilityLabel:'Note title'});
+  const check=(expected:number)=>{
+   const owner=active(),avoidance=owner.findByType(KeyboardAvoidingView),safe=owner.findByType(SectionHeading).parent!;
+   expect(avoidance.props.enabled).toBe(false);expect(StyleSheet.flatten(safe.props.style).paddingBottom).toBe(expected);
+   expect(owner.findByProps({accessibilityLabel:'Note body'})).toBe(body);
+   expect(owner.findByProps({accessibilityLabel:'Note title'})).toBe(title);expect(title.props.value).toBe('Retained title');
+   expect(owner.findByType(SectionActions).findAllByProps({testID:'section-footer'}).length).toBeGreaterThan(0);
+  };
+  (useKeyboardInset as jest.Mock).mockReturnValue(300);bottom=800;
+  await act(async()=>tree.update(render()));check(300); // full Activity remains behind IME
+  bottom=650;await act(async()=>tree.root.findByProps({testID:'overlay-host-viewport'}).props.onLayout({nativeEvent:{layout:{height:650}}}));expect(measured).toHaveBeenCalled();check(150); // partial resize
+  bottom=500;await act(async()=>tree.root.findByProps({testID:'overlay-host-viewport'}).props.onLayout({nativeEvent:{layout:{height:500}}}));check(0); // fully resized, no second subtraction
+  (useKeyboardInset as jest.Mock).mockReturnValue(0);bottom=800;await act(async()=>tree.update(render()));check(0);
+  await act(async()=>press(tree,'Save note and go back'));act(()=>press(tree,'Categories'));
+  (useKeyboardInset as jest.Mock).mockReturnValue(300);bottom=500;await act(async()=>tree.update(render()));
+  const category=active();expect(category.findByType(KeyboardAvoidingView).props.enabled).toBe(false);
+  expect(StyleSheet.flatten(category.findByType(SectionHeading).parent!.props.style).paddingBottom).toBe(0);
+ }finally{if(tree)await act(async()=>tree.unmount());dimensions.mockRestore();Object.defineProperty(Platform,'OS',oldOS);}
+});

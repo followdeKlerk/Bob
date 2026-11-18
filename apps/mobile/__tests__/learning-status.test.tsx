@@ -63,6 +63,15 @@ test('learning receipts use compact tool-style rows with expandable exact litera
   const draft=tree.root.findByProps({accessibilityLabel:'Message draft'});
   act(()=>draft.props.onChangeText('Keep this draft'));
   const list=tree.root.findAll(node=>node.props.testID==='chat-history-list'&&typeof node.instance?.scrollToEnd==='function')[0];
+  // Explicit viewport for this all-row presentation fixture; production no
+  // longer eagerly mounts ten offscreen entries without native measurements.
+  await act(async()=>{const viewport=list.findByType(ScrollView);viewport.props.onContentSizeChange(400,2000);viewport.props.onLayout({nativeEvent:{layout:{x:0,y:0,width:400,height:4000}}});viewport.props.onScroll({timeStamp:1,nativeEvent:{contentOffset:{x:0,y:0},contentSize:{width:400,height:2000},layoutMeasurement:{width:400,height:4000}}});});
+  // Cell measurements are supplied by Android in production, not by the test
+  // renderer. Drive the actual virtualized cells instead of disabling it.
+  for(let pass=0;pass<3;pass++){
+   act(()=>{for(const cell of list.findAll(node=>typeof node.props.onCellLayout==='function'))cell.props.onCellLayout({nativeEvent:{layout:{x:0,y:cell.props.index*200,width:400,height:200}}},cell.props.cellKey,cell.props.index);});
+   await act(async()=>{await new Promise<void>(resolve=>setTimeout(resolve,70));});
+  }
   for(const entry of entries.slice(0,5)){
    const row=tree.root.findByProps({testID:`history-entry-${entry.id}`});
    const title=entry.id===2?'Skill update':'Learning review';

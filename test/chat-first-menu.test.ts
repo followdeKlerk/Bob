@@ -21,8 +21,8 @@ test('Bob menu replaces bottom tabs throughout the app; chat-managed configurati
  const app=readFileSync('apps/mobile/App.tsx','utf8');
  const navigation=readFileSync('apps/mobile/components/chat-navigation.tsx','utf8');
  assert.doesNotMatch(app,/label="Open workspaces"/);
- for(const hidden of ['Chat','Skills','Todos','MCP Apps','Prompts'])assert.doesNotMatch(navigation,new RegExp(`id:'${hidden}'`));
- for(const kept of ['Notes','Workstations','Agents','Terminal','Tools','Settings'])assert.match(navigation,new RegExp(`id:'${kept}'`));
+ for(const hidden of ['Chat','Skills','MCP Apps','Prompts'])assert.doesNotMatch(navigation,new RegExp(`id:'${hidden}'`));
+ for(const kept of ['Notes','Workstations','Agents','Terminal','Tools','Todos','Settings'])assert.match(navigation,new RegExp(`id:'${kept}'`));
  assert.doesNotMatch(navigation,/id:'Sessions'/);
  assert.match(navigation,/label="Back to chat"/);
  assert.match(navigation,/onSelect\('Chat'\)/);

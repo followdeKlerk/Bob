@@ -11,6 +11,13 @@ test('all owned native text components use shared typography, with no legacy fon
  for(const file of [join(mobile,'App.tsx'),...sources(join(mobile,'components'))]){
   if(file.endsWith('app-text.tsx'))continue;
   const source=readFileSync(file,'utf8');
+  // The root error boundary must work when the shared Text/theme provider fails.
+  // It deliberately uses native Text with the same explicitly bundled font.
+  if(file.endsWith('diagnostic-boundary.tsx')){
+   assert.match(source,/fontFamily:APP_FONT_FAMILY/);
+   assert.match(source,/import \{Pressable,ScrollView,Text,useColorScheme\} from 'react-native'/);
+   continue;
+  }
   for(const match of source.matchAll(/import\s*\{([^}]+)\}\s*from ['"]react-native['"]/g)){
    assert.doesNotMatch(match[1],/(?:^|,)\s*(?:Text|TextInput)\s*(?:,|$|as\s)/,file);
   }

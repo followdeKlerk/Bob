@@ -38,7 +38,7 @@ test('a mounted sheet follows theme changes without remounting its scroll host',
 
 test('explicit close and Android Back use the same dismissal callback',()=>{
  const onClose=jest.fn();let tree!:Renderer.ReactTestRenderer;act(()=>{tree=Renderer.create(<AttachmentDetails artifact={artifact} onClose={onClose}/>);});
- expect(close(tree).props.onPress).toBe(onClose);expect(tree.root.findByType(Modal).props.onRequestClose).toBe(onClose);
+ expect(close(tree).props.onPress).toBe(tree.root.findByType(Modal).props.onRequestClose);
  act(()=>close(tree).props.onPress());expect(onClose).toHaveBeenCalledTimes(1);
  act(()=>tree.root.findByType(Modal).props.onRequestClose());expect(onClose).toHaveBeenCalledTimes(2);act(()=>tree.unmount());
 });

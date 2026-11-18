@@ -5,7 +5,7 @@ import * as Keychain from 'react-native-keychain';
 import {v4 as uuid} from 'uuid';
 import {Check,Download,AlertCircle} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {activeBuild,type BuildBackend,type BuildState} from '../use-build-status';
+import {activeBuild,type BuildBackend,type BuildState,type BuildJob} from '../use-build-status';
 import {themed,useTheme,useThemedValue} from '../theme';
 import {Text} from './app-text';
 import {UpdatePopover} from './update-popover';
@@ -22,13 +22,15 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
  const {colors}=useTheme(),s=useThemedValue(styles),insets=useSafeAreaInsets();
  const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[failure,setFailure]=useState('');
  const [request,setRequest]=useState<Request>(),[installVersion,setInstallVersion]=useState<number>(),[dismissed,setDismissed]=useState(''),[loaded,setLoaded]=useState(false);
+ const [exactJob,setExactJob]=useState<BuildJob>();
  const [downloadState,setDownloadState]=useState('checking');
  const mounted=useRef(true),admission=useRef(false),pollReceipt=useRef(0),epoch=useRef(0);
- const key=`bob.update-request.${backend.backendId}`,apk=state?.apk,job=activeBuild(state);
+ const key=`bob.update-request.${backend.backendId}`,apk=state?.apk,job=activeBuild(state)??activeBuild(exactJob?{enabled:true,jobs:[exactJob]}:undefined);
  const installed=Number(NativeModules.BobFiles?.versionCode??0),installedKnown=Number.isSafeInteger(installed)&&installed>0;
  const newer=installedKnown&&!!apk&&Number.isSafeInteger(apk.versionCode)&&apk.versionCode>installed;
  const success=installedKnown&&!!installVersion&&installed>=installVersion&&!newer;
- const failed=!job&&state?.jobs?.[0]?.status==='failed'?state.jobs[0]:undefined;
+ const receipt=exactJob??state?.jobs?.[0];
+ const failed=!job&&receipt?.status==='failed'?receipt:undefined;
  const serviceAvailable=state?.enabled===true&&state.supervisorOnline!==false&&!error;
  const canBuild=serviceAvailable&&state?.androidBuild?.configured!==false;
  const unavailable=error?'Update status unavailable':state?.enabled===false?'Updates not configured':state?.enabled&&state.supervisorOnline===false?'Update supervisor offline':!state?'Checking update status…':undefined;
@@ -56,10 +58,16 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
   return()=>{alive=false;};
  },[key,backend.backendId]);
  useEffect(()=>{
-  if(request&&state?.jobs?.some(value=>value.id===request.id)){
+  if(request&&state?.jobs?.some(value=>value.id===request.id&&value.action===request.action&&value.target===request.target)){
    setRequest(undefined);void AsyncStorage.removeItem(key).catch(()=>{});
   }
  },[state,request,key]);
+ useEffect(()=>{
+  if(!exactJob)return;
+  const refreshed=state?.jobs?.find(value=>value.id===exactJob.id);
+  if(refreshed&&refreshed!==exactJob)setExactJob(refreshed);
+  else if(activeBuild(state)&&activeBuild(state)?.id!==exactJob.id)setExactJob(undefined);
+ },[state,exactJob]);
  useEffect(()=>{
   let alive=true,timer:ReturnType<typeof setInterval>|undefined,inFlight:number|undefined;
   setDownloadState('checking');setFailure('');pollReceipt.current++;
@@ -99,6 +107,31 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
   }catch{if(current()){setDownloadState('failed');setFailure('');}}
   finally{admission.current=false;if(mounted.current)setBusy(false);}
  }
+ // Explicit reconciliation is read-only and can recover receipts outside the
+ // server's bounded recent history. Never replace the persisted admission ID.
+ async function checkStatus(){
+  onRefresh();
+  if(!request||admission.current||!active||!foreground())return;
+  const pending=request,ownedEpoch=epoch.current;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);
+  const current=()=>mounted.current&&epoch.current===ownedEpoch&&foreground();
+  try{
+   const token=await credential();if(!current())return;
+   const response=await fetch(`${backend.endpoint}/v1/updates/${encodeURIComponent(pending.id)}`,{headers:{Authorization:'Bearer '+token,'x-bob-backend':backend.backendId},signal:controller.signal});
+   if(!current()||!response.ok)return;
+   const value=await response.json() as BuildJob;
+   if(!current()||value.id!==pending.id||value.action!==pending.action||value.target!==pending.target||!['queued','building','activating','complete','failed'].includes(value.status))return;
+   if(typeof value.stage!=='string')return;
+   setExactJob(value);
+   // Old nonterminal jobs still need exact checks while outside recent history.
+   // Keep their recovery identity until a terminal receipt is actually recorded.
+   if(value.status==='complete'||value.status==='failed'){
+    await AsyncStorage.removeItem(key);if(!current())return;
+    setRequest(undefined);
+   }
+  }catch{/* Keep the original uncertain request for a later explicit check. */}
+  finally{clearTimeout(timeout);}
+ }
  async function queue(target:'android'|'all'){
   if(!active||!foreground()||!loaded||!canBuild||admission.current||downloading||job||request&&!retryable(request))return;
   admission.current=true;setBusy(true);setFailure('');
@@ -108,6 +141,7 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
   let persisted=false;
   try{
    const value=request??{id:'app-'+uuid(),action:'update' as const,target};
+   setExactJob(undefined);
    // Write before POST: an uncertain admission must never get a new request ID.
    await AsyncStorage.setItem(key,JSON.stringify(value));persisted=true;if(mounted.current)setRequest(value);if(!current())return;
    const token=await credential();if(!current())return;
@@ -136,6 +170,7 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
    if(downloadState==='idle')return `App ${apk!.versionName} available`;
    return downloadState==='unknown'?'Downloaded update status unavailable':'Checking downloaded update…';
   }
+  if(exactJob?.status==='complete')return exactJob.stage;
   return state?.androidBuild?.configured===false?'App builds not configured':'No app update available';
  })();
  const identity=unavailable?`unavailable:${unavailable}`:showBuildFailure?`failed:${failed!.id}`:installedNotice?`installed:${installVersion}`:versionUnavailable?'version-unavailable':newer?`${artifactScope}:${downloadState}`:'';
@@ -165,7 +200,7 @@ function UpdateController({backend,state,error,focus=false,active=true,keyboardI
 
    {!!failure&&failure!==status&&<Text accessibilityRole="alert" style={s.text}>{failure}</Text>}
    {installable&&['idle','ready','failed'].includes(downloadState)&&action(downloadState==='ready'?`Install ${apk!.versionName}`:downloadState==='failed'?'Retry download':`Download ${apk!.versionName}`,()=>void install(),busy||downloading,true,downloadState==='ready'?'Install':downloadState==='failed'?'Retry download':'Download')}
-   {(!!unavailable||!!request||showBuildFailure||!job&&!request&&newer&&['checking','unknown'].includes(downloadState))&&action('Check status',onRefresh,busy)}
+   {(!!unavailable||!!request||showBuildFailure||!job&&!request&&newer&&['checking','unknown'].includes(downloadState))&&action('Check status',()=>void checkStatus(),busy)}
    {focus&&<>
     {state?.androidBuild?.configured===false&&<Text style={s.text}>App build/signing prerequisites are not configured on this backend.</Text>}
     {request?action('Retry same build request',()=>void queue('android'),!loaded||!canBuild||busy||downloading||!!job||!retryable(request)): <>{action('Build app',()=>void queue('android'),!loaded||!canBuild||busy||downloading||!!job)}{action('Build app and backend',()=>void queue('all'),!loaded||!canBuild||busy||downloading||!!job)}</>}

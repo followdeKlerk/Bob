@@ -20,6 +20,6 @@ export function FileAttachment({backend,artifact,fromBob,onOpen,onSave,active=tr
   {type.kind==='audio'||type.kind==='video'?<StreamingMedia backend={backend} artifact={artifact} video={type.kind==='video'} active={active} onOpen={onOpen} onSave={fromBob?onSave:undefined} onDetails={details}/>:<View style={{alignSelf:'flex-start'}}>
    <SentAttachmentThumbnail backend={backend} artifact={artifact} onOpen={onOpen} onDetails={details} onSave={fromBob?onSave:undefined} hideFilename/>
   </View>}
-  {active&&detailsScope===scope&&<AttachmentDetails artifact={artifact} onClose={closeDetails}/>}
+  {active&&detailsScope===scope&&<AttachmentDetails scopeKey={scope} artifact={artifact} onClose={closeDetails}/>}
  </>;
 }

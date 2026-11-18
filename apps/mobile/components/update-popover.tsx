@@ -1,5 +1,7 @@
-import React,{useRef,useState} from 'react';
-import {AccessibilityInfo,findNodeHandle,Modal,Pressable,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
+import React,{useCallback,useRef,useState} from 'react';
+import {useModalTransition} from './modal-transition';
+import {useOverlayHost,useOverlayHostAvailable,useOverlayKeyboardClearance} from './overlay-host';
+import {AccessibilityInfo,Animated,findNodeHandle,Modal,Platform,Pressable,ScrollView,StyleSheet,View,useWindowDimensions} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Text} from './app-text';
 import {themed,useThemedValue} from '../theme';
@@ -9,25 +11,28 @@ import {themed,useThemedValue} from '../theme';
  * Activity does not. Reserve only keyboard occlusion not already removed. */
 export function UpdatePopover({visible,status,children,onClose,keyboardInset=0,acknowledge}:{visible:boolean;status:string;children:React.ReactNode;onClose:()=>void;keyboardInset?:number;acknowledge?:{label:string;onPress:()=>void}}){
  const s=useThemedValue(styles),insets=useSafeAreaInsets(),window=useWindowDimensions();
- const heading=useRef<React.ComponentRef<typeof Text>>(null);
+ const heading=useRef<React.ComponentRef<typeof Text>>(null),hostAvailable=useOverlayHostAvailable(),overlayKeyboard=useOverlayKeyboardClearance(),visibleRef=useRef(visible);visibleRef.current=visible;
+ const focusHeading=()=>{const node=findNodeHandle(heading.current);if(node)AccessibilityInfo.setAccessibilityFocus(node);};
+ const headingRef=useCallback((node:React.ComponentRef<typeof Text>|null)=>{(heading as React.MutableRefObject<React.ComponentRef<typeof Text>|null>).current=node;if(node&&visibleRef.current&&hostAvailable){const handle=findNodeHandle(node);if(handle)AccessibilityInfo.setAccessibilityFocus(handle);}},[hostAvailable]);
+ const transition=useModalTransition(visible);
  const [viewport,setViewport]=useState<{width:number;height:number}>();
  const width=Math.min(window.width,viewport?.width??window.width),height=Math.min(window.height,viewport?.height??window.height);
- const occlusion=Math.max(0,keyboardInset-Math.max(0,window.height-height));
+ const occlusion=hostAvailable&&Platform.OS==='android'?(overlayKeyboard??0):Math.max(0,keyboardInset-Math.max(0,window.height-height));
  const bottom=Math.max(insets.bottom,occlusion)+12;
  const available=Math.max(0,height-insets.top-bottom);
  const top=insets.top+Math.min(52,Math.max(0,available-96));
- return <Modal transparent statusBarTranslucent navigationBarTranslucent visible={visible} animationType="none" onRequestClose={onClose} onShow={()=>{const node=findNodeHandle(heading.current);if(node)AccessibilityInfo.setAccessibilityFocus(node);}}>
-  <View testID="update-popover-viewport" onLayout={({nativeEvent:{layout}})=>{if(layout.width>0&&layout.height>0)setViewport(old=>old?.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height});}} style={[s.overlay,{paddingTop:top,paddingBottom:bottom,paddingLeft:insets.left+12,paddingRight:insets.right+12}]}>
+ const overlay=<View testID="update-popover-viewport" onLayout={({nativeEvent:{layout}})=>{if(layout.width>0&&layout.height>0)setViewport(old=>old?.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height});}} style={[s.overlay,{paddingTop:top,paddingBottom:bottom,paddingLeft:insets.left+12,paddingRight:insets.right+12}]}>
    <Pressable accessibilityRole="button" accessibilityLabel="Close update bubble" onPress={onClose} style={StyleSheet.absoluteFill}/>
-   <View testID="update-popover" accessibilityViewIsModal onAccessibilityEscape={onClose} style={[s.bubble,{maxWidth:Math.max(0,Math.min(304,width-insets.left-insets.right-24)),maxHeight:Math.max(0,height-top-bottom)}]}>
+   <Animated.View testID="update-popover" accessibilityViewIsModal onAccessibilityEscape={onClose} style={[s.bubble,{maxWidth:Math.max(0,Math.min(304,width-insets.left-insets.right-24)),maxHeight:Math.max(0,height-top-bottom)},transition.panel]}>
     <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
-     <Text ref={heading} accessible accessibilityLiveRegion="polite" style={s.status}>{status}</Text>
+     <Text ref={headingRef} accessible accessibilityLiveRegion="polite" style={s.status}>{status}</Text>
      {children}
      <Pressable accessibilityRole="button" accessibilityLabel={acknowledge?.label??'Close updates'} onPress={acknowledge?.onPress??onClose} style={s.close}><Text style={s.text}>{acknowledge?'Done':'Close'}</Text></Pressable>
     </ScrollView>
-   </View>
-  </View>
- </Modal>;
+   </Animated.View>
+  </View>;
+ const hosted=useOverlayHost(visible,transition.mounted,overlay,()=>{if(visible)onClose();});
+ return hosted?null:<Modal transparent statusBarTranslucent navigationBarTranslucent visible={visible} animationType="none" onRequestClose={onClose} onShow={focusHeading}>{overlay}</Modal>;
 }
 const styles=themed(({colors,shadows})=>StyleSheet.create({
  overlay:{flex:1,alignItems:'flex-end'},

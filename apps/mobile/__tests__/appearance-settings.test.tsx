@@ -129,3 +129,28 @@ test('appearance uses scalable wrapping radios and one immediate selection tick,
  expect(selectionHaptic).toHaveBeenCalledTimes(1);expect(api.preference).toBe('dark');
  expect(tree!.root.findAllByType(View).find(node=>node.props.accessibilityRole==='radiogroup')).toBe(group);
 });
+
+test('hung appearance read reaches bounded recovery using the native mirror, without overwriting it; retry ignores late original data',async()=>{
+ jest.useFakeTimers();jest.replaceProperty(Platform,'OS','android');
+ NativeModules.BobPlatform.initialAppearance='light';let resolve!:(value:string)=>void;
+ (AsyncStorage.getItem as jest.Mock).mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+ try{
+  await mount();expect(tree!.root.findAllByProps({testID:'probe'})).toHaveLength(0);
+  expect(StyleSheet.flatten(tree!.root.findByProps({testID:'app-theme'}).props.style).backgroundColor).toBe(lightColors.background);
+  await act(async()=>jest.advanceTimersByTime(8000));expect(tree!.root.findByProps({testID:'startup-recovery'})).toBeDefined();
+  expect(NativeModules.BobPlatform.setAppearance).not.toHaveBeenCalled();expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce('dark');
+  await act(async()=>tree!.root.findByProps({accessibilityLabel:'Retry startup'}).props.onPress());expect(api.preference).toBe('dark');
+  await act(async()=>resolve('light'));expect(api.preference).toBe('dark');expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+ }finally{if(tree)await act(async()=>tree!.unmount());tree=undefined;jest.useRealTimers();}
+});
+
+test.each(['failure','invalid'])('appearance %s shows local retry and never silently changes a saved choice',async(kind)=>{
+ jest.replaceProperty(Platform,'OS','android');NativeModules.BobPlatform.initialAppearance='dark';
+ if(kind==='failure')(AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(Error('storage unavailable'));
+ else (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce('invalid-mode');
+ await mount();expect(tree!.root.findAllByProps({testID:'probe'})).toHaveLength(0);
+ expect(tree!.root.findByProps({accessibilityLabel:'Retry startup'})).toBeDefined();expect(NativeModules.BobPlatform.setAppearance).not.toHaveBeenCalled();expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+ (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce('light');
+ await act(async()=>tree!.root.findByProps({accessibilityLabel:'Retry startup'}).props.onPress());expect(api.preference).toBe('light');expect(api.colors).toBe(lightColors);
+});

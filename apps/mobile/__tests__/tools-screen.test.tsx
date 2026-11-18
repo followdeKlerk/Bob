@@ -41,6 +41,42 @@ let trees:Renderer.ReactTestRenderer[]=[];
 async function render(props:ToolsScreenProps){let tree!:Renderer.ReactTestRenderer;await act(async()=>{tree=Renderer.create(<ToolsScreen {...props}/>);});trees.push(tree);return tree;}
 afterEach(async()=>{await act(async()=>{for(const tree of trees)tree.unmount();});trees=[];jest.useRealTimers();});
 
+test('reopened Tools paints last loaded catalog immediately but cannot mutate until fresh readback',async()=>{
+ const {ToolsPresentationCache}=require('../components/tools-screen');
+ const presentation=new ToolsPresentationCache();
+ const {props,request}=setup({props:{presentation}});const first=await render(props);
+ await act(async()=>first.update(<ToolsScreen {...props} active={false}/>));
+ const slow=deferred();const fresh=jest.fn(async(path:string)=>path==='mcp-connections'?[]:slow.promise);
+ const tree=await render({...props,request:fresh});
+ expect(text(tree)).toContain('Coding');expect(text(tree)).toContain('Last loaded modules');
+ await press(tree,'Details for Coding');expect(button(tree,'Turn on Coding').props.disabled).toBe(true);
+ expect(request.mock.calls.filter(call=>call[1]==='PUT')).toHaveLength(0);
+ await act(async()=>slow.resolve([moduleItem('coding',{selected:true})]));
+ expect(text(tree)).not.toContain('Last loaded modules');expect(text(tree)).toContain('On in this chat');
+ expect(button(tree,'Turn off Coding').props.disabled).toBe(false);
+});
+test('cached connections survive offline refresh as read-only and cannot submit through stale callbacks',async()=>{
+ const {ToolsPresentationCache}=require('../components/tools-screen');const presentation=new ToolsPresentationCache();
+ const {props}=setup({props:{presentation}});const first=await render(props);await act(async()=>first.update(<ToolsScreen {...props} active={false}/>));
+ const offline=jest.fn(async()=>{throw Error('Offline');});const tree=await render({...props,request:offline});await selectPage(tree,'connections');
+ expect(text(tree)).toContain('Last loaded connections');expect(text(tree)).toContain('Offline');
+ await press(tree,'Details for connection docs');expect(button(tree,'Enable docs').props.disabled).toBe(true);expect(button(tree,'Add connection').props.disabled).toBe(true);
+ // Invoke even the disabled wrapper callback: runtime admission still refuses.
+ await act(async()=>button(tree,'Enable docs').props.onPress());
+ expect(button(tree,'Confirm tool change')).toBeUndefined();expect(offline.mock.calls).toHaveLength(2);
+});
+
+test('cached Tools remains scoped across connection revision and late old read completion',async()=>{
+ const {ToolsPresentationCache}=require('../components/tools-screen');const presentation=new ToolsPresentationCache();
+ const {props}=setup({props:{presentation}});const tree=await render(props);const slow=deferred();
+ await act(async()=>tree.update(<ToolsScreen {...props} active={false}/>));
+ await act(async()=>tree.update(<ToolsScreen {...props} scopeKey="repaired-connection" request={async()=>slow.promise}/>));
+ expect(text(tree)).not.toContain('Coding');
+ await act(async()=>tree.update(<ToolsScreen {...props} scopeKey="different-root" request={async path=>path==='mcp-connections'?[]:[moduleItem('web')]}/>));
+ await act(async()=>slow.resolve([moduleItem()]));
+ expect(text(tree)).toContain('Web');expect(text(tree)).not.toContain('Coding');
+});
+
 test('compact catalog has independent sections, custom module fallback and tap-only details',async()=>{
  const {props,request}=setup({modules:[moduleItem(),moduleItem('new-custom',{name:'Team research'})]});const tree=await render(props);
  expect(request.mock.calls.map(call=>call[0])).toEqual(['chats/7/modules','mcp-connections']);

@@ -8,6 +8,7 @@ import {SectionActions,SectionAction,RoundAction} from './section-ui';
 import {Button} from './ui/button';
 import {TerminalHeader} from './terminal-header';
 import {TerminalKeyRow} from './terminal-key-row';
+import {useOverlayBack} from './overlay-host';
 import {themed,useThemedValue,useTheme} from '../theme';
 import {terminalConnection,terminalKeyLayout,terminalNative,terminalStatus,type TerminalControl,type TerminalState,type TerminalStatus,type TerminalTarget} from '../terminal';
 
@@ -17,7 +18,7 @@ type Pending={scope:string;id:string;promise?:Promise<unknown>};
 type Phase='idle'|'checking'|'starting'|'running'|'closed'|'failed'|'unavailable';
 
 export function TerminalScreen({visible,target,workstation,allowed,bottomInset=0,menuOpen=false,menu,onBack,request}:Props){
- const styles=useThemedValue(stylesTheme),{colors}=useTheme(),window=useWindowDimensions();
+ const styles=useThemedValue(stylesTheme),{colors}=useTheme(),window=useWindowDimensions(),overlayBack=useOverlayBack();
  const menuTheme=useMenuTheme(),menuStyles=stylesTheme(menuTheme),menuColors=menuTheme.colors;
  const [frame,setFrame]=useState({width:0,height:0}),[headerHeight,setHeaderHeight]=useState(44),[footerHeight,setFooterHeight]=useState(64);
  const [status,setStatus]=useState<TerminalStatus>(),[phase,setPhase]=useState<Phase>('idle'),[message,setMessage]=useState(''),[handle,setHandle]=useState<string>(),[more,setMore]=useState(false),[ctrl,setCtrl]=useState(false),[control,setControl]=useState<TerminalControl>(),[endUnknown,setEndUnknown]=useState(false);
@@ -87,7 +88,7 @@ export function TerminalScreen({visible,target,workstation,allowed,bottomInset=0
    if(!active){invalidate();setHandle(undefined);setCtrl(false);setMore(false);setPhase('closed');setMessage('Session paused.');}
   });return()=>listener.remove();
  },[]);
- useEffect(()=>{if(!more)return;const listener=BackHandler.addEventListener('hardwareBackPress',()=>{setMore(false);return true;});return()=>listener.remove();},[more]);
+ useEffect(()=>{if(!more)return;const listener=BackHandler.addEventListener('hardwareBackPress',()=>{if(overlayBack())return true;setMore(false);return true;});return()=>listener.remove();},[more,overlayBack]);
  // React can batch several presses into one render. Keep an ordered bounded FIFO,
  // exposing only its head until native acknowledges admission; never replay on timeout.
  useEffect(()=>{

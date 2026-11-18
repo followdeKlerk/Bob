@@ -29,6 +29,39 @@
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
+    <!-- RN AlertFragment inflates its accessible title with the Activity context, but
+         builds the body/buttons with alertDialogTheme. Update both as one pair. -->
+    <style name="BobAlertOwner" />
+    <style name="BobAlertOwner.Light">
+        <item name="alertDialogTheme">@style/BobAlert.Light</item>
+        <item name="android:windowTitleStyle">@style/BobAlertTitle.Light</item>
+    </style>
+    <style name="BobAlertOwner.Dark">
+        <item name="alertDialogTheme">@style/BobAlert.Dark</item>
+        <item name="android:windowTitleStyle">@style/BobAlertTitle.Dark</item>
+    </style>
+    <style name="BobAlert.Light" parent="ThemeOverlay.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">#e8dfd0</item>
+        <item name="android:colorBackground">#e8dfd0</item>
+        <item name="android:textColorPrimary">#292720</item>
+        <item name="android:textColorSecondary">#292720</item>
+        <item name="colorAccent">#292720</item>
+        <item name="android:colorAccent">#292720</item>
+    </style>
+    <style name="BobAlert.Dark" parent="ThemeOverlay.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">#1b1c1d</item>
+        <item name="android:colorBackground">#1b1c1d</item>
+        <item name="android:textColorPrimary">#e8e0d2</item>
+        <item name="android:textColorSecondary">#e8e0d2</item>
+        <item name="colorAccent">#e8e0d2</item>
+        <item name="android:colorAccent">#e8e0d2</item>
+    </style>
+    <style name="BobAlertTitle" parent="android:style/Widget.Material.TextView">
+        <item name="android:textAppearance">@style/TextAppearance.AppCompat.Title</item>
+    </style>
+    <style name="BobAlertTitle.Light"><item name="android:textColor">#292720</item></style>
+    <style name="BobAlertTitle.Dark"><item name="android:textColor">#e8e0d2</item></style>
+
     <style name="BobEditText" parent="Widget.AppCompat.EditText">
         <item name="android:scrollbars">none</item>
     </style>

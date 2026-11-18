@@ -201,7 +201,7 @@ test.each(['light','dark'] as const)('actual App %s named network approval is in
  bridge.options.mockResolvedValue([{mode:'platform',key:'service|en-GB',label:'Named Google speech service',language:'en-GB',networkCapable:true,approved:true}]);
  await tap('Stop voice');await tap('Speak to Bob');
  expect(bridge.startConfigured).toHaveBeenLastCalledWith(expect.any(String),'service|en-GB','en-GB',false);
- expect(mounted.root.findAllByProps({testID:'speech-network-consent'})).toHaveLength(0);
+ expect(mounted.root.findAllByProps({testID:'overlay-active'}).some(node=>node.findAllByProps({testID:'speech-network-consent'}).length>0)).toBe(false);
  expect(draft(mounted)).toBe(input);expect(input.props.value).toBe('Unsent draft');expect(list(mounted)).toBe(history);expect(posts).toHaveLength(0);
 });
 

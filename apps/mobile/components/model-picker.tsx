@@ -1,11 +1,16 @@
-import {withMenuTheme} from '../menu-theme';
+import {MenuTheme,withMenuTheme} from '../menu-theme';
+import {useOverlayHost,useOverlayHostAvailable,useOverlayKeyboardClearance} from './overlay-host';
+import {useModalTransition} from './modal-transition';
+import {useKeyboardInset} from '../keyboard-inset';
+import {KeyboardLayout,nativeKeyboardLayout} from './keyboard-layout';
 import {PageSearch} from './page-search';
 import {menuButtonChrome} from '../menu-button-style';
 import {Text} from './app-text';
-import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Modal,View,FlatList,ScrollView,Pressable,StyleSheet,KeyboardAvoidingView,Platform} from 'react-native';
+import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {Animated,Keyboard,Modal,View,FlatList,ScrollView,Pressable,StyleSheet,KeyboardAvoidingView,Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {SafeAreaView} from 'react-native-safe-area-context';
+const AnimatedSafeAreaView=Animated.createAnimatedComponent(SafeAreaView);
 import {Check,Star} from 'lucide-react-native';
 import {Button} from './ui/button';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
@@ -17,6 +22,13 @@ const key=(m:{provider:string;modelId:string})=>JSON.stringify([m.provider,m.mod
 const labels:Record<string,string>={off:'Off',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Maximum'};
 function ModelPickerContent({visible,models,current,onClose,onApply,loading=false}:{visible:boolean;loading?:boolean;models:ModelOption[];current:ModelChoice;onClose:()=>void;onApply:(choice:Required<ModelChoice>)=>Promise<void>}){
  const {colors}=useTheme();
+ const transition=useModalTransition(visible),hostAvailable=useOverlayHostAvailable(),overlayKeyboard=useOverlayKeyboardClearance(),keyboard=useKeyboardInset();
+ const nativeAvoidance=hostAvailable&&nativeKeyboardLayout;
+ const [searchFocused,setSearchFocused]=useState(false);
+ const [bodyHeight,setBodyHeight]=useState(0),keyboardOpen=keyboard>0||(nativeAvoidance&&searchFocused);
+ useLayoutEffect(()=>{if(!visible)setSearchFocused(false);},[visible]);
+ const wasVisible=useRef(visible);
+ useLayoutEffect(()=>{if(wasVisible.current&&!visible&&hostAvailable)Keyboard.dismiss();wasVisible.current=visible;},[visible,hostAvailable]);
  const s=useThemedValue(sTheme);
 
  const [query,setQuery]=useState(''),[provider,setProvider]=useState(''),[selected,setSelected]=useState(''),[thinking,setThinking]=useState('medium'),[saving,setSaving]=useState(false),[error,setError]=useState('');
@@ -35,23 +47,24 @@ function ModelPickerContent({visible,models,current,onClose,onApply,loading=fals
   const id=key(m),next=favorites.includes(id)?favorites.filter(v=>v!==id):[...favorites,id];
   try{await AsyncStorage.setItem(favoriteKey,JSON.stringify(next));setFavorites(next);setError('');}catch{setError('Could not save favourites. Please try again.');}finally{favoriteBusy.current=false;setFavoriteSaving(false);}
  }
- return <Modal visible={visible} transparent animationType="slide" onRequestClose={()=>{if(!saving)onClose();}}>
-  {/* Edge-to-edge Android dialogs may not resize for the IME. Let RN measure
-      actual overlap rather than subtracting the Activity's inset a second time. */}
-  <KeyboardAvoidingView style={s.overlay} enabled behavior={Platform.OS==='ios'?'padding':'height'}>
+ // Same-window native progress keeps Cancel/Apply above the moving IME even
+ // when the JS settled-inset event arrives late. Never also apply JS clearance.
+ const body=<KeyboardAvoidingView pointerEvents={visible?'auto':'none'} accessibilityElementsHidden={!visible} importantForAccessibility={visible?'auto':'no-hide-descendants'} style={[s.overlay,hostAvailable&&Platform.OS==='android'&&!nativeAvoidance&&{paddingBottom:overlayKeyboard??0}]} enabled={!(hostAvailable&&Platform.OS==='android')} behavior={Platform.OS==='ios'?'padding':'height'}>
+   <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'#00000088'},transition.backdrop]}/>
    <Pressable style={StyleSheet.absoluteFill} onPress={()=>{if(!saving)onClose();}} accessibilityLabel="Close model selection"/>
-   <SafeAreaView edges={['top','bottom']} style={s.sheet}>
-    <SectionHeading title="Model & thinking"/>
+   <AnimatedSafeAreaView edges={['top','bottom']} style={[s.sheet,keyboardOpen&&{height:'100%'},transition.panel]}>
+    {!keyboardOpen&&<SectionHeading title="Model & thinking"/>}
     <View testID="model-search-header" style={s.searchHeader}>
-     <PageSearch label="Search models" placeholder="Search models" value={query} onChangeText={setQuery} editable={!saving}/>
+     <PageSearch label="Search models" placeholder="Search models" value={query} onChangeText={setQuery} editable={!saving} onFocus={()=>setSearchFocused(true)} onBlur={()=>setSearchFocused(false)}/>
 
     </View>
+    <View testID="model-body-layout" onLayout={({nativeEvent:{layout}})=>{if(Number.isFinite(layout.height)&&layout.height>0)setBodyHeight(old=>Math.abs(old-layout.height)<.5?old:layout.height);}} style={s.body}>
     <SectionBody footer={<SectionActions overlay leading={<SectionAction label="Close model selection" text="Cancel" disabled={saving} onPress={onClose}/>}><SectionAction label="Apply model selection" text={saving?'Saving…':'Apply'} busy={saving} primary disabled={saving||loading||!chosen||!levels.includes(thinking)} onPress={()=>{if(!chosen)return;setSaving(true);setError('');void onApply({model:{provider:chosen.provider,modelId:chosen.modelId},thinkingLevel:thinking}).catch(e=>setError(String(e.message??e))).finally(()=>setSaving(false));}}/></SectionActions>}>{clearance=><>
     <FlatList data={rows} keyExtractor={key} style={s.models} keyboardShouldPersistTaps="handled" extraData={[selected,favorites,favoriteSaving,saving,loading]} ListHeaderComponent={<View style={s.header}>
 
      {providers.length>1&&<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={s.filters}>{['',...providers].map(p=><Button key={p||'all'} variant={provider===p?'secondary':'ghost'} style={[s.filter,provider===p&&s.choice]} disabled={saving||loading} onPress={()=>setProvider(p)} accessibilityLabel={p||'All providers'} accessibilityState={{selected:provider===p}}>{provider===p&&<Check size={18} color={colors.accent}/>}<Text typography="ui" style={[s.text,s.buttonLabel]}>{p||'All providers'}</Text></Button>)}</ScrollView>}
     </View>} renderItem={({item:m,index})=>{const favorite=favorites.includes(key(m)),first=index===0||favorite!==favorites.includes(key(rows[index-1])),last=index===rows.length-1||favorite!==favorites.includes(key(rows[index+1]));return <View>
-     {first&&<Text typography="ui" accessibilityRole="header" style={s.group}>{favorite?'Favourites':'All models'}</Text>}
+     {first&&!keyboardOpen&&<Text typography="ui" accessibilityRole="header" style={s.group}>{favorite?'Favourites':'All models'}</Text>}
      <View testID={`model-row-${m.provider}-${m.modelId}`} style={[s.row,first&&s.groupTop,last&&s.groupBottom,current.model&&key(m)===key(current.model)&&s.current,selected===key(m)&&s.selected]}>
       <Pressable style={s.model} disabled={saving||loading} onPress={()=>choose(m)} accessibilityLabel={`Select ${m.name} (${m.provider})`} accessibilityRole="radio" accessibilityHint={current.model&&key(m)===key(current.model)?"Currently applied model":"Applies only after tapping Apply"} accessibilityState={{checked:selected===key(m)}}><View style={s.modelText}><Text typography="ui" style={s.text}>{m.name}</Text><Text typography="ui" style={s.caption}>{m.provider}{current.model&&key(m)===key(current.model)?' · Current':''}</Text></View>{selected===key(m)&&<Check size={18} color={colors.accent}/>}</Pressable>
       <Pressable style={s.touch} disabled={!favoritesReady||favoriteSaving||saving||loading} onPress={()=>{void toggleFavorite(m);}} accessibilityRole="button" accessibilityLabel={`${favorite?'Unfavourite':'Favourite'} ${m.name} (${m.provider})`} accessibilityState={{selected:favorite,disabled:!favoritesReady||favoriteSaving||saving||loading}}><Star size={22} color={favorite?colors.accent:colors.muted} fill={favorite?colors.accent:'transparent'}/></Pressable>
@@ -59,8 +72,8 @@ function ModelPickerContent({visible,models,current,onClose,onApply,loading=fals
      </View>
     </View>;}} ListEmptyComponent={<Text typography="ui" style={s.caption}>{loading?'Loading available models…':available.length?'No matching models.':'Connect a provider in Settings to choose a model.'}</Text>}/>
     {/* Keep thinking controls reachable outside the catalog; swipe choices sideways and allow vertical overflow only on short screens. */}
-    <View testID="selected-model-panel" style={s.selection}>
-     <ScrollView testID="selected-model-controls" style={s.controls} contentContainerStyle={[s.section,{paddingBottom:clearance+8}]} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+    <View testID="selected-model-panel" style={[s.selection,keyboardOpen&&{paddingTop:4},keyboardOpen&&bodyHeight>0&&{maxHeight:Math.max(0,bodyHeight-96)}] }>
+     <ScrollView testID="selected-model-controls" style={s.controls} contentContainerStyle={[s.section,keyboardOpen&&{gap:4},{paddingBottom:clearance+8}]} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
       <Text typography="ui" style={s.label}>Thinking effort</Text>
       <ScrollView ref={effortStrip} testID="thinking-level-strip" horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={s.effortScroll} contentContainerStyle={s.effortStrip}>{levels.map(level=><Button key={level} variant={thinking===level?'secondary':'ghost'} style={[s.filter,thinking===level&&s.choice]} disabled={saving||loading} onPress={()=>setThinking(level)} onLayout={({nativeEvent:{layout}})=>{if(thinking===level)effortStrip.current?.scrollTo({x:Math.max(0,layout.x-8),animated:false});}} accessibilityLabel={`${labels[level]??level} thinking`} accessibilityRole="radio" accessibilityState={{checked:thinking===level}}>{thinking===level&&<Check size={18} color={colors.accent}/>}<Text typography="ui" style={[s.text,s.buttonLabel]}>{labels[level]??level}</Text></Button>)}</ScrollView>
       {!chosen&&<Text typography="ui" style={s.caption}>Choose a model first.</Text>}
@@ -68,20 +81,23 @@ function ModelPickerContent({visible,models,current,onClose,onApply,loading=fals
      </ScrollView>
 
     </View>
-    </>}</SectionBody>
-   </SafeAreaView>
+    </>}</SectionBody></View>
+   </AnimatedSafeAreaView>
   </KeyboardAvoidingView>
- </Modal>;
+ ;
+ const overlay=<MenuTheme>{nativeAvoidance?<KeyboardLayout active={visible} clearanceColor={colors.background}>{body}</KeyboardLayout>:body}</MenuTheme>;
+ const hosted=useOverlayHost(visible,transition.mounted,overlay,()=>{if(visible&&!saving)onClose();});
+ return hosted?null:<Modal visible={visible} transparent animationType="none" onRequestClose={()=>{if(visible&&!saving)onClose();}}>{overlay}</Modal>;
 }
 const sTheme=themed(({colors,shadows})=>StyleSheet.create({
- overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
+ overlay:{flex:1,justifyContent:'flex-end'},
  sheet:{...shadows.popup,height:'94%',backgroundColor:colors.background,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card,gap:8},
  buttonLabel:{...menuButtonChrome({colors,shadows}).label},
  text:{color:colors.foreground,fontSize:16,lineHeight:24,flexShrink:1},
  label:{color:colors.muted,fontSize:14,lineHeight:22,fontWeight:'600'},
  caption:{fontSize:14,color:colors.muted,lineHeight:21},
  header:{gap:12},searchHeader:{paddingHorizontal:16,gap:12},
- models:{flex:1,minHeight:0,marginHorizontal:16},
+ body:{flex:1,minHeight:0},models:{flex:1,minHeight:0,marginHorizontal:16},
  // Adjacent virtualized rows share a panel; only group edges are rounded.
  row:{flexDirection:'row',alignItems:'center',backgroundColor:colors.panel,borderLeftWidth:3,borderLeftColor:'transparent',paddingRight:8,minWidth:0},
  groupTop:{borderTopLeftRadius:24,borderTopRightRadius:24},

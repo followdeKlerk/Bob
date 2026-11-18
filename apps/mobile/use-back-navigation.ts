@@ -1,17 +1,20 @@
 import {useEffect,useRef} from 'react';
 import {BackHandler,Keyboard,Platform} from 'react-native';
 import {recordAppEvent} from './app-diagnostics';
+import {useOverlayBack} from './components/overlay-host';
 /** Back dismisses UI/keyboard, but never exits or minimizes the root chat.
  * Home and Recents remain the explicit ways to leave Bob. */
 export function useBackNavigation(onBack:()=>boolean,enabled=true){
  const current=useRef(onBack);current.current=onBack;
+ const overlayBack=useOverlayBack();
  useEffect(()=>{
   if(Platform.OS!=='android'||!enabled)return;
   const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
+   if(overlayBack()){recordAppEvent('back.ui');return true;}
    if(current.current()){recordAppEvent('back.ui');return true;}
    if(Keyboard.isVisible()){Keyboard.dismiss();recordAppEvent('back.keyboard');return true;}
    recordAppEvent('back.root-ignored');return true;
   });
   return()=>subscription.remove();
- },[enabled]);
+ },[enabled,overlayBack]);
 }

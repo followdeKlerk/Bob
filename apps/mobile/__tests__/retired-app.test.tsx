@@ -51,7 +51,7 @@ function defaultApi(input:any,options?:any){
  return response([]);
 }
 function activeRoot(tree:Renderer.ReactTestRenderer){return tree.root.findAll(node=>node.type===View&&typeof node.props.testID==='string'&&node.props.testID.startsWith('session-host:')&&node.props.pointerEvents==='auto')[0]??tree.root;}
-function button(tree:Renderer.ReactTestRenderer,label:string){return activeRoot(tree).findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];}
+function button(tree:Renderer.ReactTestRenderer,label:string){const owner=tree.root.findAllByProps({testID:'overlay-active'})[0];return (owner?.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')??[])[0]??activeRoot(tree).findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0];}
 async function press(tree:Renderer.ReactTestRenderer,label:string){await act(async()=>button(tree,label).props.onPress());}
 async function navigate(tree:Renderer.ReactTestRenderer,destination:string){
  if(destination==='Sessions')destination='Agents';
@@ -222,7 +222,7 @@ test('late snapshot closes ordinary controls and stale callbacks cannot send or 
  try{
   await act(async()=>activeRoot(tree).findByType(DraftInput).props.onChangeText('stale draft'));
   const send=button(tree,'Send message').props.onPress;
-  await press(tree,'Chat actions');const chooseFiles=activeRoot(tree).findByType(PlusMenu).props.onFiles;
+  await press(tree,'Chat actions');const chooseFiles=tree.root.findByProps({testID:'overlay-active'}).findByType(PlusMenu).props.onFiles;
   await publish({'bob.profile':profile});
   expect(activeRoot(tree).findByType(DraftInput).props.editable).toBe(false);
   expect(button(tree,'Chat actions').props.disabled).toBe(true);

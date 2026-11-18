@@ -60,7 +60,7 @@ import {
   protocol,
   Model,
 } from "./contracts.js";
-import {updateStatus,queueUpdate,withMaintenance,downloadUpdate} from './maintenance-port.js';
+import {updateStatus,updateJob,queueUpdate,withMaintenance,downloadUpdate} from './maintenance-port.js';
 import {notificationReply,notificationConversationTitle} from './notification-preview.js';
 import {HttpError} from "./errors.js";
 function validateDirectory(cwd: string | undefined) {
@@ -216,7 +216,16 @@ export async function serve(
       if(path==='/v1/updates'&&req.method==='GET')return send(res,200,updateStatus(state));
       if(path==='/v1/updates'&&req.method==='POST'){
         const request=z.object({id:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),action:z.enum(['build','update','rollback']),target:z.enum(['android','backend','all'])}).strict().parse(await body(req));
-        return send(res,202,queueUpdate(state,request));
+        if(request.action==='rollback'&&request.target!=='backend')throw new HttpError(400,'Rollback supports target=backend only; Android rollback is not supported');
+        try{return send(res,202,queueUpdate(state,request));}
+        catch(error){if(error instanceof Error&&error.message==='Self-update request conflict')throw new HttpError(409,error.message);throw error;}
+      }
+      // Paired authentication and the exact backend identity fence above apply to
+      // old receipts too. Read only: absence never queues or replays a request.
+      const exactUpdate=path.match(/^\/v1\/updates\/([A-Za-z0-9_-]{1,128})$/);
+      if(exactUpdate&&req.method==='GET'){
+        const job=updateJob(state,exactUpdate[1]!);if(!job)throw new HttpError(404,'Update job not found');
+        return send(res,200,job);
       }
       const updateApk=path.match(/^\/v1\/updates\/([A-Za-z0-9_-]{1,128})\/apk$/);
       if(updateApk&&req.method==='GET'){await downloadUpdate(state,updateApk[1]!,res);return;}
@@ -304,6 +313,41 @@ export async function serve(
         if (req.method === "GET") {
           const library=await h.snapshot(Library,runtime.library.id,ctx),metadata=await h.snapshot(SkillMetadata,runtime.library.id,ctx);
           return send(res,200,{...library,skills:Object.fromEntries(Object.entries(library?.skills??{}).filter(([name])=>!metadata?.skills[name]?.archived)),commands:[delegationMenuCommand,{name:'btw',description:'Ask a tool-free side question using a recent chat snapshot without interrupting the main task.'},{name:'learn',description:'Learn a reusable skill from sources or this workflow.'},{name:'refine',description:'Review this conversation to improve memory and skills.'}],archivedSkills:Object.entries(metadata?.skills??{}).filter(([,skill])=>skill.archived).map(([name])=>name)});
+        }
+        if(req.method==='PATCH'){
+          const text=z.string().max(32000),skillValue=Skill.omit({name:true});
+          const change=z.discriminatedUnion('field',[
+            z.object({field:z.literal('instructions'),expected:text,value:text}).strict(),
+            z.object({field:z.literal('template'),name:z.string().min(1).max(80).refine(name=>name!=='__proto__'),expected:text.nullable(),value:text.nullable()}).strict(),
+            z.object({field:z.literal('skill'),name:Skill.shape.name,expected:skillValue.nullable(),value:skillValue.nullable()}).strict(),
+          ]).parse(await body(req));
+          await runtime.library.commit(async tx=>{
+            const library=await tx.doc(Library,runtime.library.id);
+            const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+            if(change.field==='instructions'){
+              if(library.instructions===change.value)return;
+              if(library.instructions!==change.expected)throw new HttpError(409,'Default instructions changed. Read the latest value before saving again.');
+              library.instructions=change.value;
+            }else if(change.field==='template'){
+              const current=Object.hasOwn(library.templates,change.name)?library.templates[change.name]:null;
+              if(current===change.value)return;
+              if(current!==change.expected)throw new HttpError(409,'This template changed. Read the latest value before saving again.');
+              if(change.value===null)delete library.templates[change.name];
+              else library.templates[change.name]=change.value;
+            }else{
+              const metadata=await tx.doc(SkillMetadata,runtime.library.id);
+              const item=Object.hasOwn(library.skills,change.name)&&!metadata.skills[change.name]?.archived?library.skills[change.name]:undefined;
+              const current=item?{description:item.description,markdown:item.markdown,enabled:item.enabled}:null;
+              if(same(current,change.value))return;
+              if(!same(current,change.expected))throw new HttpError(409,'This skill changed. Read the latest value before saving again.');
+              if(change.value===null)await mutateSkill(tx,runtime.library.id,runtime.library.id,{name:change.name,action:'archive'});
+              else{
+                if(metadata.skills[change.name]?.archived)await mutateSkill(tx,runtime.library.id,runtime.library.id,{name:change.name,action:'restore'});
+                await mutateSkill(tx,runtime.library.id,runtime.library.id,{...change.value,name:change.name,action:'save'});
+              }
+            }
+          },ctx);
+          return send(res,200,{saved:true});
         }
         if (req.method === "PUT") {
           const value = z

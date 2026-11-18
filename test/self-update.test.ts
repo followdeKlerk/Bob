@@ -41,6 +41,22 @@ test('paired update API queues idempotently, denies anonymous access and exposes
   const body=JSON.stringify({id:'ui-test',action:'build',target:'all'});
   for(let i=0;i<2;i++)assert.equal((await fetch(base+'/v1/updates',{method:'POST',headers,body})).status,202);
   assert.equal(store.jobs().length,1);
+  const first=store.job('ui-test');
+  for(let i=0;i<105;i++)store.enqueue({id:`newer-${i}`,action:'build',target:'backend'});
+  assert.ok(!store.jobs().some(job=>job.id==='ui-test'));
+  assert.equal((await fetch(base+'/v1/updates/ui-test')).status,401);
+  assert.equal((await fetch(base+'/v1/updates/ui-test',{headers:{...headers,'x-bob-backend':'other'}})).status,409);
+  const exact=await fetch(base+'/v1/updates/ui-test',{headers});assert.equal(exact.status,200);assert.deepEqual(await exact.json(),first);
+  assert.equal((await fetch(base+'/v1/updates/missing',{headers})).status,404);assert.equal(store.job('missing'),undefined);
+  assert.equal((await fetch(base+'/v1/updates',{method:'POST',headers,body})).status,202);
+  assert.deepEqual(store.job('ui-test'),first,'exact lookup and duplicate POST must not alter or replay receipt');
+  assert.equal((await fetch(base+'/v1/updates',{method:'POST',headers,body:JSON.stringify({id:'ui-test',action:'update',target:'all'})})).status,409);
+  for(const target of ['android','all']){
+   const rejected=await fetch(base+'/v1/updates',{method:'POST',headers,body:JSON.stringify({id:'unsupported-'+target,action:'rollback',target})});
+   assert.equal(rejected.status,400);assert.match(JSON.stringify(await rejected.json()),/Android rollback is not supported/);
+   assert.equal(store.job('unsupported-'+target),undefined);
+  }
+
   const conversation=await runtime.harness.createConversation({ownership:{kind:'ownerless'}},ctx);
   assert.ok((await conversation.agent(ctx)).tools.some((t:any)=>t.name==='self_update'),'Native self-update tool must be available to Bob');
   store.set('draining',true);

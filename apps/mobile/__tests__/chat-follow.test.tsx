@@ -20,6 +20,15 @@ test('streaming follows immediately, dragging up pauses, returning to bottom res
  act(()=>follow.props.onContentSizeChange(300,2300));flush();expect(end).toHaveBeenCalledWith({animated:false});expect(follow.showJump).toBe(false);
  await act(async()=>tree.unmount());
 });
+test('bursts of streamed geometry keep the first pending follow frame rather than postponing it',async()=>{
+ let tree!:Renderer.ReactTestRenderer;const end=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="burst"/>);});(follow.list as any).current={scrollToEnd:end};flush();end.mockClear();
+ const frame=jest.spyOn(globalThis,'requestAnimationFrame');
+ act(()=>{follow.props.onContentSizeChange(300,2000);follow.props.onContentSizeChange(300,2010);follow.props.onContentSizeChange(300,2020);});
+ expect(frame).toHaveBeenCalledTimes(1);flush();expect(end).toHaveBeenCalledTimes(1);
+ act(()=>{follow.props.onContentSizeChange(300,2030);follow.props.onScrollBeginDrag();});flush();expect(end).toHaveBeenCalledTimes(1);
+ await act(async()=>tree.unmount());
+});
+
 test('drag cancels a queued follow and release does not fight an upward fling',async()=>{
  let tree!:Renderer.ReactTestRenderer;const end=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="one"/>);});(follow.list as any).current={scrollToEnd:end};flush();end.mockClear();
  act(()=>{follow.props.onContentSizeChange();follow.props.onScrollBeginDrag();});flush();expect(end).not.toHaveBeenCalled();
@@ -37,6 +46,18 @@ test('jump to latest follows explicitly, scope reset follows again, ordinary scr
 });
 test('reduced motion disables animated jump',async()=>{
  (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockResolvedValue(true);let tree!:Renderer.ReactTestRenderer;const end=jest.fn();await act(async()=>{tree=Renderer.create(<Harness scope="one"/>);});(follow.list as any).current={scrollToEnd:end};flush();end.mockClear();act(()=>follow.resume());flush();expect(end).toHaveBeenCalledWith({animated:false});await act(async()=>tree.unmount());
+});
+
+test('unresolved or stale accessibility reads cannot enable animated jumps',async()=>{
+ let resolvePreference!:(value:boolean)=>void,changed!:(value:boolean)=>void;
+ (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockImplementation(()=>new Promise<boolean>(resolve=>{resolvePreference=resolve;}));
+ (AccessibilityInfo.addEventListener as jest.Mock).mockImplementation((_event,callback)=>{changed=callback;return{remove:jest.fn()};});
+ let tree!:Renderer.ReactTestRenderer;const latest=jest.fn();
+ await act(async()=>{tree=Renderer.create(<Harness scope="pending" inverted/>);});(follow.list as any).current={scrollToOffset:latest};
+ act(()=>follow.resume());flush();expect(latest).toHaveBeenLastCalledWith({offset:0,animated:false});
+ act(()=>changed(true));await act(async()=>resolvePreference(false));
+ act(()=>follow.resume());flush();expect(latest).toHaveBeenLastCalledWith({offset:0,animated:false});
+ await act(async()=>tree.unmount());
 });
 
 const layout=(height:number)=>({nativeEvent:{layout:{height}}});

@@ -11,15 +11,16 @@ export function useKeyboardInset(): number {
   const [inset, setInset] = useState(0);
   useEffect(() => {
     if (Platform.OS === 'android') {
+      let alive=true,eventReceived=false;
       const subscription = DeviceEventEmitter.addListener(
         'BobKeyboardInset',
-        (event: {imeBottom?: number}) => setInset(Math.max(0, event?.imeBottom ?? 0)),
+        (event: {imeBottom?: number}) => {eventReceived=true;const value=event?.imeBottom;if(alive&&typeof value==='number'&&Number.isFinite(value))setInset(Math.max(0,value));},
       );
       const native = NativeModules.BobKeyboard;
       if (native?.enable) {
-        native.enable().catch(() => setInset(0));
+        void native.enable().then((value:unknown)=>{if(alive&&!eventReceived&&typeof value==='number'&&Number.isFinite(value))setInset(Math.max(0,value));}).catch(()=>{/* Keep the last known inset; failure is not a keyboard hide. */});
       }
-      return () => subscription.remove();
+      return () => {alive=false;subscription.remove();};
     }
     const show = Keyboard.addListener('keyboardWillShow', event => {
       const windowHeight = Dimensions.get('window').height;

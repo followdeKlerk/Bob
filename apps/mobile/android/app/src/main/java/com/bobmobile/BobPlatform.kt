@@ -54,7 +54,7 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
         super.invalidate()
     }
     override fun getName() = "BobPlatform"
-    override fun getConstants(): Map<String, Any> = mapOf("loopbackTesting" to BuildConfig.DEBUG)
+    override fun getConstants(): Map<String, Any> = mapOf("loopbackTesting" to BuildConfig.DEBUG, "initialAppearance" to BobAppearance.preference(context))
     @ReactMethod fun selectionHaptic() { BobHaptics.selection(context) }
     @ReactMethod fun setAppearance(mode: String, promise: Promise) {
         if (mode != "light" && mode != "dark" && mode != "system") {
@@ -141,5 +141,5 @@ class BobPlatform(private val context: ReactApplicationContext) : ReactContextBa
 }
 class BobPlatformPackage : ReactPackage {
     override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> = listOf(BobPlatform(context), BobFiles(context), BobLocation(context), BobConnection(context), BobPhoneTools(context), BobNotifications(context), BobInteractive(context), BobKeyboard(context), BobSpeech(context))
-    override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> = listOf(BobInlineSurfaceManager())
+    override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> = listOf(BobInlineSurfaceManager(), BobImeLayoutManager())
 }

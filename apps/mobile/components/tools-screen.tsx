@@ -10,7 +10,14 @@ import {toolsMutationOwner,type ToolsMutationOwner} from '../tools-mutations';
 
 type Module=ReturnType<typeof ModuleInfo.parse>;
 type Connection=ReturnType<typeof McpConnection.parse>;
+/** Presentation only: one transport scope, at most its two catalog resources.
+ * No cached revision may authorize a write; every visit still reads the backend. */
+export class ToolsPresentationCache {
+ private scope='';private items=new Map<string,unknown>();
+ forScope(scope:string){if(this.scope!==scope){this.scope=scope;this.items=new Map();}return this.items;}
+}
 export type ToolsScreenProps={
+ presentation?:ToolsPresentationCache;
  backendId:string;workstationName:string;conversationId?:number;conversationTitle?:string;
  scopeKey:string;active:boolean;readOnly:boolean;
  request:(path:string,method?:string,body?:unknown,signal?:AbortSignal)=>Promise<unknown>;
@@ -75,38 +82,45 @@ type Resource<T>={items?:T[];loading:boolean;error?:string;revision?:number};
 export function ToolsScreen(props:ToolsScreenProps){
  const request=useRef(props.request);request.current=props.request;
  const transport=useCallback<ToolsScreenProps['request']>((...args)=>request.current(...args),[]);
+ const [local]=useState(()=>new ToolsPresentationCache());
+ const key=JSON.stringify([props.backendId,props.scopeKey,props.conversationId,props.readOnly]);
+ const cached=(props.presentation??local).forScope(key);
  if(!props.active)return null;
- return <ToolsContent key={JSON.stringify([props.backendId,props.scopeKey,props.conversationId,props.readOnly])} {...props} request={transport}/>;
+ return <ToolsContent key={key} {...props} cached={cached} request={transport}/>;
 }
-function useResource<T>(path:string,parse:(value:unknown)=>T[],request:ToolsScreenProps['request'],alive:React.RefObject<boolean>,owner:ToolsMutationOwner){
- const [state,setState]=useState<Resource<T>>({loading:true});
+function useResource<T>(path:string,parse:(value:unknown)=>T[],request:ToolsScreenProps['request'],alive:React.RefObject<boolean>,owner:ToolsMutationOwner,cached:Map<string,unknown>){
+ const [state,setState]=useState<Resource<T>>(()=>{try{return {loading:true,items:cached.has(path)?parse(cached.get(path)):undefined};}catch{return {loading:true};}});
  const observer=useRef<{controller:AbortController;generation:number}|undefined>(undefined);
  const generation=useRef(0);
  const load=async(verify?:(items:T[])=>boolean)=>{
   if(!alive.current)return undefined;
   observer.current?.controller.abort();const controller=new AbortController(),ticket=++generation.current;observer.current={controller,generation:ticket};
-  setState({loading:true});const readTicket=owner.beginRead();
+  // A post-write verification is not a presentation refresh: clear the old
+  // pre-write rows so uncertain/mismatched outcomes cannot look committed.
+  if(verify)cached.delete(path);
+  setState(previous=>({items:verify?undefined:previous.items,loading:true}));const readTicket=owner.beginRead();
   try{
    const items=parse(await timed(request(path,'GET',undefined,controller.signal),15000,()=>controller.abort(),controller.signal));
    if(!alive.current||ticket!==generation.current||controller.signal.aborted)return undefined;
    if(verify&&!verify(items))throw Error('Readback did not verify the requested change.');
    const fresh=owner.acceptRead(readTicket);
+   if(fresh)cached.set(path,items);
    setState({items,loading:false,revision:fresh?readTicket.revision:undefined});return {items,fresh};
-  }catch(error){if(alive.current&&ticket===generation.current)setState({loading:false,error:errorText(error)});return undefined;}
+  }catch(error){if(alive.current&&ticket===generation.current)setState(previous=>({items:previous.items,loading:false,error:errorText(error)}));return undefined;}
  };
  useEffect(()=>{void load();return()=>{++generation.current;observer.current?.controller.abort();};},[]); // Scoped owner + latest transport; never keyed by callback identity.
  return {...state,load};
 }
 type Confirmation={anchor:string;title:string;message:string;run:()=>void};
-function ToolsContent({backendId,workstationName,conversationId,conversationTitle,readOnly,request,onAskBob}:ToolsScreenProps){
+function ToolsContent({backendId,workstationName,conversationId,conversationTitle,readOnly,request,onAskBob,cached}:ToolsScreenProps&{cached:Map<string,unknown>}){
  const s=useThemedValue(styles),{colors}=useTheme();
  const alive=useRef(true);
  useLayoutEffect(()=>{alive.current=true;return()=>{alive.current=false;confirmationRef.current=undefined;};},[]);
  const modulePath=conversationId===undefined?'modules':`chats/${conversationId}/modules`;
  const moduleOwner=toolsMutationOwner(backendId,'modules',conversationId),connectionOwner=toolsMutationOwner(backendId,'connections');
  const moduleWrite=useSyncExternalStore(moduleOwner.subscribe,moduleOwner.getSnapshot),connectionWrite=useSyncExternalStore(connectionOwner.subscribe,connectionOwner.getSnapshot);
- const modules=useResource(modulePath,value=>parseModules(value,conversationId!==undefined),request,alive,moduleOwner);
- const connections=useResource('mcp-connections',parseConnections,request,alive,connectionOwner);
+ const modules=useResource(modulePath,value=>parseModules(value,conversationId!==undefined),request,alive,moduleOwner,cached);
+ const connections=useResource('mcp-connections',parseConnections,request,alive,connectionOwner,cached);
  const owners={modules:moduleOwner,connections:connectionOwner};
  const blocked=(kind:'modules'|'connections')=>{const owner=owners[kind],resource=kind==='modules'?modules:connections;return owner.getSnapshot().phase!=='idle'||resource.revision!==owner.getSnapshot().revision;};
  const [page,setPage]=useState<'modules'|'connections'>('modules');
@@ -207,7 +221,8 @@ function ToolsContent({backendId,workstationName,conversationId,conversationTitl
   </View>
   {page==='modules'&&<View testID="tools-modules" style={s.section}>
    <View style={s.scope}><Text typography="ui" style={s.scopeTitle}>{conversationId===undefined?'Workstation catalog':`This chat · ${conversationTitle||`Chat ${conversationId}`}`}{readOnly?' · View only':''}</Text><Text typography="ui" style={s.caption}>{conversationId===undefined?'Choose a chat to change its tools.':'Selections affect this chat, not workstation defaults.'}</Text></View>
-   {modules.loading&&<Text typography="ui" style={s.caption}>Loading modules…</Text>}
+   {modules.items&&modules.revision===undefined&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.caption}>Last loaded modules · {modules.loading?'refreshing…':'refresh to verify.'}</Text>}
+   {modules.loading&&!modules.items&&<Text typography="ui" style={s.caption}>Loading modules…</Text>}
    {!!modules.error&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.caption}>Modules could not be loaded. {modules.error}</Text>}
    {modules.items?.length===0&&<Text typography="ui" style={s.caption}>No modules in this workstation catalog.</Text>}
    {!!modules.items?.length&&<View style={s.listHeading}><Text typography="ui" accessibilityRole="header" style={s.sectionTitle}>Modules</Text><Text typography="ui" style={s.caption}>{modules.items.length}{conversationId===undefined?'':` · ${modules.items.filter(item=>item.selected).length} on`}</Text></View>}
@@ -230,7 +245,8 @@ function ToolsContent({backendId,workstationName,conversationId,conversationTitl
   {page==='connections'&&<View testID="tools-connections" style={s.section}>
    <View style={s.scope}><Text typography="ui" style={s.scopeTitle}>Shared across chats{readOnly?' · View only':''}</Text><Text typography="ui" style={s.caption}>Workstation configuration · availability is not tested here.</Text></View>
    {!!connectionNote&&<Text typography="ui" style={s.caption}>{connectionNote}</Text>}
-   {connections.loading&&<Text typography="ui" style={s.caption}>Loading connections…</Text>}
+   {connections.items&&connections.revision===undefined&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.caption}>Last loaded connections · {connections.loading?'refreshing…':'refresh to verify.'}</Text>}
+   {connections.loading&&!connections.items&&<Text typography="ui" style={s.caption}>Loading connections…</Text>}
    {!!connections.error&&<Text typography="ui" accessibilityLiveRegion="polite" style={s.caption}>Connections could not be loaded. {connections.error}</Text>}
    {connections.items?.length===0&&<Text typography="ui" style={s.caption}>No connections yet.</Text>}
    {!!connections.items?.length&&<View style={s.listHeading}><Text typography="ui" accessibilityRole="header" style={s.sectionTitle}>Servers</Text><Text typography="ui" style={s.caption}>{connections.items.length} · {connections.items.filter(item=>item.enabled).length} enabled</Text></View>}

@@ -65,6 +65,7 @@ export function ConversationSettings({instructions,folder,inherited,onInstructio
    <View style={s.folder}>
     <View style={s.labelRow}><Text typography="ui" accessibilityRole="header" style={s.label}>Folder</Text>{folder!==saved.cwd&&<Text typography="ui" style={s.mode}>Unsaved</Text>}</View><Text typography="ui" style={s.hint}>Absolute path on the selected workstation.</Text>
     <TextInput accessibilityLabel="Backend working directory" editable={!locked} placeholder="/path/to/project" placeholderTextColor={colors.muted} selectionColor={colors.accent} autoCapitalize="none" autoCorrect={false} spellCheck={false} value={folder} onChangeText={changeFolder} style={[s.input,s.path]}/>
+    {folder.length>60&&<Text selectable accessibilityLabel="Full working directory" style={[s.hint,{fontFamily:APP_FONT_FAMILY}]}>{folder}</Text>}
     <View style={s.actions}>{action('Set conversation folder','Save folder','folder',!folder.trim()||saved.cwd===folder,true)}</View>
     {feedbackKind==='folder'&&notice}
    </View>

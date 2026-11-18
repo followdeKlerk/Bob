@@ -1,4 +1,5 @@
 import React from 'react';
+jest.mock('react-native-reanimated',()=>({__esModule:true,default:{View:require('react-native').View}}));
 import Renderer,{act} from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {FlatList,ScrollView,Modal,StyleSheet,View,Platform,KeyboardAvoidingView} from 'react-native';
@@ -226,6 +227,7 @@ test.each(['android','ios'])('model dialog measures keyboard overlap without dup
  try{
   await act(async()=>{tree=Renderer.create(<ModelPicker visible models={models} current={current} onClose={()=>{}} onApply={jest.fn()}/>);});
   const modal=tree.root.findByType(Modal),avoidance=tree.root.findByType(KeyboardAvoidingView);
+  expect(modal.props.animationType).toBe('none'); // Motion is gated until accessibility preferences are known.
   expect(modal.props.statusBarTranslucent).not.toBe(true);
   expect(modal.props.navigationBarTranslucent).not.toBe(true);
   expect(avoidance.props.enabled).toBe(true);

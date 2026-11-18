@@ -1,5 +1,5 @@
 import {SETTINGS_PAGES} from './settings-routes';
-const destinations=['Notes','Workstations','Chat','Agents','Sessions','Terminal','Tools','Settings'] as const;
+const destinations=['Notes','Workstations','Chat','Agents','Sessions','Terminal','Tools','Todos','Settings'] as const;
 export function menuDestination(screen:string,trail:readonly string[]):typeof destinations[number]{
  const isDestination=(value:string):value is typeof destinations[number]=>destinations.some(item=>item===value);
  if(screen==='Sessions')return 'Agents';

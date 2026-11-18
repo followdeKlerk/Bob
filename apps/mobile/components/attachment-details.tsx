@@ -1,4 +1,5 @@
-import {withMenuTheme} from '../menu-theme';
+import {MenuTheme,withMenuTheme} from '../menu-theme';
+import {useRetainableOverlay} from './overlay-host';
 import React from 'react';
 import {Modal,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
@@ -15,15 +16,15 @@ function readableSize(bytes:number){
 }
 
 /** Local display metadata only: opening details never authorizes a file request. */
-function AttachmentDetailsContent({artifact,onClose}:{artifact:{name:string;mime:string;size:number};onClose:()=>void}){
+function AttachmentDetailsContent({artifact,onClose,scopeKey='standalone'}:{scopeKey?:string;artifact:{name:string;mime:string;size:number};onClose:()=>void}){
  const {colors}=useTheme(),styles=useThemedValue(stylesTheme);
  const type=attachmentType(artifact.name,artifact.mime);
- return <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
-  <SafeAreaProvider style={styles.backdrop}>
+ const close=()=>{retainExit();onClose();};
+ const overlay=<MenuTheme><SafeAreaProvider style={styles.backdrop}>
    <SafeAreaView edges={['top','right','bottom','left']} style={styles.safe}>
     <View testID="attachment-details-sheet" accessibilityViewIsModal style={styles.sheet}>
      <SectionHeading title="Attachment details"/>
-     <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<SectionAction label="Close attachment details" text="Close" onPress={onClose}/>}/>}>{clearance=>
+     <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<SectionAction label="Close attachment details" text="Close" onPress={close}/>}/>}>{clearance=>
      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content,{paddingBottom:clearance+24}]} showsVerticalScrollIndicator={false}>
       <Text typography="ui" selectable style={styles.filename}>{artifact.name}</Text>
       <View style={styles.field}><Text typography="ui" style={styles.label}>Type</Text><Text typography="ui" style={styles.value}>{typeLabels[type.kind]}</Text></View>
@@ -33,8 +34,9 @@ function AttachmentDetailsContent({artifact,onClose}:{artifact:{name:string;mime
      }</SectionBody>
     </View>
    </SafeAreaView>
-  </SafeAreaProvider>
- </Modal>;
+  </SafeAreaProvider></MenuTheme>;
+ const {hosted,retainExit}=useRetainableOverlay(`attachment-details:${scopeKey}`,overlay,close);
+ return hosted?null:<Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={close}>{overlay}</Modal>;
 }
 const stylesTheme=themed(({colors,menuChrome})=>StyleSheet.create({
  backdrop:{flex:1,backgroundColor:'rgba(0,0,0,0.45)'},

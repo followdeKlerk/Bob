@@ -16,7 +16,8 @@ internal object AppDiagnostics {
         "activity.user-leave", "activity.focus-gained", "activity.focus-lost", "activity.back",
         "activity.back-no-js-ignored", "activity.default-back-ignored",
         "js.ready", "js.active", "js.background", "js.inactive", "js.unknown", "js.extension",
-        "back.ui", "back.keyboard", "back.root-ignored"
+        "back.ui", "back.keyboard", "back.root-ignored",
+        "startup.theme-ready", "startup.session-ready", "startup.editor-ready"
     )
     fun allowedEvent(name: String) = name in allowed
     fun append(events: List<Event>, event: Event): List<Event> =

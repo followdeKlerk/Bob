@@ -58,6 +58,16 @@ test('using defaults sends null rather than blank instructions and keeps a folde
  expect(press('Use backend default instructions').props.disabled).toBe(true);
  expect(tree!.root.findAllByType(Text).some(node=>node.props.children==='Using backend default.')).toBe(true);
 });
+test('a long folder remains fully inspectable without replacing its editable input',async()=>{
+ await mount();
+ const input=field('Backend working directory'),longPath='/workspace/'+('nested-directory/'.repeat(8))+'project';
+ act(()=>input.props.onChangeText(longPath));
+ expect(field('Backend working directory')).toBe(input);
+ expect(input.props.value).toBe(longPath);
+ const full=tree!.root.findByProps({accessibilityLabel:'Full working directory'});
+ expect(full.props.selectable).toBe(true);expect(full.props.children).toBe(longPath);
+});
+
 test('saving a folder does not overwrite unsaved instructions',async()=>{
  save.mockResolvedValue({instructions:'Be concise',cwd:'/project'});await mount();
  act(()=>field('Conversation instructions').props.onChangeText('Unsaved instruction draft'));

@@ -1,11 +1,13 @@
 import {MenuTheme,useMenuTheme} from '../menu-theme';
-import {MotionSurface} from './motion-surface';
+import {useModalTransition} from './modal-transition';
+import {useOverlayHost} from './overlay-host';
 import {TouchTarget} from './touch-target';
 import {menuButtonChrome} from '../menu-button-style';
 import React from 'react';
-import {Modal,ScrollView,StyleSheet,View} from 'react-native';
+import {Animated,Modal,ScrollView,StyleSheet,View} from 'react-native';
 import {SafeAreaView,useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Menu as NavigationMenu,SquareTerminal,NotebookPen,Monitor,Users,Wrench,Settings,ArrowLeft,Check,X,type LucideIcon} from 'lucide-react-native';
+const AnimatedSafeAreaView=Animated.createAnimatedComponent(SafeAreaView);
+import {Menu as NavigationMenu,SquareTerminal,NotebookPen,Monitor,Users,Wrench,Settings,ListChecks,ArrowLeft,Check,X,type LucideIcon} from 'lucide-react-native';
 import {Text} from './app-text';
 import type {BottomDestination} from './bottom-tabs';
 import {menuRadii,themed,useTheme,useThemedValue} from '../theme';
@@ -17,25 +19,19 @@ const destinations:{id:BottomDestination;label?:string;icon:LucideIcon}[]=[
  {id:'Notes',icon:NotebookPen},
  {id:'Workstations',icon:Monitor},
  {id:'Tools',icon:Wrench},
+ {id:'Todos',label:'Tasks',icon:ListChecks},
  {id:'Settings',icon:Settings},
 ];
 export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,showTrigger=true,readOnly=false,selected='Chat',framedTrigger=false}:{framedTrigger?:boolean;selected?:BottomDestination;open:boolean;onOpen:()=>void;onClose:()=>void;onSelect:(destination:BottomDestination)=>void;activeAgentCount?:number;showTrigger?:boolean;readOnly?:boolean}){
  const chatTheme=useTheme(),menuTheme=useMenuTheme(),{colors}=menuTheme;
  const triggerStyles=useThemedValue(sTheme),s=sTheme(menuTheme);
- const insets=useSafeAreaInsets();
+ const insets=useSafeAreaInsets(),transition=useModalTransition(open);
  const count=!readOnly&&Number.isSafeInteger(activeAgentCount)&&activeAgentCount>0?activeAgentCount:0;
  const agentActivity=`${count} active ${count===1?'agent':'agents'}`;
- return <>
-  {showTrigger&&<TouchTarget accessibilityRole="button" accessibilityLabel="Menu" accessibilityHint="Open navigation" accessibilityValue={{text:agentActivity}} accessibilityState={{expanded:open}} onPress={onOpen} style={[triggerStyles.trigger,framedTrigger&&triggerStyles.framedTrigger]}>
-   <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={triggerStyles.glyph}>
-    <NavigationMenu size={24} color={chatTheme.colors.foreground}/>
-    {count>0&&<View testID="chat-menu-agent-badge" style={triggerStyles.badge}><Text typography="ui" style={triggerStyles.badgeText}>{count>99?'99+':count}</Text></View>}
-   </View>
-  </TouchTarget>}
-  <MenuTheme><Modal visible={open} transparent animationType="none" onRequestClose={onClose}>
-   <View style={[s.overlay,{paddingTop:insets.top+12}]}>
+ const overlay=<MenuTheme>  <View pointerEvents={open?'auto':'none'} accessibilityElementsHidden={!open} importantForAccessibility={open?'auto':'no-hide-descendants'} style={[s.overlay,{paddingTop:insets.top+12}]}>
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:'#00000088'},transition.backdrop]}/>
     <TouchTarget haptic={false} accessibilityRole="button" accessibilityLabel="Dismiss navigation menu" onPress={onClose} style={StyleSheet.absoluteFill}/>
-    <SafeAreaView edges={['left','right','bottom']} testID="chat-navigation-sheet" accessibilityViewIsModal onAccessibilityEscape={onClose} style={s.sheet}><MotionSurface active={open} style={{flexShrink:1}}>
+    <AnimatedSafeAreaView edges={['left','right','bottom']} testID="chat-navigation-sheet" accessibilityViewIsModal onAccessibilityEscape={onClose} style={[s.sheet,transition.panel]}><View style={{flexShrink:1}}>
      <SectionHeading title="Menu"/>
      <SectionBody surfaceColor={colors.background} style={{flex:undefined,flexShrink:1}} footer={<SectionActions overlay leading={<View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>{selected!=='Chat'&&<RoundAction label="Back to chat" onPress={()=>onSelect('Chat')} icon={ArrowLeft}/>}<RoundAction label="Close navigation menu" onPress={onClose} icon={X}/></View>}/>}>{clearance=>
      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content,{paddingBottom:clearance+12}]} style={s.scroll}>
@@ -47,9 +43,18 @@ export function ChatNavigation({open,onOpen,onClose,onSelect,activeAgentCount=0,
       </TouchTarget></View>)}
      </ScrollView>
      }</SectionBody>
-    </MotionSurface></SafeAreaView>
+    </View></AnimatedSafeAreaView>
    </View>
-  </Modal></MenuTheme>
+ </MenuTheme>;
+ const hosted=useOverlayHost(open,transition.mounted,overlay,()=>{if(open)onClose();});
+ return <>
+  {showTrigger&&<TouchTarget accessibilityRole="button" accessibilityLabel="Menu" accessibilityHint="Open navigation" accessibilityValue={{text:agentActivity}} accessibilityState={{expanded:open}} onPress={onOpen} style={[triggerStyles.trigger,framedTrigger&&triggerStyles.framedTrigger]}>
+   <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={triggerStyles.glyph}>
+    <NavigationMenu size={24} color={chatTheme.colors.foreground}/>
+    {count>0&&<View testID="chat-menu-agent-badge" style={triggerStyles.badge}><Text typography="ui" style={triggerStyles.badgeText}>{count>99?'99+':count}</Text></View>}
+   </View>
+  </TouchTarget>}
+  {!hosted&&<Modal visible={open} transparent animationType="none" onRequestClose={()=>{if(open)onClose();}}>{overlay}</Modal>}
  </>;
 }
 const sTheme=themed(({colors,shadows})=>StyleSheet.create({
@@ -58,7 +63,7 @@ const sTheme=themed(({colors,shadows})=>StyleSheet.create({
  glyph:{width:40,height:48,alignItems:'center',justifyContent:'center'},
  badge:{position:'absolute',right:-3,top:0,minWidth:18,minHeight:18,paddingHorizontal:4,borderRadius:12,backgroundColor:colors.selectedSurface,borderWidth:1,borderColor:colors.foreground,alignItems:'center',justifyContent:'center'},
  badgeText:{color:colors.foreground,fontSize:11,lineHeight:15,fontWeight:'700'},
- overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#00000088'},
+ overlay:{flex:1,justifyContent:'flex-end'},
  sheet:{...shadows.popup,width:'100%',maxWidth:760,maxHeight:'85%',alignSelf:'center',backgroundColor:colors.background,borderWidth:1,borderColor:colors.border,borderTopLeftRadius:menuRadii.card,borderTopRightRadius:menuRadii.card},
  scroll:{flexGrow:0,flexShrink:1,minHeight:0},
  content:{paddingHorizontal:16,paddingBottom:12,gap:2},group:{paddingHorizontal:12,paddingTop:16,paddingBottom:6,color:colors.muted,fontSize:13,lineHeight:18,fontWeight:'600'},current:{backgroundColor:colors.selectedSurface,borderColor:colors.selectedBorder,borderRadius:16},

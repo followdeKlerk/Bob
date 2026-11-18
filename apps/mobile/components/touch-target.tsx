@@ -22,7 +22,7 @@ export function TouchTarget({style,disabled,haptic=true,onPress,onPressIn,onPres
   held.current=pressed;setPressed(pressed);
   animation.current?.stop();
   const toValue=pressed?APP_MOTION.pressedOpacity:1;
-  if(!motion){opacity.setValue(toValue);return;}
+  if(disabled||!motion){opacity.setValue(disabled?1:toValue);return;}
   animation.current=Animated.timing(opacity,{toValue,duration:pressed?APP_MOTION.press:APP_MOTION.release,easing:Easing.out(Easing.quad),useNativeDriver:true,isInteraction:false});
   animation.current.start();
  };
@@ -31,8 +31,11 @@ export function TouchTarget({style,disabled,haptic=true,onPress,onPressIn,onPres
   held.current=false;setPressed(false);opacity.setValue(1);
   return()=>animation.current?.stop();
  },[disabled,motion,opacity]);
+ // Keep opacity under one native animation owner across enabled/disabled
+ // changes. Removing the graph while a release/reset is in flight can race
+ // disabled static paint even though activation is fenced.
  return <AnimatedPressable {...props} ref={ref} disabled={disabled}
-  style={[resolved,!disabled&&{opacity:feedbackOpacity}]}
+  style={[resolved,{opacity:feedbackOpacity}]}
   onPress={onPress?event=>{if(disabled)return;if(haptic)selectionHaptic();onPress(event);}:undefined}
   onPressIn={event=>{if(!disabled)settle(true);onPressIn?.(event);}}
   onPressOut={event=>{settle(false);onPressOut?.(event);}}

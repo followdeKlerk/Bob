@@ -273,3 +273,52 @@ test('actual indicator, close, management and transport lifetime report presenta
  expect(fetch).not.toHaveBeenCalled();expect(native().installUpdate).not.toHaveBeenCalled();
  expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();expect(await AsyncStorage.getItem('build-dismissed:backend-id')).toBeNull();
 });
+
+test('explicit exact-job reconciliation recovers an old staged build outside recent history without replay',async()=>{
+ const pending={id:'old-build',action:'build',target:'backend'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ const receipt={...pending,status:'complete',stage:'Backend build staged; not activated'};
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>receipt} as Response);
+ await mount({enabled:true,jobs:[]},true);expect(fetch).not.toHaveBeenCalled();
+ await act(async()=>button('Check status').props.onPress());
+ expect(fetch).toHaveBeenCalledTimes(1);
+ expect(fetch.mock.calls[0][0]).toBe(backend.endpoint+'/v1/updates/old-build');
+ expect(fetch.mock.calls[0][1]).toMatchObject({headers:{Authorization:'Bearer secret','x-bob-backend':backend.backendId}});
+ expect(fetch.mock.calls[0][1]?.method).toBeUndefined();
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();
+ expect(text()).toContain('Backend build staged; not activated');expect(text()).not.toContain('Build result not confirmed');
+});
+
+test.each(['missing','wrong-id','wrong-action','wrong-target','offline'])('exact reconciliation %s retains uncertain admission identity',async(kind)=>{
+ const pending={id:'old-build',action:'update',target:'android'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ const receipt={...pending,status:'complete',stage:'Ready',...(kind==='wrong-id'?{id:'other'}:kind==='wrong-action'?{action:'build'}:kind==='wrong-target'?{target:'backend'}:{})};
+ const fetch=jest.spyOn(globalThis,'fetch');
+ if(kind==='offline')fetch.mockRejectedValue(Error('offline'));
+ else fetch.mockResolvedValue({ok:kind!=='missing',status:kind==='missing'?404:200,json:async()=>receipt} as Response);
+ await mount({enabled:true,jobs:[]},true);await act(async()=>button('Check status').props.onPress());
+ expect(fetch).toHaveBeenCalledTimes(1);expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBe(JSON.stringify(pending));
+ expect(text()).toContain('Build result not confirmed');
+});
+
+test('late exact-job read after backend switch cannot clear old persisted identity or change new owner',async()=>{
+ const pending={id:'old-build',action:'update',target:'android'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ let resolve:(value:any)=>void=()=>{};
+ jest.spyOn(globalThis,'fetch').mockImplementation(()=>new Promise(done=>{resolve=done;}));
+ await mount({enabled:true,jobs:[]},true);await act(async()=>button('Check status').props.onPress());
+ await update({enabled:true,jobs:[]},true,{backend:{...backend,backendId:'other'}});
+ await act(async()=>resolve({ok:true,json:async()=>({...pending,status:'complete',stage:'Ready'})}));
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBe(JSON.stringify(pending));
+ expect(text()).not.toContain('Ready');
+});
+
+test('old nonterminal exact receipt stays reconcilable until completion, without requeueing',async()=>{
+ const pending={id:'old-build',action:'update',target:'android'};
+ await AsyncStorage.setItem('bob.update-request.backend-id',JSON.stringify(pending));
+ const fetch=jest.spyOn(globalThis,'fetch').mockResolvedValueOnce({ok:true,json:async()=>({...pending,status:'building',stage:'Building APK'})} as Response).mockResolvedValueOnce({ok:true,json:async()=>({...pending,status:'complete',stage:'Signed APK ready'})} as Response);
+ await mount({enabled:true,jobs:[]},true);await act(async()=>button('Check status').props.onPress());
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBe(JSON.stringify(pending));expect(text()).toContain('Building APK');
+ await act(async()=>button('Check status').props.onPress());expect(fetch).toHaveBeenCalledTimes(2);
+ expect(await AsyncStorage.getItem('bob.update-request.backend-id')).toBeNull();expect(text()).toContain('Signed APK ready');
+});

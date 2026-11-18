@@ -109,3 +109,90 @@ test('provisional height cache is bounded, validates measurements and evicts lea
  expect(initialInlineHeight(recent)).toBe(650);forgetInlineHeight(recent);expect(initialInlineHeight(recent)).toBe(420);
  for(let i=0;i<62;i++)forgetInlineHeight(scope(String(i)));forgetInlineHeight(scope('new'));
 });
+
+const press=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(node=>node.props.accessibilityLabel===label&&typeof node.props.onPress==='function')[0].props.onPress();
+const deferred=()=>{let resolve!:(handle:string)=>void,reject!:(error:Error)=>void;const promise=new Promise<string>((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+
+test('local retry preserves the card and scope, admits one preparation, and recovers after repeated failures',async()=>{
+ const retry=deferred();const onExpand=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ NativeModules.BobInteractive.prepare.mockRejectedValueOnce(Error('Offline')).mockRejectedValueOnce(Error('Still offline')).mockReturnValueOnce(retry.promise);
+ try{
+  await act(async()=>{tree=Renderer.create(<InlineSurface backend={backend} surface={surface} onExpand={onExpand}/>);});
+  const card=tree.root.findByProps({testID:'inline-surface-container'});
+  expect(JSON.stringify(tree.toJSON())).toContain('Offline');
+  await act(async()=>press(tree,'Retry visual: Natural content'));
+  expect(JSON.stringify(tree.toJSON())).toContain('Still offline');
+  await act(async()=>{const action=tree.root.findAll(node=>node.props.accessibilityLabel==='Retry visual: Natural content'&&typeof node.props.onPress==='function')[0];action.props.onPress();action.props.onPress();});
+  expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(3);
+  expect(tree.root.findAllByProps({accessibilityLabel:'Retry visual: Natural content'})).toHaveLength(0);
+  expect(JSON.stringify(tree.toJSON())).toContain('Loading visual');
+  expect(onExpand).not.toHaveBeenCalled();
+  for(const args of NativeModules.BobInteractive.prepare.mock.calls)expect(args).toEqual([backend.endpoint,backend.backendId,'test-token',surface.conversationId,surface.id]);
+  await act(async()=>retry.resolve('retried-session'));
+  expect(tree.root.findByProps({testID:'inline-surface-container'})).toBe(card);
+  expect(native(tree).props.session).toBe('retried-session');
+  act(()=>emit(1200));expect(native(tree).props.style.height).toBe(420);
+  act(()=>emit(650,{session:'retried-session'}));expect(native(tree).props.style.height).toBe(650);
+  act(()=>press(tree,'Expand visual: Natural content'));expect(onExpand).toHaveBeenCalledTimes(1);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+ expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('retried-session');
+});
+
+test.each(['resolve','reject'] as const)('late retry %s cannot attach or change errors after a card scope change',async result=>{
+ const pending=deferred();let tree!:Renderer.ReactTestRenderer;
+ NativeModules.BobInteractive.prepare.mockRejectedValueOnce(Error('Offline')).mockReturnValueOnce(pending.promise).mockResolvedValueOnce('new-card-session');
+ try{
+  await act(async()=>{tree=Renderer.create(<InlineSurface backend={backend} surface={surface} onExpand={jest.fn()}/>);});
+  await act(async()=>press(tree,'Retry visual: Natural content'));
+  const next={...surface,id:'next-visual',conversationId:8};
+  await act(async()=>tree.update(<InlineSurface backend={backend} surface={next} onExpand={jest.fn()}/>));
+  await act(async()=>result==='resolve'?pending.resolve('abandoned-retry'):pending.reject(Error('Stale failure')));
+  expect(native(tree).props.session).toBe('new-card-session');
+  expect(JSON.stringify(tree.toJSON())).not.toContain('Stale failure');
+  if(result==='resolve')expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('abandoned-retry');
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('expanding to fullscreen while retry is pending releases the late handle and never mounts inline',async()=>{
+ const pending=deferred();let tree!:Renderer.ReactTestRenderer;const onExpand=jest.fn();
+ NativeModules.BobInteractive.prepare.mockRejectedValueOnce(Error('Offline')).mockReturnValueOnce(pending.promise);
+ try{
+  await act(async()=>{tree=Renderer.create(<InlineSurface backend={backend} surface={surface} onExpand={onExpand}/>);});
+  await act(async()=>press(tree,'Retry visual: Natural content'));
+  act(()=>press(tree,'Expand visual: Natural content'));expect(onExpand).toHaveBeenCalledTimes(1);
+  await act(async()=>tree.update(<InlineSurface backend={backend} surface={{...surface,presentation:'fullscreen'}} onExpand={onExpand}/>));
+  await act(async()=>pending.resolve('late-fullscreen'));
+  expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
+  expect(tree.root.findAllByProps({accessibilityLabel:'Retry visual: Natural content'})).toHaveLength(0);
+  expect(NativeModules.BobInteractive.releasePrepared).toHaveBeenCalledWith('late-fullscreen');
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('retry rechecks pairing and preserves native unsafe-content rejection without a fallback renderer',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce(false).mockResolvedValue({password:'refreshed-token'});
+ NativeModules.BobInteractive.prepare.mockRejectedValue(Error('Unsafe visual rejected'));
+ try{
+  await act(async()=>{tree=Renderer.create(<InlineSurface backend={backend} surface={surface} onExpand={jest.fn()}/>);});
+  expect(NativeModules.BobInteractive.prepare).not.toHaveBeenCalled();
+  await act(async()=>press(tree,'Retry visual: Natural content'));
+  await act(async()=>press(tree,'Retry visual: Natural content'));
+  expect(Keychain.getGenericPassword).toHaveBeenCalledTimes(3);
+  expect(NativeModules.BobInteractive.prepare).toHaveBeenCalledTimes(2);
+  expect(NativeModules.BobInteractive.prepare).toHaveBeenLastCalledWith(backend.endpoint,backend.backendId,'refreshed-token',surface.conversationId,surface.id);
+  expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
+  expect(JSON.stringify(tree.toJSON())).toContain('Unsafe visual rejected');
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('overflow fallback does not leak into a different card session',async()=>{
+ let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<InlineSurface backend={backend} surface={surface} onExpand={jest.fn()}/>);});
+  await act(async()=>DeviceEventEmitter.emit('BobSurfaceOverflow',{...backend,...surface,session:'mount-one'}));
+  expect(tree.root.findAllByProps({testID:'bob-inline-native-surface'})).toHaveLength(0);
+  NativeModules.BobInteractive.prepare.mockResolvedValueOnce('new-card');
+  await act(async()=>tree.update(<InlineSurface backend={backend} surface={{...surface,id:'next-visual',conversationId:8}} onExpand={jest.fn()}/>));
+  expect(native(tree).props.session).toBe('new-card');
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
