@@ -13,6 +13,15 @@ beforeEach(()=>{
  jest.spyOn(AppState,'addEventListener').mockImplementation((_event,callback)=>{lifecycle=callback;return {remove:jest.fn()};});
 });
 afterEach(()=>{jest.useRealTimers();jest.restoreAllMocks();});
+test('absent overview retains one empty identity through rerenders and hidden scope changes',async()=>{
+ const request=jest.fn();let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<Probe request={request} visible={false}/>);});const empty=latest.sessions;
+  await act(async()=>tree.update(<Probe request={request} visible={false}/>));expect(latest.sessions).toBe(empty);
+  await act(async()=>tree.update(<Probe backend={b} request={request} visible={false}/>));expect(latest.sessions).toBe(empty);
+  expect(request).not.toHaveBeenCalled();
+ }finally{await act(async()=>tree?.unmount());}
+});
 test('metadata polling only runs while visible and foreground; hidden results cannot cross scope',async()=>{
  const old=deferred<AgentOverviewPage>(),request=jest.fn().mockReturnValueOnce(old.promise).mockResolvedValue(page('b',20));let tree!:Renderer.ReactTestRenderer;
  await act(async()=>{tree=Renderer.create(<Probe request={request} visible={false}/>);});expect(request).not.toHaveBeenCalled();

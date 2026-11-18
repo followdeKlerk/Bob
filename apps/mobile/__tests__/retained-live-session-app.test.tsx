@@ -102,7 +102,7 @@ async function mount({emptyA=false,continuous=false,updates={enabled:false}}:{em
  await AsyncStorage.setItem('workstation-selections',JSON.stringify({[a.backendId]:emptyA?undefined:chat,[b.backendId]:chat}));
  (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({username:'synthetic-device',password:'synthetic-token'});
  NativeModules.BobPlatform={takeNotificationTarget:jest.fn(async()=>null),addListener:jest.fn(),removeListeners:jest.fn()};
- const notifications={setAppContext:jest.fn(),setReplyNotifications:jest.fn()};NativeModules.BobNotifications=notifications;
+ const notifications={setAppContext:jest.fn(),setReplyNotifications:jest.fn(),setSessionLabels:jest.fn(async()=>{})};NativeModules.BobNotifications=notifications;
  NativeModules.BobFiles={versionCode:1,versionName:'1.0',getUpdateStatus:jest.fn(async()=>({state:'downloading'})),installUpdate:jest.fn()};delete NativeModules.BobOutbox;delete NativeModules.BobPhoneLocation;
  const phone={enabled:jest.fn(async()=>true),setEnabled:jest.fn(async()=>true),execute:jest.fn(async(_backendId:string,_request:string)=>JSON.stringify({status:'ok',data:{sdkInt:35}})),getResult:jest.fn(async()=>null)};
  NativeModules.BobPhoneTools=phone;jest.spyOn(PermissionsAndroid,'check').mockResolvedValue(true);
@@ -152,6 +152,24 @@ async function mount({emptyA=false,continuous=false,updates={enabled:false}}:{em
  return {tree,streams,latest,publish,publishNative,publishNativeRaw,notifications,phone,connection,fetchMock,transition,close:async()=>act(async()=>tree.unmount())};
 }
 
+test('typing and prose snapshots do not republish unchanged notification labels; real overview titles still publish',async()=>{
+ const app=await mount();
+ try{
+  await app.publish(a);const labels=app.notifications.setSessionLabels,count=labels.mock.calls.length;
+  await act(async()=>draft(host(app.tree,a)).props.onChangeText('Retain this draft'));
+  await app.publish(a,{},[{id:4,kind:'pi.assistant',model:[{role:'assistant',content:'New prose only'}]}]);
+  expect(labels).toHaveBeenCalledTimes(count);
+  await openNotification(b,chat);await app.publish(b);const afterSwitch=labels.mock.calls.length;
+  await act(async()=>draft(host(app.tree,b)).props.onChangeText('B draft'));
+  await app.publish(b,{},[{id:5,kind:'pi.assistant',model:[{role:'assistant',content:'B prose'}]}]);
+  expect(labels).toHaveBeenCalledTimes(afterSwitch);
+  const original=app.fetchMock.getMockImplementation()!;
+  app.fetchMock.mockImplementation(async(input,init)=>String(input).includes('/agent-overview')?{ok:true,status:200,json:async()=>({backendId:b.backendId,sessions:[{conversationId:chat,title:'New authoritative title',status:'idle',agents:[]}]})} as Response:original(input,init));
+  await navigateTo(app.tree,'Tasks');
+  expect(labels.mock.calls.some((args:any[])=>args[0]===b.backendId&&args[1].some((row:any)=>row.title==='New authoritative title'))).toBe(true);
+  expect(draft(host(app.tree,a)).props.value).toBe('Retain this draft');
+ }finally{await app.close();}
+});
 test('saved-session hydration starts while appearance is still reading, without exposing unthemed chat',async()=>{
  const get=(AsyncStorage.getItem as jest.Mock).getMockImplementation()!;let finish!:(value:string|null)=>void;
  const held=new Promise<string|null>(resolve=>{finish=resolve;});

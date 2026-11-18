@@ -12,6 +12,37 @@ const page=(chat=781,ids=[2,3],next:string|undefined=undefined)=>({backendId:bac
 let history!:ReturnType<typeof useStoredHistory>;
 function Harness({chat=781,request,refreshOnForeground=true}:{chat?:number;request:(path:string)=>Promise<unknown>;refreshOnForeground?:boolean}){history=useStoredHistory(backend,chat,request,{refreshOnForeground});return null;}
 beforeEach(()=>{jest.clearAllMocks();(cacheGeneration as jest.Mock).mockReturnValue(0);(readHistoryCache as jest.Mock).mockResolvedValue(undefined);});
+test('a held optional cache cannot postpone fresh history or overwrite its page and cursor',async()=>{
+ let releaseCache!:(value:string)=>void;
+ (readHistoryCache as jest.Mock).mockImplementation(()=>new Promise(resolve=>{releaseCache=resolve;}));
+ const request=jest.fn().mockResolvedValue(page(781,[30,31],'fresh-cursor'));let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<Harness request={request}/>);});
+  expect(request).toHaveBeenCalledTimes(1);expect(history.ready).toBe(true);
+  expect(history.page?.items.map(item=>item.id)).toEqual([30,31]);
+  await act(async()=>releaseCache(JSON.stringify(page(781,[1,2],'stale-cursor'))));
+  expect(history.page?.items.map(item=>item.id)).toEqual([30,31]);expect(history.page?.next).toBe('fresh-cursor');
+ }finally{await act(async()=>tree?.unmount());}
+});
+test('late optional recovery cannot cross scope or cache-clear generation, including an empty fresh page',async()=>{
+ const held=new Map<string,(value:string)=>void>();
+ (readHistoryCache as jest.Mock).mockImplementation((key:string)=>new Promise(resolve=>held.set(key,resolve)));
+ const network=new Map<number,(value:unknown)=>void>();
+ const request=jest.fn().mockImplementation((path:string)=>path.includes('/781/')?Promise.resolve(page(781,[],'fresh-empty')):new Promise(resolve=>network.set(Number(path.split('/')[1]),resolve)));let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<Harness request={request}/>);});
+  await act(async()=>held.get(`history-pages:${backend}:781`)!(JSON.stringify(page(781,[1],'old'))));
+  expect(history.page?.items).toEqual([]);expect(history.page?.next).toBe('fresh-empty');
+  await act(async()=>tree.update(<Harness chat={782} request={request}/>));
+  (cacheGeneration as jest.Mock).mockReturnValue(1);
+  await act(async()=>held.get(`history-pages:${backend}:782`)!(JSON.stringify(page(782,[20]))));
+  expect(history.page).toBeUndefined();
+  await act(async()=>tree.update(<Harness chat={783} request={request}/>));
+  await act(async()=>tree.update(<Harness chat={784} request={request}/>));
+  await act(async()=>held.get(`history-pages:${backend}:783`)!(JSON.stringify(page(783,[21]))));
+  expect(history.page).toBeUndefined();
+ }finally{await act(async()=>{tree?.unmount();for(const [id,resolve] of network)resolve(page(id));});}
+});
 test('opening a conversation automatically restores authoritative history even when the cache read fails',async()=>{
  (readHistoryCache as jest.Mock).mockRejectedValue(Error('Oversized cache row'));
  const request=jest.fn().mockResolvedValue(page());let tree!:Renderer.ReactTestRenderer;

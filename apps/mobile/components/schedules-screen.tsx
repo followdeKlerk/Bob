@@ -44,9 +44,20 @@ function SchedulesScreenContent({menu,visible,request,onCompose,onOpenChat,onBac
  async function refresh(){
   if(pending.current||mutating.current)return;
   const ticket=++generation.current,controller=new AbortController();pending.current=ticket;readAbort.current=controller;
-  try{const value=await api.current('schedules','GET',undefined,controller.signal);if(!Array.isArray(value.jobs))throw Error('Invalid schedule response');if(mounted.current&&ticket===generation.current){setJobs(value.jobs);setError('');}}
-  catch(e){if(mounted.current&&ticket===generation.current&&!controller.signal.aborted)setError(String((e as Error).message??e));}
-  finally{if(pending.current===ticket)pending.current=0;if(readAbort.current===controller)readAbort.current=undefined;if(mounted.current&&ticket===generation.current)setLoading(false);}
+  let timeout:ReturnType<typeof setTimeout>|undefined;
+  let cancel=()=>{};
+  const deadline=new Promise<never>((_resolve,reject)=>{
+   cancel=()=>reject(Error('Schedule read cancelled.'));
+   controller.signal.addEventListener('abort',cancel,{once:true});
+   timeout=setTimeout(()=>{
+    // Reject first: even a transport which ignores abort cannot retain admission.
+    reject(Error('Schedule read timed out. Refresh to try again.'));
+    controller.abort();
+   },15000);
+  });
+  try{const value=await Promise.race([api.current('schedules','GET',undefined,controller.signal),deadline]);if(!Array.isArray(value.jobs))throw Error('Invalid schedule response');if(mounted.current&&ticket===generation.current){setJobs(value.jobs);setError('');}}
+  catch(e){if(mounted.current&&ticket===generation.current)setError(String((e as Error).message??e));}
+  finally{clearTimeout(timeout);controller.signal.removeEventListener('abort',cancel);if(pending.current===ticket)pending.current=0;if(readAbort.current===controller)readAbort.current=undefined;if(mounted.current&&ticket===generation.current)setLoading(false);}
  }
  useEffect(()=>{
   if(!visible)return;void refresh();

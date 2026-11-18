@@ -5,6 +5,8 @@ export type AgentStatus='working'|'stopping'|'idle'|'unknown';
 export type OverviewAgent={name:string;conversationId:number;status:AgentStatus};
 export type AgentSession={conversationId:number;title:string;status:AgentStatus;agents:OverviewAgent[];pinned?:boolean;archived?:boolean;trashed?:boolean;readOnly?:boolean};
 export type AgentOverviewPage={backendId:string;sessions:AgentSession[];next?:string};
+const EMPTY_SESSIONS:AgentSession[]=[];
+Object.freeze(EMPTY_SESSIONS);
 type Backend={backendId:string;endpoint:string};
 function checkedPage(value:AgentOverviewPage,backendId:string){
  const id=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>0;
@@ -53,5 +55,5 @@ export function useAgentOverview(backend:Backend|undefined,visible:boolean,reque
  },[scope,visible,version]);
  const retry=useCallback(()=>refresh.current(),[]);
  const loadMore=useCallback(()=>{if(state?.next&&!state.loading){pages.current++;setVersion(value=>value+1);}},[state?.next,state?.loading]);
- return {sessions:state?.scope===scope?state.sessions:[],loading:visible&&(!state||state.scope!==scope||state.loading),error:state?.scope===scope?state.error:undefined,next:state?.scope===scope?state.next:undefined,retry,loadMore};
+ return {sessions:state?.scope===scope?state.sessions:EMPTY_SESSIONS,loading:visible&&(!state||state.scope!==scope||state.loading),error:state?.scope===scope?state.error:undefined,next:state?.scope===scope?state.next:undefined,retry,loadMore};
 }

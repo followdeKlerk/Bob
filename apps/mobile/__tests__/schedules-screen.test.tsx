@@ -15,6 +15,19 @@ const press=(tree:Renderer.ReactTestRenderer,label:string)=>tree.root.findAll(n=
 beforeEach(()=>{jest.spyOn(AppState,'addEventListener').mockReturnValue({remove:jest.fn()});});
 afterEach(()=>jest.restoreAllMocks());
 
+test('a stalled read expires independently of transport and permits retry without late overwrite',async()=>{
+ jest.useFakeTimers();let release!:(value:unknown)=>void,signal!:AbortSignal;
+ const request=jest.fn().mockImplementationOnce((_path,_method,_body,s)=>{signal=s;return new Promise(resolve=>{release=resolve;});}).mockResolvedValue({jobs:[{...job,title:'Fresh schedule'}]});let tree!:Renderer.ReactTestRenderer;
+ try{
+  await act(async()=>{tree=Renderer.create(<SchedulesScreen visible request={request} onCompose={()=>{}} onOpenChat={()=>{}}/>);});
+  await act(async()=>press(tree,'Refresh schedules'));expect(request).toHaveBeenCalledTimes(1);
+  await act(async()=>jest.advanceTimersByTime(15000));expect(signal.aborted).toBe(true);
+  expect(tree.root.findAllByProps({accessibilityLabel:'Loading schedules'})).toHaveLength(0);expect(text(tree)).toContain('Schedule read timed out');
+  await act(async()=>press(tree,'Refresh saved state'));expect(request).toHaveBeenCalledTimes(2);expect(text(tree)).toContain('Fresh schedule');
+  await act(async()=>release({jobs:[{...job,title:'Obsolete schedule'}]}));expect(text(tree)).not.toContain('Obsolete schedule');expect(text(tree)).toContain('Fresh schedule');
+  expect(request.mock.calls.every(args=>args[1]!=='POST')).toBe(true);
+ }finally{await act(async()=>tree?.unmount());jest.useRealTimers();}
+});
 test('schedule list is a full overlay, shows honest timing, details, direct pause and source navigation',async()=>{
  let current=job;const request=jest.fn(async(_path:string,method?:string,body?:any)=>{if(method==='POST'){expect(body.operation).toEqual({action:'pause',id:job.id,expectedRevision:3});current={...job,state:'paused',revision:4,nextRunAt:undefined};return{persisted:true,...current};}return {jobs:[current]};});
  const compose=jest.fn(),open=jest.fn();let tree!:Renderer.ReactTestRenderer;

@@ -43,7 +43,7 @@ export function useStoredHistory(backendId:string|undefined,conversationId:numbe
    const page=HistoryPage.parse(await requestRef.current(`chats/${session.conversationId}/history${cursor?'?cursor='+encodeURIComponent(cursor):''}`,controller.signal));
    if(page.backendId!==session.backendId||page.conversationId!==session.conversationId)throw Object.assign(Error('History identity mismatch'),{httpStatus:409});
    if(active.current!==session||scopeRef.current!==session.scope)return;
-   session.page=older&&previous?{...page,items:sorted([...previous.items,...page.items])}:mergeLatestHistory(previous,page);
+   session.page=older&&previous?{...page,items:sorted([...previous.items,...page.items])}:mergeLatestHistory(session.page,page);
    session.ready=true;session.error=undefined;session.attempts=0;session.retryAfterAt=undefined;publish(session);
    void writeHistoryCache(`history-pages:${session.scope}`,JSON.stringify(session.page),generation).catch(()=>{});
   }catch(error){
@@ -61,15 +61,18 @@ export function useStoredHistory(backendId:string|undefined,conversationId:numbe
  useEffect(()=>{
   const session:Session={scope,backendId,conversationId,ready:false,loading:false};active.current=session;publish(session);
   if(!scope)return;
+  const generation=cacheGeneration();
+  // Optional local recovery and authenticated IO have independent ownership.
+  // Cache may paint while the first request waits, never after fresh authority.
   void(async()=>{
    try{
     const cached=await readHistoryCache(`history-pages:${scope}`);
-    if(cached){const page=HistoryPage.parse(JSON.parse(cached));if(page.backendId===backendId&&page.conversationId===conversationId)session.page={...page,items:sorted(page.items)};}
+    if(active.current!==session||scopeRef.current!==scope||cacheGeneration()!==generation||session.page)return;
+    if(cached){const page=HistoryPage.parse(JSON.parse(cached));if(page.backendId===backendId&&page.conversationId===conversationId){session.page={...page,items:sorted(page.items)};publish(session);}}
    }catch{/* Invalid local cache cannot block authoritative history loading. */}
-   if(active.current!==session||scopeRef.current!==scope)return;
-   session.ready=true;publish(session);
-   await fetchPage(session).catch(()=>{});
   })();
+  session.ready=true;
+  void fetchPage(session).catch(()=>{});
   const listener=AppState.addEventListener('change',state=>{clearTimeout(session.retry);session.retry=undefined;if(state==='active'&&session.ready&&(refreshOnForeground.current||session.error||!session.page))void fetchPage(session).catch(()=>{});});
   return()=>{listener.remove();clearTimeout(session.retry);session.controller?.abort();if(active.current===session)active.current=undefined;};
  },[scope]);
